@@ -1,4 +1,4 @@
 {
   "extends": "../.nuxt/tsconfig.shared.json",
-  "include": ["./unit/**/*", "./e2e/**/*"]
+  "include": ["./unit/**/*", "./e2e/**/*", "../scripts/**/*"]
 }

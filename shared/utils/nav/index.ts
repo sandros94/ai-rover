@@ -8,3 +8,16 @@ export type { Motion, MotionOptions } from './motions'
 export { motionsFromPolyline } from './motions'
 export type { NavMetrics, SegmentPlan } from './plan'
 export { planSegment } from './plan'
+export type { SubmissionSummary } from './summary'
+export {
+  compassPoint,
+  detourLabel,
+  EFFECTIVE_SPEED_MPS,
+  looseGroundLabel,
+  meanSlopeLabel,
+  slopeLabel,
+  straightLineLabel,
+  SubmissionSummarySchema,
+  summarizeSubmission,
+  unseenLabel,
+} from './summary'

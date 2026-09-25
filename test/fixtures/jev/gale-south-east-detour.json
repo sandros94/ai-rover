@@ -1,0 +1,140 @@
+{
+  "request": {
+    "model": "jev-1.13.0",
+    "state": {
+      "rover": {
+        "class": "Perseverance-class six-wheel rocker-bogie rover",
+        "speed": "152 m per hour at most, about 120 m per hour with autonomous navigation",
+        "limits": "operational slope limit 16 degrees; drives over rocks up to 40 cm; turns in place"
+      },
+      "mission_rules": "A segment goes from the current stop to a destination 50 to 250 m away. The rover plans only over ground it has already seen; unseen ground is uncertain and the drive stops safely if it turns out impassable.",
+      "destination": {
+        "straight_line_m": 140,
+        "straight_line_label": "medium",
+        "bearing": "south-east"
+      },
+      "route": {
+        "reached": true,
+        "path_length_m": 176,
+        "detour_label": "moderate detour",
+        "max_slope_deg": 11,
+        "max_slope_label": "moderate",
+        "mean_slope_label": "moderate",
+        "unseen_label": "mostly seen",
+        "turns_in_place": 7,
+        "loose_ground_label": "some loose ground",
+        "estimated_drive_minutes": 89
+      }
+    },
+    "questions": {
+      "feasible": {
+        "type": "noul",
+        "instructions": "Can the rover realistically complete this segment as planned, arriving at the destination without being stopped short or failing?",
+        "criteria": {
+          "true": "A route was found and it runs over mostly seen, firm ground with gentle or moderate slopes and at most a moderate detour.",
+          "false": "No route was found, or the route crosses mostly unseen ground, climbs slopes near the limit, runs over mostly loose ground or takes a long detour."
+        }
+      },
+      "distance_confidence": {
+        "type": "score",
+        "instructions": "How closely will the distance the rover actually drives match the planned path length?",
+        "criteria": [
+          "No route was found, or the route crosses mostly unseen ground with a long detour, so replans will likely change the driven distance a lot.",
+          "The route crosses mostly unseen ground, or partly unseen ground with a long detour; the driven distance will likely differ noticeably from the plan.",
+          "The route crosses partly unseen ground or takes a moderate detour; some replanning may lengthen the drive.",
+          "The route is mostly seen with at most a moderate detour; the driven distance should stay close to the plan.",
+          "The route is fully seen, nearly straight and gentle; the rover will drive almost exactly the planned distance."
+        ]
+      },
+      "time_confidence": {
+        "type": "score",
+        "instructions": "How closely will the actual drive time match the estimated drive minutes? Slopes, loose ground, turns in place and unseen ground add pauses, slowdowns and replans.",
+        "criteria": [
+          "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
+          "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
+          "The route crosses partly unseen ground, some loose ground or moderate slopes with several turns in place; the drive will likely take noticeably longer.",
+          "The route is mostly seen and firm with moderate slopes or a few turns in place; the drive should take close to the estimate.",
+          "The route is fully seen, firm, gentle and nearly straight with few turns; the drive will take almost exactly the estimate."
+        ]
+      },
+      "risk": {
+        "type": "score",
+        "instructions": "How likely is the rover to be stopped or to fail on this drive?",
+        "criteria": [
+          "Seen, firm and gentle ground all the way; nothing is likely to stop the rover.",
+          "Some unseen stretches or moderate slopes; a safe stop short of the destination is possible but unlikely.",
+          "Much unseen ground, loose ground or slopes near the limit; being stopped short or getting stuck is a real possibility.",
+          "No route was found, or the route combines unseen ground with slopes near the limit or mostly loose ground; stopping short or failing is likely."
+        ]
+      }
+    }
+  },
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "feasible": {
+        "type": "noul",
+        "noul": 0.81
+      },
+      "distance_confidence": {
+        "type": "score",
+        "score": 2.99,
+        "confidence": 0.99,
+        "legend": {
+          "0": "No route was found, or the route crosses mostly unseen ground with a long detour, so replans will likely change the driven distance a lot.",
+          "1": "The route crosses mostly unseen ground, or partly unseen ground with a long detour; the driven distance will likely differ noticeably from the plan.",
+          "2": "The route crosses partly unseen ground or takes a moderate detour; some replanning may lengthen the drive.",
+          "3": "The route is mostly seen with at most a moderate detour; the driven distance should stay close to the plan.",
+          "4": "The route is fully seen, nearly straight and gentle; the rover will drive almost exactly the planned distance."
+        },
+        "probabilities": {
+          "0": 0,
+          "1": 0,
+          "2": 0.01,
+          "3": 0.99,
+          "4": 0
+        }
+      },
+      "time_confidence": {
+        "type": "score",
+        "score": 2.2,
+        "confidence": 0.83,
+        "legend": {
+          "0": "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
+          "1": "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
+          "2": "The route crosses partly unseen ground, some loose ground or moderate slopes with several turns in place; the drive will likely take noticeably longer.",
+          "3": "The route is mostly seen and firm with moderate slopes or a few turns in place; the drive should take close to the estimate.",
+          "4": "The route is fully seen, firm, gentle and nearly straight with few turns; the drive will take almost exactly the estimate."
+        },
+        "probabilities": {
+          "0": 0,
+          "1": 0,
+          "2": 0.8,
+          "3": 0.2,
+          "4": 0
+        }
+      },
+      "risk": {
+        "type": "score",
+        "score": 1.03,
+        "confidence": 0.97,
+        "legend": {
+          "0": "Seen, firm and gentle ground all the way; nothing is likely to stop the rover.",
+          "1": "Some unseen stretches or moderate slopes; a safe stop short of the destination is possible but unlikely.",
+          "2": "Much unseen ground, loose ground or slopes near the limit; being stopped short or getting stuck is a real possibility.",
+          "3": "No route was found, or the route combines unseen ground with slopes near the limit or mostly loose ground; stopping short or failing is likely."
+        },
+        "probabilities": {
+          "0": 0,
+          "1": 0.97,
+          "2": 0.03,
+          "3": 0
+        }
+      }
+    },
+    "usage": {
+      "input_tokens": 1170,
+      "output_tokens": 67
+    }
+  }
+}

@@ -19,6 +19,11 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  runtimeConfig: {
+    /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
+    typesafeToken: '',
+  },
+
   imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE] },
   nitro: { imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE] } },
 

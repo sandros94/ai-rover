@@ -1,0 +1,234 @@
+import type { Fetch } from '@typesafe-ai/sdk'
+import { TypeSafeClient } from '@typesafe-ai/sdk'
+import * as v from 'valibot'
+import type { SubmissionSummary } from '#shared/utils/nav/summary'
+import { SubmissionSummarySchema } from '#shared/utils/nav/summary'
+import { canonicalJson } from '#shared/utils/terrain/manifest'
+import { JudgeError } from './errors'
+import { JUDGE_QUESTIONS } from './questions'
+
+/** Pinned model: answers are reproducible only within one model version. */
+export const JEV_MODEL = 'jev-1.13.0'
+
+/** Largest summary judged, in JSON characters; Jev's accuracy drops as the state grows. */
+export const MAX_SUMMARY_CHARS = 1500
+
+/** One Score answer, `probabilities[k]` being the probability of level `k`. */
+export interface ScoreJudgment {
+  /** Expected level, 0 to the top level, fractional. */
+  score: number
+  confidence: number
+  probabilities: number[]
+}
+
+/** The four answers as returned by Jev; what the cache stores. */
+export interface JudgedAnswers {
+  /** Probability that the rover completes the segment as planned. */
+  feasible: number
+  distanceConfidence: ScoreJudgment
+  timeConfidence: ScoreJudgment
+  risk: ScoreJudgment
+}
+
+export type Verdict = 'reject' | 'review' | 'accept'
+
+export interface SubmissionJudgment extends JudgedAnswers {
+  /** `distanceConfidence.score` over its top level, 0 to 1: the vote tie-break weight. */
+  distanceWeight: number
+  /** `timeConfidence.score` over its top level, 0 to 1. */
+  timeWeight: number
+  verdict: Verdict
+  /** True when answered from the cache without a request. */
+  cached: boolean
+  /** Set only when a request was made. */
+  usage?: { inputTokens: number }
+}
+
+/** Where judged answers are memoised; a `Map` works, as does an async store. */
+export interface JevCache {
+  get(key: string): JudgedAnswers | undefined | Promise<JudgedAnswers | undefined>
+  set(key: string, value: JudgedAnswers): unknown
+}
+
+export interface JevClientOptions {
+  /** TypeSafe API key; empty or missing throws `NOT_CONFIGURED`. */
+  apiKey: string | undefined
+  fetch?: Fetch
+  /** Default: a `Map` private to this client. */
+  cache?: JevCache
+  /** Per attempt. Default: the SDK's 10 s. */
+  timeoutMs?: number
+  /** Retries after the first attempt on 408, 429, 5xx and connection failures. Default: the SDK's 2. */
+  maxRetries?: number
+  verdict?: {
+    /** `feasible` below this rejects. Default 0.2. */
+    rejectBelow?: number
+    /** `feasible` above this accepts; in between goes to review. Default 0.8. */
+    acceptAbove?: number
+  }
+}
+
+export interface JevClient {
+  judgeSubmission(
+    summary: SubmissionSummary,
+    options?: { signal?: AbortSignal },
+  ): Promise<SubmissionJudgment>
+}
+
+/** The request body sent for one submission. */
+export interface JudgeRequest {
+  model: string
+  state: SubmissionSummary
+  questions: typeof JUDGE_QUESTIONS
+}
+
+/**
+ * Hex SHA-256 of the canonical JSON of a request body as it goes on the wire (the JSON round
+ * trip drops `undefined` fields exactly as the request does).
+ */
+export async function jevRequestKey(request: {
+  model: string
+  state: unknown
+  questions: unknown
+}): Promise<string> {
+  const wire = JSON.parse(JSON.stringify(request)) as unknown
+  const bytes = new TextEncoder().encode(canonicalJson(wire))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+export function createJevClient(options: JevClientOptions): JevClient {
+  const apiKey = options.apiKey?.trim()
+  if (!apiKey) {
+    throw new JudgeError(
+      'NOT_CONFIGURED',
+      'Jev has no TypeSafe API key; set NUXT_TYPESAFE_TOKEN (runtimeConfig.typesafeToken).',
+    )
+  }
+  const { rejectBelow = 0.2, acceptAbove = 0.8 } = options.verdict ?? {}
+  const cache = options.cache ?? new Map<string, JudgedAnswers>()
+  const client = new TypeSafeClient({
+    apiKey,
+    defaultModel: JEV_MODEL,
+    ...(options.fetch && { fetch: options.fetch }),
+    ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+    ...(options.maxRetries !== undefined && { retry: { maxRetries: options.maxRetries } }),
+  })
+
+  function judgmentOf(answers: JudgedAnswers, cached: boolean, inputTokens?: number) {
+    const top = (judgment: ScoreJudgment) => judgment.probabilities.length - 1
+    const verdict: Verdict =
+      answers.feasible < rejectBelow
+        ? 'reject'
+        : answers.feasible > acceptAbove
+          ? 'accept'
+          : 'review'
+    return {
+      // A copy, so callers never mutate what the cache holds.
+      ...structuredClone(answers),
+      distanceWeight: answers.distanceConfidence.score / top(answers.distanceConfidence),
+      timeWeight: answers.timeConfidence.score / top(answers.timeConfidence),
+      verdict,
+      cached,
+      ...(inputTokens !== undefined && { usage: { inputTokens } }),
+    } satisfies SubmissionJudgment
+  }
+
+  return {
+    async judgeSubmission(summary, callOptions = {}) {
+      const state = parseSummary(summary)
+      const request: JudgeRequest = { model: JEV_MODEL, state, questions: JUDGE_QUESTIONS }
+      const key = await jevRequestKey(request)
+      const hit = await cache.get(key)
+      if (hit) return judgmentOf(hit, true)
+
+      let result: unknown
+      try {
+        result = await client.systemOne(request, { signal: callOptions.signal })
+      } catch (error) {
+        throw new JudgeError(
+          'UPSTREAM',
+          `Jev request failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        )
+      }
+      const parsed = v.safeParse(ResultSchema, result)
+      if (!parsed.success) {
+        throw new JudgeError(
+          'UPSTREAM',
+          `Jev answered outside the questions asked: ${describeIssue(parsed.issues)}.`,
+          { cause: new v.ValiError(parsed.issues) },
+        )
+      }
+      const { answers, usage } = parsed.output
+      const judged: JudgedAnswers = {
+        feasible: answers.feasible.noul,
+        distanceConfidence: scoreJudgment(answers.distance_confidence),
+        timeConfidence: scoreJudgment(answers.time_confidence),
+        risk: scoreJudgment(answers.risk),
+      }
+      await cache.set(key, judged)
+      return judgmentOf(judged, false, usage.input_tokens)
+    },
+  }
+}
+
+function parseSummary(summary: SubmissionSummary): SubmissionSummary {
+  const parsed = v.safeParse(SubmissionSummarySchema, summary)
+  if (!parsed.success) {
+    throw new JudgeError(
+      'INVALID_SUMMARY',
+      `Submission summary is invalid: ${describeIssue(parsed.issues)}. Build it with summarizeSubmission.`,
+      { cause: new v.ValiError(parsed.issues) },
+    )
+  }
+  const chars = JSON.stringify(parsed.output).length
+  if (chars > MAX_SUMMARY_CHARS) {
+    throw new JudgeError(
+      'INVALID_SUMMARY',
+      `Submission summary is ${chars} JSON characters; keep it within ${MAX_SUMMARY_CHARS}, since Jev's accuracy drops as its state grows.`,
+    )
+  }
+  return parsed.output
+}
+
+function describeIssue(issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]]): string {
+  const [issue] = issues
+  return `${v.getDotPath(issue) ?? '(root)'} ${issue.message}`
+}
+
+const probability = v.pipe(v.number(), v.minValue(0), v.maxValue(1))
+
+function scoreSchema(levels: number) {
+  return v.object({
+    type: v.literal('score'),
+    score: v.pipe(v.number(), v.minValue(0), v.maxValue(levels - 1)),
+    confidence: probability,
+    probabilities: v.object(
+      Object.fromEntries(Array.from({ length: levels }, (_, k) => [`${k}`, probability])),
+    ),
+  })
+}
+
+const ResultSchema = v.object({
+  answers: v.object({
+    feasible: v.object({ type: v.literal('noul'), noul: probability }),
+    distance_confidence: scoreSchema(JUDGE_QUESTIONS.distance_confidence.criteria.length),
+    time_confidence: scoreSchema(JUDGE_QUESTIONS.time_confidence.criteria.length),
+    risk: scoreSchema(JUDGE_QUESTIONS.risk.criteria.length),
+  }),
+  usage: v.object({ input_tokens: v.number() }),
+})
+
+function scoreJudgment(answer: {
+  score: number
+  confidence: number
+  probabilities: Record<string, number>
+}): ScoreJudgment {
+  const levels = Object.keys(answer.probabilities).length
+  return {
+    score: answer.score,
+    confidence: answer.confidence,
+    probabilities: Array.from({ length: levels }, (_, k) => answer.probabilities[`${k}`]!),
+  }
+}

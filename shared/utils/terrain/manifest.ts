@@ -89,7 +89,8 @@ export function parseStopManifest(value: unknown): StopManifest {
   )
 }
 
-function canonicalJson(value: unknown): string {
+/** JSON with object keys sorted at every level, so equal values always serialise alike. */
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

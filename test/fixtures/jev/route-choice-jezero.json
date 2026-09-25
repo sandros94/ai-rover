@@ -1,0 +1,217 @@
+{
+  "request": {
+    "state": {
+      "rover": {
+        "class": "Perseverance-class six-wheel rocker-bogie rover",
+        "speed": "152 m per hour at most, about 120 m per hour with autonomous navigation",
+        "limits": "operational slope limit 16 degrees; drives over rocks up to 40 cm; turns in place"
+      },
+      "mission_rules": "A segment goes from the current stop to a destination 50 to 250 m away. The rover plans only over ground it has already seen; unseen ground is uncertain and the drive stops safely if it turns out impassable.",
+      "destination": {
+        "straight_line_m": 220,
+        "straight_line_label": "long",
+        "bearing": "north"
+      }
+    },
+    "questions": {
+      "best_route": {
+        "type": "choice",
+        "instructions": "Which route should the rover drive to reach the destination most reliably, arriving without being stopped short or failing?",
+        "criteria": {
+          "route_a": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          },
+          "route_b": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          },
+          "route_c": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          },
+          "route_d": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          },
+          "route_e": {
+            "reached": true,
+            "path_length_m": 221,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 112
+          }
+        }
+      },
+      "safe_route_a": {
+        "type": "noul",
+        "instructions": {
+          "question": "Can the rover drive this route to the destination without being stopped short or failing?",
+          "route": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          }
+        }
+      },
+      "safe_route_b": {
+        "type": "noul",
+        "instructions": {
+          "question": "Can the rover drive this route to the destination without being stopped short or failing?",
+          "route": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          }
+        }
+      },
+      "safe_route_c": {
+        "type": "noul",
+        "instructions": {
+          "question": "Can the rover drive this route to the destination without being stopped short or failing?",
+          "route": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          }
+        }
+      },
+      "safe_route_d": {
+        "type": "noul",
+        "instructions": {
+          "question": "Can the rover drive this route to the destination without being stopped short or failing?",
+          "route": {
+            "reached": true,
+            "path_length_m": 220,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 111
+          }
+        }
+      },
+      "safe_route_e": {
+        "type": "noul",
+        "instructions": {
+          "question": "Can the rover drive this route to the destination without being stopped short or failing?",
+          "route": {
+            "reached": true,
+            "path_length_m": 221,
+            "detour_label": "nearly straight",
+            "max_slope_deg": 8,
+            "max_slope_label": "moderate",
+            "mean_slope_label": "moderate",
+            "unseen_label": "mostly unseen",
+            "turns_in_place": 0,
+            "loose_ground_label": "some loose ground",
+            "estimated_drive_minutes": 112
+          }
+        }
+      }
+    },
+    "model": "jev-1.13.0"
+  },
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "best_route": {
+        "type": "choice",
+        "choice": "route_a",
+        "confidence": 0.79,
+        "probabilities": {
+          "route_a": 0.83,
+          "route_e": 0.05,
+          "route_b": 0.07,
+          "route_d": 0.02,
+          "route_c": 0.03
+        }
+      },
+      "safe_route_a": {
+        "type": "noul",
+        "noul": 0.28
+      },
+      "safe_route_b": {
+        "type": "noul",
+        "noul": 0.28
+      },
+      "safe_route_c": {
+        "type": "noul",
+        "noul": 0.29
+      },
+      "safe_route_d": {
+        "type": "noul",
+        "noul": 0.28
+      },
+      "safe_route_e": {
+        "type": "noul",
+        "noul": 0.31
+      }
+    },
+    "usage": {
+      "input_tokens": 1749,
+      "output_tokens": 150
+    }
+  }
+}
