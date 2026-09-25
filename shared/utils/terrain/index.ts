@@ -1,7 +1,20 @@
 export type { TerrainErrorCode } from './errors'
 export { TerrainError } from './errors'
-export type { CraterConfig, ReliefConfig, ResolvedWorldConfig, World, WorldConfig } from './world'
-export { DEFAULT_CRATERS, DEFAULT_RELIEF, defineWorld, sampleHeights } from './world'
+export type {
+  CraterConfig,
+  RegolithConfig,
+  ReliefConfig,
+  ResolvedWorldConfig,
+  World,
+  WorldConfig,
+} from './world'
+export {
+  DEFAULT_CRATERS,
+  DEFAULT_REGOLITH,
+  DEFAULT_RELIEF,
+  defineWorld,
+  sampleHeights,
+} from './world'
 export type { GridCell, HeightGrid } from './grid'
 export type { Chunk, ChunkCoords } from './chunk'
 export { generateChunk, MASK_SEEN, MASK_TRAVERSABLE } from './chunk'

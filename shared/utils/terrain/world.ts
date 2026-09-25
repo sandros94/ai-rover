@@ -41,6 +41,12 @@ export interface CraterConfig {
   minFreshness: number
 }
 
+/** Loose-regolith field: one octave of value noise in [0, 1], 1 the loosest ground. */
+export interface RegolithConfig {
+  /** Lattice spacing of the noise, metres. */
+  wavelength: number
+}
+
 export interface WorldConfig {
   /** Mission seed; any non-empty string. */
   seed: string
@@ -54,6 +60,7 @@ export interface WorldConfig {
   slopeLimitDeg?: number
   relief?: Partial<ReliefConfig>
   craters?: Partial<CraterConfig>
+  regolith?: Partial<RegolithConfig>
 }
 
 export interface ResolvedWorldConfig {
@@ -64,12 +71,15 @@ export interface ResolvedWorldConfig {
   readonly slopeLimitDeg: number
   readonly relief: Readonly<ReliefConfig>
   readonly craters: Readonly<CraterConfig>
+  readonly regolith: Readonly<RegolithConfig>
 }
 
 export interface World {
   readonly config: ResolvedWorldConfig
   /** Terrain height in metres at world position (x, y), x east, y north. */
   readonly heightAt: (x: number, y: number) => number
+  /** Regolith looseness in [0, 1] at world position (x, y); bit-identical on every IEEE-754 host. */
+  readonly looseAt: (x: number, y: number) => number
 }
 
 export const DEFAULT_RELIEF: Readonly<ReliefConfig> = Object.freeze({
@@ -91,6 +101,8 @@ export const DEFAULT_CRATERS: Readonly<CraterConfig> = Object.freeze({
   ejectaExtent: 3,
   minFreshness: 0.3,
 })
+
+export const DEFAULT_REGOLITH: Readonly<RegolithConfig> = Object.freeze({ wavelength: 80 })
 
 interface Crater {
   x: number
@@ -119,6 +131,7 @@ const REACH_CACHE_LIMIT = 64
 
 const LANE_OCTAVE = 1
 const LANE_CRATER = 2
+const LANE_REGOLITH = 3
 
 export function defineWorld(config: WorldConfig): World {
   const resolved = resolveConfig(config)
@@ -135,6 +148,7 @@ export function defineWorld(config: WorldConfig): World {
       h += cratersAtPoint(state, x, y)
       return h
     },
+    looseAt: (x: number, y: number): number => looseAt(state, x, y),
   })
   internals.set(world, state)
   return world
@@ -219,6 +233,31 @@ function reliefAt(state: WorldInternals, x: number, y: number): number {
     weight *= gain
   }
   return total === 0 ? 0 : (amplitude * sum) / total
+}
+
+/**
+ * Value noise over a square lattice: hashed corner values in [0, 1), blended with smoothstep.
+ * Only `+ − × ÷` and `floor` are used, so every host agrees bit for bit.
+ */
+function looseAt(state: WorldInternals, x: number, y: number): number {
+  const { wavelength } = state.config.regolith
+  const u = x / wavelength
+  const v = y / wavelength
+  const i = Math.floor(u)
+  const j = Math.floor(v)
+  const fx = u - i
+  const fy = v - j
+  const sx = fx * fx * (3 - 2 * fx)
+  const sy = fy * fy * (3 - 2 * fy)
+  const corner = (di: number, dj: number): number =>
+    deriveSeed(state.rootSeed, LANE_REGOLITH, i + di, j + dj) / 4294967296
+  const a = corner(0, 0)
+  const b = corner(1, 0)
+  const c = corner(0, 1)
+  const d = corner(1, 1)
+  const bottom = a + (b - a) * sx
+  const top = c + (d - c) * sx
+  return bottom + (top - bottom) * sy
 }
 
 function cratersAtPoint(state: WorldInternals, x: number, y: number): number {
@@ -338,6 +377,7 @@ function resolveConfig(config: WorldConfig): ResolvedWorldConfig {
   }
   const relief: ReliefConfig = { ...DEFAULT_RELIEF, ...config.relief }
   const craters: CraterConfig = { ...DEFAULT_CRATERS, ...config.craters }
+  const regolith: RegolithConfig = { ...DEFAULT_REGOLITH, ...config.regolith }
   const resolved: ResolvedWorldConfig = {
     seed: config.seed,
     chunkSize: config.chunkSize ?? 64,
@@ -346,6 +386,7 @@ function resolveConfig(config: WorldConfig): ResolvedWorldConfig {
     slopeLimitDeg: config.slopeLimitDeg ?? 16,
     relief: Object.freeze(relief),
     craters: Object.freeze(craters),
+    regolith: Object.freeze(regolith),
   }
 
   const check = (ok: boolean, field: string, value: number, expected: string): void => {
@@ -420,6 +461,8 @@ function resolveConfig(config: WorldConfig): ResolvedWorldConfig {
     craters.minFreshness,
     'a number in (0, 1]',
   )
+
+  positive('regolith.wavelength', regolith.wavelength)
 
   return Object.freeze(resolved)
 }

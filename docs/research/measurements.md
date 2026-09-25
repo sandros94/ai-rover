@@ -67,6 +67,22 @@ Theta\* on the 1 m grid plans a full segment in well under a second on a desktop
 
 Desktop, 2026-09-25, `poseOnTerrain` on the `mars` world, 2,000 random poses, belly sampling included: ~0.09 ms per solve (~11,000 solves/s), ~141 height samples per solve (80 belly samples, ~61 for about three Newton iterations). An hour and a half of driving at 10 Hz is ~54k solves, about 5 s. A 20k-step drive in 4 mm steps had a worst wheel-height error of 1.4e-11 m. Default flat link angles: rocker 37.9°, bogie 60.7°.
 
+## Producer as implemented (`shared/utils/drive`)
+
+Desktop, 2026-09-25, seed `mars`, 500 m disk:
+
+| Run | Compute | Sim steps | Replans | Planning share | Reveal share |
+| --- | --- | --- | --- | --- | --- |
+| 150 m at 10 Hz | 3.9 s | 50,830 | 0 | 53 ms | 80 ms |
+| 250 m at 10 Hz, three goals | 5.6–6.7 s | 84–88k | 0 | 53–387 ms | 107–136 ms |
+| 250 m at 2 Hz (now the default) | 1.7 s | 17.5k | 0 | 166 ms | 121 ms |
+
+About 95 % of the time is the pose solve at every step. Effective flat-ground speed 0.0331 m/s (100 m in 3,024 s). Keyframes 547 KB per hour raw, ~1.3 MB per 250 m. Events JSON ~26 KB per 250 m, mostly per-metre pauses. Reveal deltas 1.2k–22k vertices (5–90 KB) per 250 m, at most ~245 vertices in one metre. The 50 m corridor viewshed on the 1025² grid costs 0.8–1.3 ms per metre.
+
+Interpolation at 2 Hz against re-solved poses over 500 random times: max wheel height error 5.7e-5 m, max wheel-to-ground gap 5.8e-5 m, body height 4.8e-6 m.
+
+The default terrain produced no replans and no slip events on any run: the relief tuning is what will make drives eventful.
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:

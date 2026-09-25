@@ -128,3 +128,48 @@ describe('heightAt', () => {
     expect(craters).toBeGreaterThan(0)
   })
 })
+
+describe('looseAt', () => {
+  it('is deterministic for a seed, differs across seeds and stays in [0, 1]', () => {
+    const a = defineWorld({ seed: 'mars' })
+    const b = defineWorld({ seed: 'mars' })
+    const c = defineWorld({ seed: 'phobos' })
+    const points = [
+      [0, 0],
+      [12.5, -40],
+      [1000, 2000],
+      [-513, 77],
+    ] as const
+    for (const [x, y] of points) expect(a.looseAt(x, y)).toBe(b.looseAt(x, y))
+    expect(points.some(([x, y]) => a.looseAt(x, y) !== c.looseAt(x, y))).toBe(true)
+    let min = Infinity
+    let max = -Infinity
+    for (let x = -2000; x <= 2000; x += 3) {
+      const v = a.looseAt(x, 0.37 * x)
+      min = Math.min(min, v)
+      max = Math.max(max, v)
+    }
+    expect(min).toBeGreaterThanOrEqual(0)
+    expect(max).toBeLessThanOrEqual(1)
+    expect(min).toBeLessThan(0.25)
+    expect(max).toBeGreaterThan(0.75)
+  })
+
+  it('varies over tens of metres, not from one metre to the next', () => {
+    const world = defineWorld({ seed: 'mars' })
+    const { wavelength } = world.config.regolith
+    expect(wavelength).toBe(80)
+    let steepest = 0
+    for (let x = -500; x < 500; x += 0.5) {
+      steepest = Math.max(steepest, Math.abs(world.looseAt(x + 1, 7) - world.looseAt(x, 7)))
+    }
+    // Smoothstep value noise changes by at most 1.5 per wavelength along an axis.
+    expect(steepest).toBeLessThanOrEqual(1.5 / wavelength + 1e-12)
+  })
+
+  it('refuses a non-positive wavelength', () => {
+    expect(
+      terrainErrorOf(() => defineWorld({ seed: 'mars', regolith: { wavelength: 0 } }))?.code,
+    ).toBe('INVALID_CONFIG')
+  })
+})

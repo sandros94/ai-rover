@@ -10,10 +10,12 @@ export interface CostMapOptions {
 }
 
 /**
- * Traversal cost per disk-grid vertex, at least 1 wherever finite:
- * `1 + slopeWeight · (tan slope / tan slopeLimit)²`, times `unrevealedPenalty` on unrevealed
- * vertices. `Infinity` where the vertex is untraversable, has no height, or lies outside the disk
- * radius. `revealed` is one byte per grid vertex (see `revealedOverDisk`).
+ * Traversal cost per disk-grid vertex, at least 1 wherever finite. A revealed vertex costs
+ * `1 + slopeWeight · (tan slope / tan slopeLimit)²`, or `Infinity` when untraversable. An
+ * unrevealed vertex costs `unrevealedPenalty` whatever its true slope: the rover has not seen it,
+ * so the plan may cross it and the drive discovers what is there. `Infinity` wherever the vertex
+ * has no height or lies outside the disk radius. `revealed` is one byte per grid vertex (see
+ * `revealedOverDisk`).
  */
 export function buildCostMap(
   disk: StopDisk,
@@ -40,13 +42,17 @@ export function buildCostMap(
     for (let i = 0; i < width; i++) {
       const k = j * width + i
       const dx = (origin.i + i) * cellSize - center.x
-      if (dx * dx + dy * dy > radius2 || !traversable[k] || Number.isNaN(grid.heights[k])) continue
+      if (dx * dx + dy * dy > radius2 || Number.isNaN(grid.heights[k])) continue
+      if (!revealed[k]) {
+        costs[k] = unrevealedPenalty
+        continue
+      }
+      if (!traversable[k]) continue
       // Central differences skip the vertex's own height; a missing neighbour yields a NaN slope.
       const slope = slopeAt(grid, { i, j })
       if (Number.isNaN(slope)) continue
       const ratio = slope / limit
-      const cost = 1 + slopeWeight * ratio * ratio
-      costs[k] = revealed[k] ? cost : cost * unrevealedPenalty
+      costs[k] = 1 + slopeWeight * ratio * ratio
     }
   }
   return costs

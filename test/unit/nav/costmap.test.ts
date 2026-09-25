@@ -36,15 +36,35 @@ describe('buildCostMap', () => {
     expect(costs[at(0, 0)]).toBe(1)
   })
 
-  it('multiplies unrevealed vertices by the penalty', () => {
-    const disk = syntheticDisk({ size: SIZE, radius: 8 })
+  it('prices unrevealed vertices at the penalty, whatever their true slope or traversability', () => {
+    const disk = syntheticDisk({
+      size: SIZE,
+      radius: 8,
+      heightAt: (x) => 0.2 * x,
+      blocked: (x, y) => x === 2 && y === 2,
+    })
     const revealed = new Uint8Array(SIZE * SIZE).fill(1)
     revealed[at(1, 1)] = 0
+    revealed[at(2, 2)] = 0
     const byDefault = buildCostMap(disk, { revealed, slopeLimitDeg: 16 })
     expect(byDefault[at(1, 1)]).toBe(3)
-    expect(byDefault[at(0, 0)]).toBe(1)
+    expect(byDefault[at(2, 2)]).toBe(3)
+    expect(byDefault[at(0, 0)]).toBeGreaterThan(1)
     const custom = buildCostMap(disk, { revealed, slopeLimitDeg: 16, unrevealedPenalty: 5 })
     expect(custom[at(1, 1)]).toBe(5)
+    expect(custom[at(2, 2)]).toBe(5)
+  })
+
+  it('keeps unrevealed vertices without height or outside the radius impassable', () => {
+    const disk = syntheticDisk({
+      size: SIZE,
+      radius: 8,
+      heightAt: (x, y) => (x === -4 && y === 0 ? Number.NaN : 0),
+    })
+    const costs = buildCostMap(disk, { revealed: new Uint8Array(SIZE * SIZE), slopeLimitDeg: 16 })
+    expect(costs[at(-4, 0)]).toBe(Infinity)
+    expect(costs[at(9, 0)]).toBe(Infinity)
+    expect(costs[at(0, 0)]).toBe(3)
   })
 
   it('grows monotonically with slope and matches the quadratic term', () => {
