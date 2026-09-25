@@ -10,7 +10,7 @@ let shared: Db | undefined
  * platform picks the connector per environment (a pooled server connection, or HTTP plus a
  * WebSocket pool inside Functions), and the driver follows it.
  */
-export function useDb(): Db {
+export function useDB(): Db {
   shared ??= drizzle({ client: getDatabase(), relations })
   return shared
 }
