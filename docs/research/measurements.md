@@ -35,6 +35,22 @@ Default world parameters produce benign ground: over a 500 m disk heights span a
 
 Chunk format v1: 20-byte header + 5 bytes per vertex, 21,145 bytes per 64 m chunk before compression.
 
+## Stop disks as implemented (`computeStopDisk`, radius 500 m, three seeds)
+
+| Measure | Value |
+| --- | --- |
+| Chunks per disk | 224 (16×16 bounding box minus 32 corner chunks outside the circle) |
+| Assembled grid | 1025 × 1025 vertices |
+| Compute time (desktop) | 207–252 ms |
+| Chunk blobs per disk, raw | ~4.74 MB (224 × 21,145 B) |
+| Visible vertices from the stop | 187k–283k (18–27 % of the grid) |
+| Revealed mask blob after one stop | 50–66 KB (94–122 chunks, 537 B each) |
+| Manifest JSON | ~15 KB |
+
+Revealed mask format v1: 16-byte header ("JRRV", version, flags, vertexCount, cellSize, chunkCount) then per chunk `i32 cx, i32 cy` and ⌈vertexCount²/8⌉ packed bits, chunks sorted by (cy, cx).
+
+The 4.7 MB of raw chunk data per stop is the number to watch for the browser: compression, a narrower first fetch, or a compact height encoding are the levers (open question in `docs/decisions.md`).
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:

@@ -1,0 +1,115 @@
+import * as v from 'valibot'
+import type { ChunkCoords } from './chunk'
+import { assertChunkCoord } from './chunk'
+import type { StopDisk } from './disk'
+import { TerrainError } from './errors'
+import { hashString } from './seed'
+import type { World } from './world'
+
+/** Manifest version written by {@link buildStopManifest}. */
+export const STOP_MANIFEST_VERSION = 1
+
+const WORLD_HASH = /^[0-9a-f]{16}$/
+
+const int32 = v.pipe(v.number(), v.integer(), v.minValue(-0x80000000), v.maxValue(0x7fffffff))
+
+/** JSON manifest of one stop: the disk's chunk blobs and the revealed mask as of that stop. */
+export const StopManifestSchema = v.object({
+  version: v.literal(STOP_MANIFEST_VERSION),
+  worldHash: v.pipe(v.string(), v.regex(WORLD_HASH)),
+  stop: v.object({
+    index: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
+    x: v.pipe(v.number(), v.finite()),
+    y: v.pipe(v.number(), v.finite()),
+  }),
+  radius: v.pipe(v.number(), v.finite(), v.gtValue(0)),
+  chunks: v.array(v.object({ cx: int32, cy: int32, key: v.string() })),
+  revealedKey: v.string(),
+})
+
+export type StopManifest = v.InferOutput<typeof StopManifestSchema>
+
+/**
+ * Fingerprint of the resolved world config: its canonical JSON (keys sorted at every level)
+ * hashed twice under different lane prefixes, as 16 hex characters.
+ */
+export function worldHash(world: World): string {
+  const canonical = canonicalJson(world.config)
+  return [1, 2]
+    .map((lane) => hashString(`${lane}\u0000${canonical}`).toString(16).padStart(8, '0'))
+    .join('')
+}
+
+export function chunkKey(worldHash: string, coords: ChunkCoords): string {
+  assertWorldHash(worldHash)
+  assertChunkCoord('cx', coords.cx)
+  assertChunkCoord('cy', coords.cy)
+  return `terrain/${worldHash}/chunks/${coords.cx}_${coords.cy}.bin`
+}
+
+/** Key of the revealed mask accumulated up to and including stop `stopIndex`. */
+export function revealedKey(worldHash: string, stopIndex: number): string {
+  assertWorldHash(worldHash)
+  assertStopIndex(stopIndex)
+  return `terrain/${worldHash}/revealed/${stopIndex}.bin`
+}
+
+export function stopManifestKey(worldHash: string, stopIndex: number): string {
+  assertWorldHash(worldHash)
+  assertStopIndex(stopIndex)
+  return `terrain/${worldHash}/stops/${stopIndex}.json`
+}
+
+export function buildStopManifest(
+  world: World,
+  disk: StopDisk,
+  options: { stopIndex: number },
+): StopManifest {
+  const { stopIndex } = options
+  const hash = worldHash(world)
+  return {
+    version: STOP_MANIFEST_VERSION,
+    worldHash: hash,
+    stop: { index: stopIndex, x: disk.center.x, y: disk.center.y },
+    radius: disk.radius,
+    chunks: disk.chunks.map(({ cx, cy }) => ({ cx, cy, key: chunkKey(hash, { cx, cy }) })),
+    revealedKey: revealedKey(hash, stopIndex),
+  }
+}
+
+export function parseStopManifest(value: unknown): StopManifest {
+  const result = v.safeParse(StopManifestSchema, value)
+  if (result.success) return result.output
+  const [issue] = result.issues
+  const path = v.getDotPath(issue) ?? '(root)'
+  throw new TerrainError(
+    'INVALID_MANIFEST',
+    `Stop manifest field ${path} is invalid: ${issue.message}. Pass a version ${STOP_MANIFEST_VERSION} manifest built by buildStopManifest.`,
+    { cause: new v.ValiError(result.issues) },
+  )
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return `{${entries.map(([k, item]) => `${JSON.stringify(k)}:${canonicalJson(item)}`).join(',')}}`
+}
+
+function assertWorldHash(hash: string): void {
+  if (!WORLD_HASH.test(hash)) {
+    throw new TerrainError(
+      'INVALID_CONFIG',
+      `World hash is "${hash}"; pass the 16 hex characters returned by worldHash(world).`,
+    )
+  }
+}
+
+function assertStopIndex(stopIndex: number): void {
+  if (!Number.isSafeInteger(stopIndex) || stopIndex < 0) {
+    throw new TerrainError(
+      'OUT_OF_BOUNDS',
+      `Stop index is ${stopIndex}; pass a non-negative integer.`,
+    )
+  }
+}

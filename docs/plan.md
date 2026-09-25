@@ -10,7 +10,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Terrain-disk budget: time a 500 m disk (chunks + cost map + flood fill + viewshed at 1 m cells) in a 1024 MB function.
 - Ledger items retire with the measured numbers.
 
-## Phase 1 — World model (the data everything else reads)
+## Phase 1 — World model (the data everything else reads) — terrain core, stop disks, revealed mask and manifests exist; segment record pending
 
 - Deterministic Martian heightmap `h(x, y, seed)`: fBm simplex + crater stamps, chunked, hash-seeded, no `Math.random`, no host-dependent transcendental drift in stored data.
 - On-demand computation: chunks, cost map, pathability and viewshed (line of sight from ~2 m mast height) for a ~500 m disk around each stationary point, computed server-side when the rover arrives there, stored as blobs (chunk data + revealed mask) and served via CDN. Benchmark this step in Phase 0.
