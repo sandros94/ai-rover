@@ -8,6 +8,7 @@ import {
   encodeRevealedMask,
   isRevealed,
   revealDisk,
+  revealedOverDisk,
   TerrainError,
 } from '#shared/utils/terrain'
 
@@ -107,6 +108,36 @@ describe('revealed mask', () => {
     const coarse = defineWorld({ seed: 'mars', cellSize: 2 })
     const disk = computeStopDisk(coarse, { center: { x: 0, y: 0 }, radius: 40 })
     expect(terrainErrorOf(() => revealDisk(createRevealedMask(world), disk))?.code).toBe(
+      'INVALID_GRID',
+    )
+  })
+})
+
+describe('revealedOverDisk', () => {
+  it('matches isRevealed at every vertex of the disk grid', () => {
+    const mask = revealDisk(createRevealedMask(world), second)
+    const bits = revealedOverDisk(mask, first)
+    const { width, height } = first.grid
+    expect(bits.length).toBe(width * height)
+    let revealed = 0
+    let hidden = 0
+    for (let gj = 0; gj < height; gj++) {
+      for (let gi = 0; gi < width; gi++) {
+        const point = { x: gi + first.origin.i, y: gj + first.origin.j }
+        const expected = isRevealed(mask, world, point) ? 1 : 0
+        expect(bits[gj * width + gi]).toBe(expected)
+        if (expected) revealed++
+        else hidden++
+      }
+    }
+    expect(revealed).toBeGreaterThan(0)
+    expect(hidden).toBeGreaterThan(0)
+  })
+
+  it('refuses a disk from a world with a different cell size', () => {
+    const coarse = defineWorld({ seed: 'mars', cellSize: 2 })
+    const disk = computeStopDisk(coarse, { center: { x: 0, y: 0 }, radius: 40 })
+    expect(terrainErrorOf(() => revealedOverDisk(createRevealedMask(world), disk))?.code).toBe(
       'INVALID_GRID',
     )
   })

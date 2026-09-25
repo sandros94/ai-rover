@@ -51,6 +51,18 @@ Revealed mask format v1: 16-byte header ("JRRV", version, flags, vertexCount, ce
 
 The 4.7 MB of raw chunk data per stop is the number to watch for the browser: compression, a narrower first fetch, or a compact height encoding are the levers (open question in `docs/decisions.md`).
 
+## Segment planner as implemented (`shared/utils/nav`)
+
+Desktop, 2026-09-25, 500 m disk, goal 250 m away, revealed = the stop's own viewshed:
+
+| Seed | Disk build | Plan | Expansions | Detour ratio | Max slope | Unrevealed share | Turns in place |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| mars | 239 ms | 264 ms | 124,534 | 1.05 | 6.4° | 0.43 | 1 |
+| jezero | 233 ms | 161 ms | 82,096 | 1.63 | 8.6° | 0.01 | 10 |
+| gale | 229 ms | 109 ms | 51,234 | 1.03 | 10.6° | 0.19 | 3 |
+
+Theta\* on the 1 m grid plans a full segment in well under a second on a desktop, comparable to the disk build itself, so the plain A\* fallback is not needed. Default cost weights (slope weight 4, unrevealed penalty 3) and the blend rule (2 m radius, turn in place above 30°) are untuned.
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:

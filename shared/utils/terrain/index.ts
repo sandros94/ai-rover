@@ -19,6 +19,7 @@ export {
   REVEALED_FORMAT_VERSION,
   REVEALED_HEADER_BYTES,
   revealDisk,
+  revealedOverDisk,
 } from './revealed'
 export type { StopManifest } from './manifest'
 export {

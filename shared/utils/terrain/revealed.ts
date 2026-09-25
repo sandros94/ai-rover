@@ -31,21 +31,10 @@ export function createRevealedMask(world: World): RevealedMask {
 
 /** A new mask with the disk's visible vertices OR-ed in; `mask` is left untouched. */
 export function revealDisk(mask: RevealedMask, disk: StopDisk): RevealedMask {
+  assertDiskAligned(mask, disk, 'revealDisk')
   const { vertexCount } = mask
   const cells = vertexCount - 1
-  const { width, height, cellSize } = disk.grid
-  if (
-    cellSize !== mask.cellSize ||
-    disk.origin.i % cells !== 0 ||
-    disk.origin.j % cells !== 0 ||
-    (width - 1) % cells !== 0 ||
-    (height - 1) % cells !== 0
-  ) {
-    throw new TerrainError(
-      'INVALID_GRID',
-      `revealDisk: disk grid (cellSize ${cellSize}, origin ${disk.origin.i},${disk.origin.j}, ${width}×${height}) does not align with the mask's ${vertexCount}-vertex chunks at cellSize ${mask.cellSize}; pass a disk computed for the mask's world.`,
-    )
-  }
+  const { width } = disk.grid
   const chunks = new Map(mask.chunks)
   for (const { cx, cy } of disk.chunks) {
     const key = `${cx},${cy}`
@@ -65,6 +54,32 @@ export function revealDisk(mask: RevealedMask, disk: StopDisk): RevealedMask {
     if (target) chunks.set(key, target)
   }
   return { version: 1, cellSize: mask.cellSize, vertexCount, chunks }
+}
+
+/**
+ * Per disk-grid vertex: 1 where the mask holds it as seen. Covers the whole grid, including
+ * vertices outside the disk radius and in chunks the disk does not list.
+ */
+export function revealedOverDisk(mask: RevealedMask, disk: StopDisk): Uint8Array {
+  assertDiskAligned(mask, disk, 'revealedOverDisk')
+  const { vertexCount } = mask
+  const cells = vertexCount - 1
+  const { width, height } = disk.grid
+  const out = new Uint8Array(width * height)
+  const cx0 = disk.origin.i / cells
+  const cy0 = disk.origin.j / cells
+  // Shared edge vertices are OR-ed from every chunk that stores them.
+  for (let by = 0; by < (height - 1) / cells; by++) {
+    for (let bx = 0; bx < (width - 1) / cells; bx++) {
+      const bits = mask.chunks.get(`${cx0 + bx},${cy0 + by}`)
+      if (!bits) continue
+      for (let b = 0; b < vertexCount; b++) {
+        const row = (by * cells + b) * width + bx * cells
+        for (let a = 0; a < vertexCount; a++) out[row + a]! |= bits[b * vertexCount + a]!
+      }
+    }
+  }
+  return out
 }
 
 /** Whether the vertex nearest `point` has been seen. */
@@ -232,6 +247,24 @@ export function decodeRevealedMask(bytes: Uint8Array): RevealedMask {
     chunks.set(key, bits)
   }
   return { version: 1, cellSize, vertexCount, chunks }
+}
+
+function assertDiskAligned(mask: RevealedMask, disk: StopDisk, context: string): void {
+  const { vertexCount } = mask
+  const cells = vertexCount - 1
+  const { width, height, cellSize } = disk.grid
+  if (
+    cellSize !== mask.cellSize ||
+    disk.origin.i % cells !== 0 ||
+    disk.origin.j % cells !== 0 ||
+    (width - 1) % cells !== 0 ||
+    (height - 1) % cells !== 0
+  ) {
+    throw new TerrainError(
+      'INVALID_GRID',
+      `${context}: disk grid (cellSize ${cellSize}, origin ${disk.origin.i},${disk.origin.j}, ${width}×${height}) does not align with the mask's ${vertexCount}-vertex chunks at cellSize ${mask.cellSize}; pass a disk computed for the mask's world.`,
+    )
+  }
 }
 
 function parseChunkKey(key: string): { cx: number; cy: number } {

@@ -1,0 +1,62 @@
+import { slopeAt } from '../terrain/analysis'
+import type { StopDisk } from '../terrain/disk'
+import { assertFiniteAtLeast, NavError } from './errors'
+
+export interface CostMapOptions {
+  /** Weight of the squared normalised slope term. Default 4. */
+  slopeWeight?: number
+  /** Cost multiplier on vertices the rover has not seen; at least 1. Default 3. */
+  unrevealedPenalty?: number
+}
+
+/**
+ * Traversal cost per disk-grid vertex, at least 1 wherever finite:
+ * `1 + slopeWeight · (tan slope / tan slopeLimit)²`, times `unrevealedPenalty` on unrevealed
+ * vertices. `Infinity` where the vertex is untraversable, has no height, or lies outside the disk
+ * radius. `revealed` is one byte per grid vertex (see `revealedOverDisk`).
+ */
+export function buildCostMap(
+  disk: StopDisk,
+  options: { revealed: Uint8Array; slopeLimitDeg: number } & CostMapOptions,
+): Float32Array {
+  const { revealed, slopeLimitDeg, slopeWeight = 4, unrevealedPenalty = 3 } = options
+  const { grid, traversable, origin, center, radius } = disk
+  const { width, height, cellSize } = grid
+  if (revealed.length !== width * height) {
+    throw new NavError(
+      'INVALID_INPUT',
+      `buildCostMap: revealed holds ${revealed.length} values but the disk grid is ${width}×${height} (${width * height}); pass revealedOverDisk(mask, disk).`,
+    )
+  }
+  assertSlopeLimit(slopeLimitDeg, 'buildCostMap')
+  assertFiniteAtLeast(slopeWeight, 0, 'slopeWeight', 'buildCostMap')
+  assertFiniteAtLeast(unrevealedPenalty, 1, 'unrevealedPenalty', 'buildCostMap')
+
+  const limit = Math.tan((slopeLimitDeg * Math.PI) / 180)
+  const radius2 = radius * radius
+  const costs = new Float32Array(width * height).fill(Infinity)
+  for (let j = 0; j < height; j++) {
+    const dy = (origin.j + j) * cellSize - center.y
+    for (let i = 0; i < width; i++) {
+      const k = j * width + i
+      const dx = (origin.i + i) * cellSize - center.x
+      if (dx * dx + dy * dy > radius2 || !traversable[k] || Number.isNaN(grid.heights[k])) continue
+      // Central differences skip the vertex's own height; a missing neighbour yields a NaN slope.
+      const slope = slopeAt(grid, { i, j })
+      if (Number.isNaN(slope)) continue
+      const ratio = slope / limit
+      const cost = 1 + slopeWeight * ratio * ratio
+      costs[k] = revealed[k] ? cost : cost * unrevealedPenalty
+    }
+  }
+  return costs
+}
+
+export function assertSlopeLimit(slopeLimitDeg: number, context: string): void {
+  if (!(slopeLimitDeg > 0 && slopeLimitDeg < 90)) {
+    throw new NavError(
+      'INVALID_INPUT',
+      `${context}: slopeLimitDeg is ${slopeLimitDeg}; pass degrees strictly between 0 and 90.`,
+    )
+  }
+}
