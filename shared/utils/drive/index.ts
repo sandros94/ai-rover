@@ -22,3 +22,27 @@ export type {
   SpeedModel,
 } from './segment'
 export { driveSegment } from './segment'
+export type { JourneyKey } from './keys'
+export {
+  assertSegmentId,
+  parseJourneyKey,
+  SEGMENT_ID,
+  segmentManifestKey,
+  segmentSliceKey,
+} from './keys'
+export type { SegmentManifest, SegmentSlice, StoredSegmentManifest } from './slices'
+export {
+  DEFAULT_SLICE_SECONDS,
+  decodeSlice,
+  encodeSlice,
+  parseSegmentManifest,
+  parseStoredSegmentManifest,
+  SEGMENT_MANIFEST_VERSION,
+  SegmentManifestSchema,
+  SLICE_FORMAT_VERSION,
+  SLICE_HEADER_BYTES,
+  sliceGate,
+  sliceRecord,
+  sliceReleaseAt,
+  StoredSegmentManifestSchema,
+} from './slices'
