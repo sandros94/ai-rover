@@ -63,13 +63,7 @@ export default defineHandler(async (event) => {
     )
     const startedAt = Math.round(Date.now() + body.startedAtOffsetS * 1000)
     const segment = await time('publishSegmentMs', () =>
-      publishSegment(store, {
-        record,
-        segmentId: body.segmentId,
-        startedAt,
-        start,
-        goal: body.goal,
-      }),
+      publishSegment(store, { record, segmentId: body.segmentId, startedAt }),
     )
     const chunks = stop.written.filter((w) => w.key.includes('/chunks/'))
     const maskBlobs = stop.written.filter((w) => w.key.includes('/revealed/'))

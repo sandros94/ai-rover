@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
 import type { SegmentSlice, StoredSegmentManifest } from '#shared/utils/drive'
 import {
+  DEFAULT_SLICE_SECONDS,
   decodeSlice,
   driveSegment,
   encodeSlice,
@@ -29,7 +30,7 @@ const { record } = driveSegment(world, {
   goal,
   revealRadiusM: 50,
 })
-const { manifest, slices } = sliceRecord(record, { start, goal })
+const { manifest, slices } = sliceRecord(record)
 
 function concat(parts: SegmentSlice[]) {
   const keyframes = new Float32Array(parts.reduce((n, s) => n + s.keyframes.length, 0))
@@ -47,11 +48,12 @@ function concat(parts: SegmentSlice[]) {
 }
 
 describe('sliceRecord on seed mars, 150 m', () => {
-  it('spans the record in 60 s slices', () => {
-    expect(manifest.sliceSeconds).toBe(60)
+  it('spans the record in 30 s slices', () => {
+    expect(DEFAULT_SLICE_SECONDS).toBe(30)
+    expect(manifest.sliceSeconds).toBe(30)
     expect(manifest.keyframeHz).toBe(record.keyframes.hz)
     expect(manifest.stride).toBe(KEYFRAME_STRIDE)
-    expect(slices.length).toBe(Math.floor(record.outcome.durationS / 60) + 1)
+    expect(slices.length).toBe(Math.floor(record.outcome.durationS / 30) + 1)
     expect(slices.length).toBeGreaterThan(2)
     slices.forEach((s, k) => expect(s.index).toBe(k))
   })
@@ -88,7 +90,7 @@ describe('sliceRecord on seed mars, 150 m', () => {
       }
     }
     expect(slices[0]!.keyframes[0]).toBe(0)
-    expect(slices[1]!.keyframes[0]).toBe(60)
+    expect(slices[1]!.keyframes[0]).toBe(30)
   })
 
   it('keeps the outcome out of the manifest and out of every slice but the last', () => {
@@ -102,6 +104,9 @@ describe('sliceRecord on seed mars, 150 m', () => {
   })
 
   it('carries the plan, start and goal, and parses', () => {
+    expect(record.start).toEqual(start)
+    expect(record.goal).toEqual(goal)
+    expect(record.start).not.toBe(start)
     expect(manifest.plan.polyline).toEqual(record.plan.polyline)
     expect(manifest.plan.metrics).toEqual(record.plan.metrics)
     expect(manifest.start).toEqual(start)
@@ -110,16 +115,19 @@ describe('sliceRecord on seed mars, 150 m', () => {
   })
 
   it('takes another slice length', () => {
-    const { slices: fine } = sliceRecord(record, { start, goal, sliceSeconds: 30 })
-    expect(fine.length).toBe(Math.floor(record.outcome.durationS / 30) + 1)
-    expect(concat(fine).keyframes).toEqual(record.keyframes.data)
+    const { slices: coarse } = sliceRecord(record, { sliceSeconds: 60 })
+    expect(coarse.length).toBe(Math.floor(record.outcome.durationS / 60) + 1)
+    expect(concat(coarse).keyframes).toEqual(record.keyframes.data)
+  })
+
+  it('refuses a record whose start or goal is not finite', () => {
+    const broken = { ...record, goal: { x: Number.NaN, y: 0 } }
+    expect(driveErrorOf(() => sliceRecord(broken))?.code).toBe('INVALID_INPUT')
   })
 
   it('refuses a non-positive slice length', () => {
     for (const sliceSeconds of [0, -1, Number.NaN, Infinity]) {
-      expect(driveErrorOf(() => sliceRecord(record, { start, goal, sliceSeconds }))?.code).toBe(
-        'INVALID_INPUT',
-      )
+      expect(driveErrorOf(() => sliceRecord(record, { sliceSeconds }))?.code).toBe('INVALID_INPUT')
     }
   })
 })
@@ -213,17 +221,27 @@ describe('release gate', () => {
   const startedAt = Date.UTC(2026, 8, 25, 12)
   const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1', startedAt }
 
-  it('releases slice k at startedAt + k · sliceSeconds', () => {
-    expect(sliceReleaseAt(startedAt, 0, 60)).toBe(startedAt)
-    expect(sliceReleaseAt(startedAt, 3, 60)).toBe(startedAt + 180_000)
-    expect(sliceReleaseAt(startedAt, 2, 30)).toBe(startedAt + 60_000)
+  it('releases slice k at the end of its window, startedAt + (k + 1) · sliceSeconds', () => {
+    expect(sliceReleaseAt(startedAt, 0, 30)).toBe(startedAt + 30_000)
+    expect(sliceReleaseAt(startedAt, 3, 30)).toBe(startedAt + 120_000)
+    expect(sliceReleaseAt(startedAt, 2, 60)).toBe(startedAt + 180_000)
   })
 
   it('refuses a slice before its release and serves it from then on', () => {
-    const at = startedAt + 120_000
+    const at = startedAt + 90_000
     expect(sliceGate(stored, 2, at - 1)).toEqual({ released: false, releaseAt: at })
     expect(sliceGate(stored, 2, at)).toEqual({ released: true, releaseAt: at })
-    expect(sliceGate(stored, 0, startedAt - 5)).toEqual({ released: false, releaseAt: startedAt })
+    expect(sliceGate(stored, 0, startedAt)).toEqual({
+      released: false,
+      releaseAt: startedAt + 30_000,
+    })
+  })
+
+  it('serves only slices whose window has fully passed', () => {
+    // 35 s after the start: slice 0 [0, 30) is over, slice 1 [30, 60) is still running.
+    const now = startedAt + 35_000
+    expect(sliceGate(stored, 0, now).released).toBe(true)
+    expect(sliceGate(stored, 1, now).released).toBe(false)
   })
 
   it('refuses a bad index or time', () => {

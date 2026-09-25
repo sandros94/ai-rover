@@ -7,7 +7,7 @@ import {
   revealedOverDisk,
 } from '#shared/utils/terrain'
 import { planSegment } from '#shared/utils/nav'
-import { navErrorOf } from './helpers'
+import { navErrorOf, syntheticDisk } from './helpers'
 
 const world = defineWorld({ seed: 'mars' })
 const disk = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 300 })
@@ -63,5 +63,51 @@ describe('planSegment', () => {
     expect(
       navErrorOf(() => planSegment(disk, { ...options, revealed: new Uint8Array(4) }))?.code,
     ).toBe('INVALID_INPUT')
+  })
+})
+
+describe('planSegment slope metrics', () => {
+  // Flat ground with a 5-degree ramp west of the centre, seen, and a 12-degree ramp east of it,
+  // unseen. Unseen ground plans as flat, so the route runs straight across both.
+  const size = 301
+  const tanOf = (deg: number) => Math.tan((deg * Math.PI) / 180)
+  const heightAt = (x: number) =>
+    Math.min(Math.max(x + 60, 0), 40) * tanOf(5) + Math.min(Math.max(x - 20, 0), 40) * tanOf(12)
+  const disk = syntheticDisk({ size, radius: 150, heightAt })
+  const half = (size - 1) / 2
+  const seenExcept = (unseen: (x: number) => boolean) => {
+    const bytes = new Uint8Array(size * size)
+    for (let j = 0; j < size; j++)
+      for (let i = 0; i < size; i++) bytes[j * size + i] = unseen(i - half) ? 0 : 1
+    return bytes
+  }
+  const start = { x: -100, y: 0 }
+  const goal = { x: 100, y: 0 }
+
+  it('reports only the slopes of revealed ground', () => {
+    const revealed = seenExcept((x) => x >= 10 && x <= 70)
+    const { metrics } = planSegment(disk, { revealed, start, goal, slopeLimitDeg })
+    expect(metrics.reached).toBe(true)
+    expect(metrics.pathLengthM).toBe(200)
+    expect(metrics.unrevealedFraction).toBeGreaterThan(0.25)
+    expect(metrics.maxSlopeDeg).toBeCloseTo(5, 3)
+    // 40 m of 5 degrees over about 140 m of seen path.
+    expect(metrics.meanSlopeDeg).toBeGreaterThan(1.2)
+    expect(metrics.meanSlopeDeg).toBeLessThan(1.8)
+  })
+
+  it('reports the steep ramp once it is revealed', () => {
+    const revealed = seenExcept(() => false)
+    const { metrics } = planSegment(disk, { revealed, start, goal, slopeLimitDeg })
+    expect(metrics.maxSlopeDeg).toBeCloseTo(12, 3)
+  })
+
+  it('reports zero slopes when the path crosses no revealed vertex', () => {
+    const revealed = seenExcept(() => true)
+    const { metrics } = planSegment(disk, { revealed, start, goal, slopeLimitDeg })
+    expect(metrics.reached).toBe(true)
+    expect(metrics.unrevealedFraction).toBe(1)
+    expect(metrics.maxSlopeDeg).toBe(0)
+    expect(metrics.meanSlopeDeg).toBe(0)
   })
 })

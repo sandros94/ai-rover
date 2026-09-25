@@ -6,7 +6,7 @@ import { KEYFRAME_STRIDE } from './keyframes'
 import type { DriveEvent, DriveEventType, DriveOutcome, SegmentRecord } from './segment'
 
 /** Slice length used by {@link sliceRecord} unless told otherwise, seconds of sim time. */
-export const DEFAULT_SLICE_SECONDS = 60
+export const DEFAULT_SLICE_SECONDS = 30
 /** Manifest version written by {@link sliceRecord}. */
 export const SEGMENT_MANIFEST_VERSION = 1
 /** Slice format version written by {@link encodeSlice}. */
@@ -125,27 +125,23 @@ const SlicePayloadSchema = v.strictObject({
 
 /**
  * Cuts a record into slices of `sliceSeconds` of sim time, from t = 0 to the slice holding its
- * last keyframe, event or reveal, plus the manifest that describes them. The outcome rides in the
- * last slice only; the manifest carries neither the outcome nor the duration or slice count, which
- * would give away how the segment ends.
+ * last keyframe, event or reveal, plus the manifest that describes them, start and goal taken from
+ * the record. The outcome rides in the last slice only; the manifest carries neither the outcome
+ * nor the duration or slice count, which would give away how the segment ends.
  */
 export function sliceRecord(
   record: SegmentRecord,
-  options: {
-    start: { x: number; y: number; headingRad: number }
-    goal: { x: number; y: number }
-    sliceSeconds?: number
-  },
+  options: { sliceSeconds?: number } = {},
 ): { manifest: SegmentManifest; slices: SegmentSlice[] } {
-  const { start, goal, sliceSeconds = DEFAULT_SLICE_SECONDS } = options
+  const { sliceSeconds = DEFAULT_SLICE_SECONDS } = options
   assertSliceSeconds(sliceSeconds)
+  const { start, goal, keyframes, events, reveals, outcome } = record
   if (![start.x, start.y, start.headingRad, goal.x, goal.y].every(Number.isFinite)) {
     throw new DriveError(
       'INVALID_INPUT',
-      `sliceRecord: start (${start.x}, ${start.y}, ${start.headingRad}) and goal (${goal.x}, ${goal.y}) must be finite; pass the drive's own start and goal.`,
+      `sliceRecord: record start (${start.x}, ${start.y}, ${start.headingRad}) and goal (${goal.x}, ${goal.y}) must be finite; pass a record produced by driveSegment.`,
     )
   }
-  const { keyframes, events, reveals, outcome } = record
   const { data, count: frameCount } = keyframes
   const at = (t: number) => Math.max(0, Math.floor(t / sliceSeconds))
 
@@ -203,7 +199,11 @@ export function parseStoredSegmentManifest(value: unknown): StoredSegmentManifes
   )
 }
 
-/** Wall-clock epoch milliseconds from which slice `sliceIndex` may be served. */
+/**
+ * Wall-clock epoch milliseconds from which slice `sliceIndex` may be served: the end of its
+ * window, `startedAt + (sliceIndex + 1) · sliceSeconds · 1000`. Nothing in the future is ever
+ * served; the live view trails the simulation by at most one slice.
+ */
 export function sliceReleaseAt(
   startedAt: number,
   sliceIndex: number,
@@ -222,10 +222,13 @@ export function sliceReleaseAt(
     )
   }
   assertSliceSeconds(sliceSeconds)
-  return startedAt + sliceIndex * sliceSeconds * 1000
+  return startedAt + (sliceIndex + 1) * sliceSeconds * 1000
 }
 
-/** Whether slice `sliceIndex` of a published segment may be served at epoch milliseconds `now`. */
+/**
+ * Whether slice `sliceIndex` of a published segment may be served at epoch milliseconds `now`,
+ * that is whether its whole window lies in the past (see {@link sliceReleaseAt}).
+ */
 export function sliceGate(
   manifest: Pick<StoredSegmentManifest, 'startedAt' | 'sliceSeconds'>,
   sliceIndex: number,

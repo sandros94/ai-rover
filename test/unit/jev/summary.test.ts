@@ -126,6 +126,9 @@ describe('summarizeSubmission', () => {
     expect(summary.route.reached).toBe(true)
     if (!summary.route.reached) return
     expect(summary.route.max_slope_deg).toBe(9)
+    expect(summary.route.max_slope_deg).toBe(Math.round(plan.metrics.maxSlopeDeg))
+    expect(summary.route.max_slope_label).toBe(slopeLabel(plan.metrics.maxSlopeDeg))
+    expect(summary.route.mean_slope_label).toBe(meanSlopeLabel(plan.metrics.meanSlopeDeg))
     expect(summary.route.max_slope_label).toBe('moderate')
     expect(summary.route.mean_slope_label).toBe('near the limit')
     expect(summary.route.loose_ground_label).toBe('some loose ground')

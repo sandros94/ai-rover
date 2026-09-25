@@ -70,19 +70,13 @@ describe('publishSegment', () => {
   const start = { x: 0, y: 0, headingRad: 0 }
   const goal = { x: 40, y: 30 }
   const { record } = driveSegment(world, { disk, revealed: mask, start, goal })
-  const { slices } = sliceRecord(record, { start, goal })
+  const { slices } = sliceRecord(record)
 
   it('writes the slices before the manifest, which parses with its id and start time', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     const startedAt = 1_790_000_000_000
-    const result = await publishSegment(store, {
-      record,
-      segmentId: 'seg-1',
-      startedAt,
-      start,
-      goal,
-    })
+    const result = await publishSegment(store, { record, segmentId: 'seg-1', startedAt })
     expect(result.manifestKey).toBe(segmentManifestKey('seg-1'))
     expect(blobs.writes).toEqual([
       ...slices.map((s) => segmentSliceKey('seg-1', s.index)),
@@ -91,6 +85,8 @@ describe('publishSegment', () => {
     const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
     expect(manifest.segmentId).toBe('seg-1')
     expect(manifest.startedAt).toBe(startedAt)
+    expect(manifest.start).toEqual(start)
+    expect(manifest.goal).toEqual(goal)
     const last = decodeSlice(
       (await store.getInflated(segmentSliceKey('seg-1', slices.length - 1)))!,
     )
@@ -102,10 +98,10 @@ describe('publishSegment', () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     await expect(
-      publishSegment(store, { record, segmentId: '../x', startedAt: 0, start, goal }),
+      publishSegment(store, { record, segmentId: '../x', startedAt: 0 }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
     await expect(
-      publishSegment(store, { record, segmentId: 'ok', startedAt: Number.NaN, start, goal }),
+      publishSegment(store, { record, segmentId: 'ok', startedAt: Number.NaN }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
     expect(blobs.writes).toEqual([])
   })

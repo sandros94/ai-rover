@@ -48,22 +48,15 @@ export async function publishStop(
 }
 
 /**
- * Publishes a segment record as time-gated slices, then its manifest stamped with the segment id
- * and wall-clock start (epoch milliseconds). The manifest goes last, so a reader that finds it
- * finds every slice.
+ * Publishes a segment record as time-gated slices of the default length, each served once its
+ * window has passed, then its manifest stamped with the segment id and wall-clock start (epoch
+ * milliseconds). The manifest goes last, so a reader that finds it finds every slice.
  */
 export async function publishSegment(
   store: JourneyStore,
-  options: {
-    record: SegmentRecord
-    segmentId: string
-    startedAt: number
-    start: { x: number; y: number; headingRad: number }
-    goal: { x: number; y: number }
-    sliceSeconds?: number
-  },
+  options: { record: SegmentRecord; segmentId: string; startedAt: number },
 ): Promise<{ manifestKey: string; written: PutResult[] }> {
-  const { record, segmentId, startedAt, start, goal, sliceSeconds } = options
+  const { record, segmentId, startedAt } = options
   assertSegmentId(segmentId)
   if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
     throw new DriveError(
@@ -71,11 +64,7 @@ export async function publishSegment(
       `publishSegment: startedAt is ${startedAt}; pass whole epoch milliseconds.`,
     )
   }
-  const { manifest, slices } = sliceRecord(record, {
-    start,
-    goal,
-    ...(sliceSeconds === undefined ? {} : { sliceSeconds }),
-  })
+  const { manifest, slices } = sliceRecord(record)
   const written: PutResult[] = []
   for (const slice of slices) {
     written.push(

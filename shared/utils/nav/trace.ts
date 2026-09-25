@@ -1,3 +1,5 @@
+import type { GridCell } from '../terrain/grid'
+
 /**
  * Walks the straight segment between two grid vertices through every vertex cell it crosses,
  * cells being the unit squares centred on vertices. `visit(k, weight)` receives the vertex index
@@ -51,4 +53,30 @@ export function traceSegment(
     t = next
   }
   return visit(k, 1 - t)
+}
+
+/**
+ * Walks a route of grid vertices leg by leg through every vertex cell it crosses (see
+ * {@link traceSegment}). `visit(k, weight)` receives the vertex index and the route length inside
+ * its cell in metres; cells only touched at a corner are skipped. A single-vertex route visits its
+ * vertex once with weight 1, so it still reports the ground under it.
+ */
+export function tracePath(
+  width: number,
+  cellSize: number,
+  waypoints: GridCell[],
+  visit: (k: number, weight: number) => void,
+): void {
+  const legs =
+    waypoints.length > 1
+      ? waypoints.slice(1).map((b, k) => [waypoints[k]!, b] as const)
+      : [[waypoints[0]!, waypoints[0]!] as const]
+  for (const [a, b] of legs) {
+    const legM = Math.hypot(b.i - a.i, b.j - a.j) * cellSize
+    const scale = legM > 0 ? legM : 1
+    traceSegment(width, a.j * width + a.i, b.j * width + b.i, (k, weight) => {
+      if (weight > 0) visit(k, weight * scale)
+      return true
+    })
+  }
 }

@@ -8,11 +8,12 @@ import type { Motion, MotionOptions } from './motions'
 import { motionsFromPolyline } from './motions'
 import type { RouteFailureReason, RouteOptions, RouteResult } from './theta-star'
 import { findRoute } from './theta-star'
-import { traceSegment } from './trace'
+import { tracePath } from './trace'
 
 /**
  * Navigation telemetry of one plan. Path-derived fields (`pathLengthM`, `detourRatio`, slopes,
- * `unrevealedFraction`, `turnCount`) are 0 when the goal was not reached.
+ * `unrevealedFraction`, `turnCount`) are 0 when the goal was not reached. Slopes see only revealed
+ * ground: the metrics are public, and the slope of unseen ground would leak hidden terrain.
  */
 export interface NavMetrics {
   reached: boolean
@@ -23,9 +24,12 @@ export interface NavMetrics {
   straightLineM: number
   /** `pathLengthM / straightLineM`, 1 when start and goal share a vertex. */
   detourRatio: number
-  /** Over the vertex cells the path crosses, from the disk grid's gradient. */
+  /**
+   * Over the revealed vertex cells the path crosses, from the disk grid's gradient; 0 when it
+   * crosses none.
+   */
   maxSlopeDeg: number
-  /** Path-length-weighted. */
+  /** Path-length-weighted over the same cells; 0 when the path crosses no revealed cell. */
   meanSlopeDeg: number
   /** Share of path length over vertices not yet revealed, 0 to 1. */
   unrevealedFraction: number
@@ -105,7 +109,10 @@ export function planSegment(
   return { route, polyline, motions, metrics }
 }
 
-/** Length and length-weighted terrain statistics over the vertex cells a route crosses. */
+/**
+ * Length, unrevealed share and length-weighted slope over the vertex cells a route crosses; the
+ * slopes over its revealed cells only, 0 when there are none.
+ */
 function alongPath(
   disk: StopDisk,
   revealed: Uint8Array,
@@ -114,34 +121,32 @@ function alongPath(
   const { grid } = disk
   const { width, cellSize } = grid
   let lengthM = 0
+  for (let k = 1; k < waypoints.length; k++) {
+    const a = waypoints[k - 1]!
+    const b = waypoints[k]!
+    lengthM += Math.hypot(b.i - a.i, b.j - a.j) * cellSize
+  }
+  let span = 0
+  let unrevealed = 0
+  let seen = 0
   let maxSlopeDeg = 0
   let slopeSum = 0
-  let unrevealed = 0
-  let span = 0
-  const legs =
-    waypoints.length > 1
-      ? waypoints.slice(1).map((b, k) => [waypoints[k]!, b] as const)
-      : [[waypoints[0]!, waypoints[0]!] as const]
-  for (const [a, b] of legs) {
-    const legM = Math.hypot(b.i - a.i, b.j - a.j) * cellSize
-    lengthM += legM
-    // A zero-length route still reports the ground under its single vertex.
-    const scale = legM > 0 ? legM : 1
-    traceSegment(width, a.j * width + a.i, b.j * width + b.i, (k, weight) => {
-      if (weight === 0) return true
-      const i = k % width
-      const slopeDeg = (Math.atan(slopeAt(grid, { i, j: (k - i) / width })) * 180) / Math.PI
-      maxSlopeDeg = Math.max(maxSlopeDeg, slopeDeg)
-      slopeSum += slopeDeg * weight * scale
-      if (!revealed[k]) unrevealed += weight * scale
-      span += weight * scale
-      return true
-    })
-  }
+  tracePath(width, cellSize, waypoints, (k, weight) => {
+    span += weight
+    if (!revealed[k]) {
+      unrevealed += weight
+      return
+    }
+    const i = k % width
+    const slopeDeg = (Math.atan(slopeAt(grid, { i, j: (k - i) / width })) * 180) / Math.PI
+    maxSlopeDeg = Math.max(maxSlopeDeg, slopeDeg)
+    slopeSum += slopeDeg * weight
+    seen += weight
+  })
   return {
     lengthM,
     maxSlopeDeg,
-    meanSlopeDeg: slopeSum / span,
+    meanSlopeDeg: seen > 0 ? slopeSum / seen : 0,
     unrevealedFraction: unrevealed / span,
   }
 }

@@ -128,6 +128,10 @@ export interface DriveOutcome {
 /** One segment attempt, immutable once produced. Contains no wall-clock values. */
 export interface SegmentRecord {
   version: 1
+  /** The drive's start pose, as passed to `driveSegment`. */
+  start: PlanarPose
+  /** The drive's goal, as passed to `driveSegment`. */
+  goal: { x: number; y: number }
   /** The plan at the start of the segment, `metrics.computeMs` zeroed; replans ride on events. */
   plan: SegmentPlan
   keyframes: KeyframeBlock
@@ -287,8 +291,11 @@ class Drive {
   run(): SegmentRecord {
     const plan = this.plan()
     const outcome = this.execute(plan)
+    const { start, goal } = this.options
     return {
       version: 1,
+      start: { x: start.x, y: start.y, headingRad: start.headingRad },
+      goal: { x: goal.x, y: goal.y },
       plan: { ...plan, metrics: { ...plan.metrics, computeMs: 0 } },
       keyframes: {
         hz: this.o.simHz / this.o.frameEvery,

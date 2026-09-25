@@ -11,7 +11,7 @@ const IMMUTABLE = 'public, max-age=31536000, immutable'
 
 /**
  * Journey blobs through the CDN, deflated as stored and cached forever. A segment slice is
- * refused, uncached, until wall-clock reaches its release time.
+ * refused, uncached, until wall-clock passes the end of its window (see `sliceReleaseAt`).
  */
 export default defineHandler(async (event) => {
   const key = getRouterParam(event, 'key') ?? ''

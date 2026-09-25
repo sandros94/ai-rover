@@ -1,11 +1,10 @@
 import * as v from 'valibot'
-import { slopeAt } from '../terrain/analysis'
 import type { StopDisk } from '../terrain/disk'
 import type { World } from '../terrain/world'
 import { NavError } from './errors'
 import type { SegmentPlan } from './plan'
 import type { RouteFailureReason } from './theta-star'
-import { traceSegment } from './trace'
+import { tracePath } from './trace'
 
 /**
  * Average ground speed of a drive, m/s: 152 m/h cruise with a think pause before every metre
@@ -131,8 +130,9 @@ export function compassPoint(
 
 /**
  * Builds Jev's state for a planned segment. Slope and looseness come from the seen part of the
- * path only: the rover has no knowledge of unseen ground beyond it being unseen. `revealed` is
- * the byte per disk-grid vertex the plan was made with (see `revealedOverDisk`).
+ * path only: the rover has no knowledge of unseen ground beyond it being unseen. Slopes are the
+ * plan's own metrics; `revealed` is the byte per disk-grid vertex the plan was made with (see
+ * `revealedOverDisk`), used for the looseness.
  */
 export function summarizeSubmission(
   plan: SegmentPlan,
@@ -166,61 +166,44 @@ export function summarizeSubmission(
       failure_reason: FAILURE_REASONS[metrics.failureReason ?? 'goal-unreachable'],
     }
   }
-  const seen = seenGround(plan, world, disk, revealed)
+  const meanLooseness = seenLooseness(plan, world, disk, revealed)
   return {
     ...common,
     route: {
       reached: true,
       path_length_m: Math.round(metrics.pathLengthM),
       detour_label: detourLabel(metrics.detourRatio),
-      max_slope_deg: Math.round(seen.maxSlopeDeg),
-      max_slope_label: slopeLabel(seen.maxSlopeDeg),
-      mean_slope_label: meanSlopeLabel(seen.meanSlopeDeg),
+      max_slope_deg: Math.round(metrics.maxSlopeDeg),
+      max_slope_label: slopeLabel(metrics.maxSlopeDeg),
+      mean_slope_label: meanSlopeLabel(metrics.meanSlopeDeg),
       unseen_label: unseenLabel(metrics.unrevealedFraction),
       turns_in_place: metrics.turnCount,
-      loose_ground_label: looseGroundLabel(seen.meanLooseness),
+      loose_ground_label: looseGroundLabel(meanLooseness),
       estimated_drive_minutes: Math.round(metrics.pathLengthM / EFFECTIVE_SPEED_MPS / 60),
     },
   }
 }
 
 /**
- * Slope and looseness over the seen vertex cells a reached route crosses, weighted by the length
- * inside each cell. All zero when the route crosses no seen cell.
+ * Regolith looseness over the seen vertex cells a reached route crosses, weighted by the length
+ * inside each cell. 0 when the route crosses no seen cell.
  */
-function seenGround(
+function seenLooseness(
   plan: SegmentPlan,
   world: Pick<World, 'looseAt'>,
   disk: StopDisk,
   revealed: Uint8Array,
-): { maxSlopeDeg: number; meanSlopeDeg: number; meanLooseness: number } {
+): number {
   const { grid, origin } = disk
   const { width, cellSize } = grid
-  const waypoints = plan.route.waypoints
-  const legs =
-    waypoints.length > 1
-      ? waypoints.slice(1).map((b, k) => [waypoints[k]!, b] as const)
-      : [[waypoints[0]!, waypoints[0]!] as const]
-  let maxSlopeDeg = 0
-  let slopeSum = 0
   let looseSum = 0
   let span = 0
-  for (const [a, b] of legs) {
-    const legM = Math.hypot(b.i - a.i, b.j - a.j) * cellSize
-    const scale = legM > 0 ? legM : 1
-    traceSegment(width, a.j * width + a.i, b.j * width + b.i, (k, weight) => {
-      if (weight === 0 || !revealed[k]) return true
-      const i = k % width
-      const j = (k - i) / width
-      const slopeDeg = (Math.atan(slopeAt(grid, { i, j })) * 180) / Math.PI
-      const w = weight * scale
-      maxSlopeDeg = Math.max(maxSlopeDeg, slopeDeg)
-      slopeSum += slopeDeg * w
-      looseSum += world.looseAt((origin.i + i) * cellSize, (origin.j + j) * cellSize) * w
-      span += w
-      return true
-    })
-  }
-  if (span === 0) return { maxSlopeDeg: 0, meanSlopeDeg: 0, meanLooseness: 0 }
-  return { maxSlopeDeg, meanSlopeDeg: slopeSum / span, meanLooseness: looseSum / span }
+  tracePath(width, cellSize, plan.route.waypoints, (k, weight) => {
+    if (!revealed[k]) return
+    const i = k % width
+    const j = (k - i) / width
+    looseSum += world.looseAt((origin.i + i) * cellSize, (origin.j + j) * cellSize) * weight
+    span += weight
+  })
+  return span > 0 ? looseSum / span : 0
 }
