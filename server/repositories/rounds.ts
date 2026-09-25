@@ -1,12 +1,12 @@
 import { and, eq, ne } from 'drizzle-orm'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError, isUniqueViolation } from '../database/errors'
 import type { Round } from '../database/schema'
 import { round, stop, submission } from '../database/schema'
 
 /** Refuses while the mission has an open round, and a stop of another mission. */
 export async function openRound(
-  db: Db,
+  db: DB,
   input: { missionId: string; fromStopId: string; opensAt?: Date },
 ): Promise<Round> {
   return db.transaction(async (tx) => {
@@ -35,7 +35,7 @@ export async function openRound(
   })
 }
 
-export async function getOpenRound(db: Db, missionId: string): Promise<Round | undefined> {
+export async function getOpenRound(db: DB, missionId: string): Promise<Round | undefined> {
   const [row] = await db
     .select()
     .from(round)
@@ -48,7 +48,7 @@ export async function getOpenRound(db: Db, missionId: string): Promise<Round | u
  * submission of the round becomes `lost`, so a closed round holds no open submission.
  */
 export async function closeRound(
-  db: Db,
+  db: DB,
   roundId: string,
   options: { winnerSubmissionId: string; closesAt: Date },
 ): Promise<Round> {

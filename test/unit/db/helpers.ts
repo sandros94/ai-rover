@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { PGlite } from '@electric-sql/pglite'
 import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
-import type { Db } from '#server/database/db'
+import type { DB } from '#server/database/db'
 import type { MissionConfig, StoredJudgment } from '#server/database/schema'
 import { relations } from '#server/database/schema'
 import { DbError } from '#server/database/errors'
@@ -19,7 +19,7 @@ export const MIGRATIONS_DIR = fileURLToPath(
 )
 
 /** A fresh in-memory database with every generated migration applied. */
-export async function createTestDb(): Promise<{ db: Db; close: () => Promise<void> }> {
+export async function createTestDb(): Promise<{ db: DB; close: () => Promise<void> }> {
   const client = new PGlite()
   const db = drizzle({ client, relations })
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR })
@@ -71,7 +71,7 @@ export const SUMMARY: SubmissionSummary = {
 }
 
 /** A mission with its first stop set current, an open round from it and one user. */
-export async function seedMission(db: Db) {
+export async function seedMission(db: DB) {
   const mission = await createMission(db, {
     seed: 'mars',
     worldHash: '0123456789abcdef',

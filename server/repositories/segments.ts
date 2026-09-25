@@ -1,6 +1,6 @@
 import { and, asc, count, eq, gte, sql } from 'drizzle-orm'
 import type { DriveOutcome } from '#shared/utils/drive/segment'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import type { Segment } from '../database/schema'
 import { segment, stop } from '../database/schema'
@@ -38,7 +38,7 @@ export interface Death {
 }
 
 /** Starts `driving`; `attempt` counts the settled failures before it from the same stop. */
-export async function createSegment(db: Db, input: NewSegment): Promise<Segment> {
+export async function createSegment(db: DB, input: NewSegment): Promise<Segment> {
   return db.transaction(async (tx) => {
     const [from] = await tx
       .select({ missionId: stop.missionId })
@@ -71,7 +71,7 @@ export type SegmentSettlement =
  * reached. Refused before `endsAt` and once settled.
  */
 export async function settleSegment(
-  db: Db,
+  db: DB,
   segmentId: string,
   settlement: SegmentSettlement & { now: Date },
 ): Promise<Segment> {
@@ -97,7 +97,7 @@ export async function settleSegment(
 }
 
 export async function getPublicSegment(
-  db: Db,
+  db: DB,
   segmentId: string,
   options: { now: Date },
 ): Promise<PublicSegment> {
@@ -108,7 +108,7 @@ export async function getPublicSegment(
 
 /** The mission's segments in start order, as public at `now`. */
 export async function listMissionSegments(
-  db: Db,
+  db: DB,
   missionId: string,
   options: { now: Date },
 ): Promise<PublicSegment[]> {
@@ -128,7 +128,7 @@ export function publicSegment(row: Segment, now: Date): PublicSegment {
 
 /** Death positions of settled failures, oldest first; unsettled ones are not public yet. */
 export async function listDeaths(
-  db: Db,
+  db: DB,
   missionId: string,
   options: { fromStopId?: string } = {},
 ): Promise<Death[]> {
@@ -158,7 +158,7 @@ export async function listDeaths(
  * `since` keeps only those that became public at or after it.
  */
 export async function countRecentFailuresNear(
-  db: Db,
+  db: DB,
   missionId: string,
   options: { point: { x: number; y: number }; radiusM: number; since?: Date },
 ): Promise<number> {

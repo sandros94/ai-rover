@@ -1,11 +1,11 @@
 import { and, count, eq } from 'drizzle-orm'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import { submission, submissionLike } from '../database/schema'
 
 /** Idempotent. Likes change only while the submission is open, which implies an open round. */
 export async function like(
-  db: Db,
+  db: DB,
   submissionId: string,
   options: { userId: string },
 ): Promise<void> {
@@ -20,7 +20,7 @@ export async function like(
 
 /** Idempotent; same window as {@link like}. */
 export async function unlike(
-  db: Db,
+  db: DB,
   submissionId: string,
   options: { userId: string },
 ): Promise<void> {
@@ -37,7 +37,7 @@ export async function unlike(
   })
 }
 
-export async function countLikes(db: Db, submissionId: string): Promise<number> {
+export async function countLikes(db: DB, submissionId: string): Promise<number> {
   const [row] = await db
     .select({ likes: count() })
     .from(submissionLike)
@@ -46,7 +46,7 @@ export async function countLikes(db: Db, submissionId: string): Promise<number> 
 }
 
 /** Holds the submission's status steady until the transaction ends. */
-async function lockOpenSubmission(tx: Db, submissionId: string): Promise<void> {
+async function lockOpenSubmission(tx: DB, submissionId: string): Promise<void> {
   const [row] = await tx
     .select({ status: submission.status })
     .from(submission)

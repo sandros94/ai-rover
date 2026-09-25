@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isUUIDv7 } from 'unsecure/uuid'
-import type { Db } from '#server/database/db'
+import type { DB } from '#server/database/db'
 import { createUser, findUserByIdentity, linkIdentity } from '#server/repositories/users'
 import { createTestDb, dbErrorOf } from './helpers'
 
-let db: Db
+let db: DB
 let close: () => Promise<void>
 beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())

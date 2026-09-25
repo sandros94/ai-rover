@@ -1,7 +1,7 @@
 import { and, asc, count, eq } from 'drizzle-orm'
 import type { NavMetrics } from '#shared/utils/nav/plan'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError, isUniqueViolation } from '../database/errors'
 import type { StoredJudgment, Submission, SubmissionStatus } from '../database/schema'
 import { round, submission, submissionLike, userAccount } from '../database/schema'
@@ -22,7 +22,7 @@ export interface ListedSubmission extends Submission {
 }
 
 /** Refuses a closed round, and a second open submission by the same user in it. */
-export async function createSubmission(db: Db, input: NewSubmission): Promise<Submission> {
+export async function createSubmission(db: DB, input: NewSubmission): Promise<Submission> {
   const { goal, ...rest } = input
   return db.transaction(async (tx) => {
     const [target] = await tx
@@ -57,7 +57,7 @@ export async function createSubmission(db: Db, input: NewSubmission): Promise<Su
 }
 
 /** Every submission of the round in creation order, whatever its status. */
-export async function listRoundSubmissions(db: Db, roundId: string): Promise<ListedSubmission[]> {
+export async function listRoundSubmissions(db: DB, roundId: string): Promise<ListedSubmission[]> {
   const likes = db
     .select({ submissionId: submissionLike.submissionId, likes: count().as('likes') })
     .from(submissionLike)
@@ -87,7 +87,7 @@ export async function listRoundSubmissions(db: Db, roundId: string): Promise<Lis
 
 /** Settles an open submission; settled ones never change again. */
 export async function setSubmissionStatus(
-  db: Db,
+  db: DB,
   submissionId: string,
   status: Exclude<SubmissionStatus, 'open'>,
 ): Promise<Submission> {
@@ -106,7 +106,7 @@ export async function setSubmissionStatus(
 
 /** Only the submitter may withdraw, and only while the submission is open. */
 export async function withdrawSubmission(
-  db: Db,
+  db: DB,
   submissionId: string,
   options: { userId: string },
 ): Promise<Submission> {
@@ -129,7 +129,7 @@ export async function withdrawSubmission(
   )
 }
 
-async function assertSubmissionExists(db: Db, submissionId: string): Promise<void> {
+async function assertSubmissionExists(db: DB, submissionId: string): Promise<void> {
   const [found] = await db
     .select({ id: submission.id })
     .from(submission)

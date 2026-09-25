@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Db } from '#server/database/db'
+import type { DB } from '#server/database/db'
 import { createMission, getMission, setCurrentStop } from '#server/repositories/missions'
 import { createStop, getStop, listStops } from '#server/repositories/stops'
 import { closeRound, getOpenRound, openRound } from '#server/repositories/rounds'
@@ -7,7 +7,7 @@ import { createSubmission, listRoundSubmissions } from '#server/repositories/sub
 import { createUser } from '#server/repositories/users'
 import { CONFIG, createTestDb, dbErrorOf, seedMission, submissionInput } from './helpers'
 
-let db: Db
+let db: DB
 let close: () => Promise<void>
 beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())

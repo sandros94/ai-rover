@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DriveOutcome } from '#shared/utils/drive'
-import type { Db } from '#server/database/db'
+import type { DB } from '#server/database/db'
 import { closeRound, openRound } from '#server/repositories/rounds'
 import {
   countRecentFailuresNear,
@@ -14,7 +14,7 @@ import { createStop } from '#server/repositories/stops'
 import { createSubmission } from '#server/repositories/submissions'
 import { createTestDb, dbErrorOf, seedMission, submissionInput } from './helpers'
 
-let db: Db
+let db: DB
 let close: () => Promise<void>
 beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())

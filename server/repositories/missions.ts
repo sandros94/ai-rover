@@ -1,24 +1,24 @@
 import { eq } from 'drizzle-orm'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import type { Mission, MissionConfig } from '../database/schema'
 import { mission, stop } from '../database/schema'
 
 export async function createMission(
-  db: Db,
+  db: DB,
   input: { seed: string; worldHash: string; config: MissionConfig; solsEpoch?: Date },
 ): Promise<Mission> {
   const [row] = await db.insert(mission).values(input).returning()
   return row!
 }
 
-export async function getMission(db: Db, missionId: string): Promise<Mission> {
+export async function getMission(db: DB, missionId: string): Promise<Mission> {
   const [row] = await db.select().from(mission).where(eq(mission.id, missionId))
   if (!row) throw new DbError('NOT_FOUND', `Mission ${missionId} does not exist.`)
   return row
 }
 
-export async function setCurrentStop(db: Db, missionId: string, stopId: string): Promise<Mission> {
+export async function setCurrentStop(db: DB, missionId: string, stopId: string): Promise<Mission> {
   return db.transaction(async (tx) => {
     await getMission(tx, missionId)
     const [target] = await tx

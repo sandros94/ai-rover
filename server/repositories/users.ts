@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import type { Db } from '../database/db'
+import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import type { IdentityProvider, UserAccount, UserIdentity } from '../database/schema'
 import { userAccount, userIdentity } from '../database/schema'
@@ -10,7 +10,7 @@ export interface Identity {
 }
 
 export async function createUser(
-  db: Db,
+  db: DB,
   input: { displayName: string; avatarUrl?: string | null; handle?: string | null },
 ): Promise<UserAccount> {
   const [row] = await db.insert(userAccount).values(input).returning()
@@ -18,7 +18,7 @@ export async function createUser(
 }
 
 export async function findUserByIdentity(
-  db: Db,
+  db: DB,
   identity: Identity,
 ): Promise<UserAccount | undefined> {
   const [row] = await db
@@ -33,7 +33,7 @@ export async function findUserByIdentity(
 
 /** Idempotent for the same user; an identity never moves between users. */
 export async function linkIdentity(
-  db: Db,
+  db: DB,
   userId: string,
   identity: Identity,
 ): Promise<UserIdentity> {
