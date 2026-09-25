@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gte, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, sql } from 'drizzle-orm'
 import type { DriveOutcome } from '#shared/utils/drive/segment'
 import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
@@ -6,6 +6,8 @@ import type { Segment } from '../database/schema'
 import { segment, stop } from '../database/schema'
 
 export interface NewSegment {
+  /** Made in code when the id must be known before the row exists (it names the journey blobs). */
+  id?: string
   missionId: string
   roundId: string
   submissionId: string
@@ -60,6 +62,34 @@ export async function createSegment(db: DB, input: NewSegment): Promise<Segment>
       .returning()
     return row!
   })
+}
+
+export async function getSegment(db: DB, segmentId: string): Promise<Segment> {
+  const [row] = await db.select().from(segment).where(eq(segment.id, segmentId))
+  if (!row) throw new DbError('NOT_FOUND', `Segment ${segmentId} does not exist.`)
+  return row
+}
+
+/** The mission's unsettled segment, at most one; its outcome is private, so keep this server-side. */
+export async function getDrivingSegment(db: DB, missionId: string): Promise<Segment | undefined> {
+  const [row] = await db
+    .select()
+    .from(segment)
+    .where(and(eq(segment.missionId, missionId), eq(segment.status, 'driving')))
+    .orderBy(desc(segment.startedAt), desc(segment.id))
+    .limit(1)
+  return row
+}
+
+/** The mission's most recently started segment, settled or not. */
+export async function getLatestSegment(db: DB, missionId: string): Promise<Segment | undefined> {
+  const [row] = await db
+    .select()
+    .from(segment)
+    .where(eq(segment.missionId, missionId))
+    .orderBy(desc(segment.startedAt), desc(segment.id))
+    .limit(1)
+  return row
 }
 
 export type SegmentSettlement =

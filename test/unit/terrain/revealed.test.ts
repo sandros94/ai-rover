@@ -9,6 +9,7 @@ import {
   isRevealed,
   revealDisk,
   revealedOverDisk,
+  revealVertices,
   TerrainError,
 } from '#shared/utils/terrain'
 
@@ -140,6 +141,42 @@ describe('revealedOverDisk', () => {
     expect(terrainErrorOf(() => revealedOverDisk(createRevealedMask(world), disk))?.code).toBe(
       'INVALID_GRID',
     )
+  })
+})
+
+describe('revealVertices', () => {
+  it('adds disk-grid vertices, shared chunk edges included, without touching its input', () => {
+    const empty = createRevealedMask(world)
+    const { width } = first.grid
+    // An interior vertex, and one on a chunk corner shared by four chunks.
+    const interior = { x: 5, y: 7 }
+    const corner = { x: 64, y: 64 }
+    const index = (p: { x: number; y: number }) =>
+      (p.y - first.origin.j) * width + (p.x - first.origin.i)
+    const mask = revealVertices(empty, first, [index(interior), index(corner)])
+    expect(empty.chunks.size).toBe(0)
+    expect(isRevealed(mask, world, interior)).toBe(true)
+    expect(isRevealed(mask, world, corner)).toBe(true)
+    expect(isRevealed(mask, world, { x: 6, y: 7 })).toBe(false)
+    // The corner is held by every chunk that stores it, as revealDisk would.
+    for (const key of ['0,0', '1,0', '0,1', '1,1']) expect(mask.chunks.has(key)).toBe(true)
+    const bits = revealedOverDisk(mask, first)
+    expect(bits.reduce((n, b) => n + b, 0)).toBe(2)
+  })
+
+  it('agrees with revealDisk over the visible vertices', () => {
+    const visible: number[] = []
+    for (let k = 0; k < first.visible.length; k++) if (first.visible[k]) visible.push(k)
+    const viaVertices = revealVertices(createRevealedMask(world), first, visible)
+    const viaDisk = revealDisk(createRevealedMask(world), first)
+    expect(revealedOverDisk(viaVertices, first)).toEqual(revealedOverDisk(viaDisk, first))
+  })
+
+  it('refuses a vertex outside the disk grid', () => {
+    const size = first.grid.width * first.grid.height
+    expect(
+      terrainErrorOf(() => revealVertices(createRevealedMask(world), first, [size]))?.code,
+    ).toBe('OUT_OF_BOUNDS')
   })
 })
 

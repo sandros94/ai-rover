@@ -1,0 +1,70 @@
+import type { Mission, Stop } from '../../database/schema'
+import type { JourneyStore } from '../journey/store'
+import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
+import { computeStopDisk, decodeRevealedMask, defineWorld, worldHash } from '#shared/utils/terrain'
+import { LifecycleError } from './errors'
+
+/**
+ * Worlds and stop disks are pure functions of stored rows, so each process keeps the recent ones.
+ * A disk over the default 500 m radius holds about 1.2 M vertices (≈ 8 MB), hence the small bound.
+ */
+const WORLD_LIMIT = 8
+const DISK_LIMIT = 4
+
+const worlds = new Map<string, World>()
+const disks = new Map<string, StopDisk>()
+
+/**
+ * The mission's world, `defineWorld({ seed, ...config.world })`. Refuses a world whose hash
+ * differs from the stored one: the blobs already published were computed from the stored world,
+ * and a changed default would silently disagree with them.
+ */
+export function missionWorld(
+  mission: Pick<Mission, 'id' | 'seed' | 'config' | 'worldHash'>,
+): World {
+  const cached = worlds.get(mission.id)
+  if (cached) return touch(worlds, mission.id, cached)
+  const world = defineWorld({ seed: mission.seed, ...mission.config.world })
+  const hash = worldHash(world)
+  if (hash !== mission.worldHash) {
+    throw new LifecycleError(
+      'WORLD_MISMATCH',
+      `Mission ${mission.id} was created on world ${mission.worldHash} but its seed and config now build world ${hash}; restore the world defaults it was created with.`,
+    )
+  }
+  return remember(worlds, WORLD_LIMIT, mission.id, world)
+}
+
+/** The disk around a stop, centred on its position. */
+export function stopDisk(world: World, stop: Pick<Stop, 'id' | 'x' | 'y'>): StopDisk {
+  const cached = disks.get(stop.id)
+  if (cached) return touch(disks, stop.id, cached)
+  return remember(disks, DISK_LIMIT, stop.id, computeStopDisk(world, { center: stop }))
+}
+
+/** The journey's revealed mask as of the stop, from its published blob. */
+export async function loadRevealedMask(
+  store: JourneyStore,
+  stop: Pick<Stop, 'id' | 'revealedKey'>,
+): Promise<RevealedMask> {
+  const bytes = await store.getInflated(stop.revealedKey)
+  if (!bytes) {
+    throw new LifecycleError(
+      'NOT_PUBLISHED',
+      `Stop ${stop.id} has no revealed mask at "${stop.revealedKey}" in the journey store; publish the stop before planning from it.`,
+    )
+  }
+  return decodeRevealedMask(bytes)
+}
+
+function touch<V>(cache: Map<string, V>, key: string, value: V): V {
+  cache.delete(key)
+  cache.set(key, value)
+  return value
+}
+
+function remember<V>(cache: Map<string, V>, limit: number, key: string, value: V): V {
+  cache.set(key, value)
+  while (cache.size > limit) cache.delete(cache.keys().next().value!)
+  return value
+}

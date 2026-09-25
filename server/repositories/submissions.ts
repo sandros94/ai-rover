@@ -14,6 +14,10 @@ export interface NewSubmission {
   judgment: StoredJudgment
   metrics: NavMetrics
   summary: SubmissionSummary
+  /** `rejected` stores a refused submission, which holds no place in the round. Default `open`. */
+  status?: 'open' | 'rejected'
+  /** Default: the database's clock. */
+  createdAt?: Date
 }
 
 export interface ListedSubmission extends Submission {
@@ -54,6 +58,12 @@ export async function createSubmission(db: DB, input: NewSubmission): Promise<Su
       )
     }
   })
+}
+
+export async function getSubmission(db: DB, submissionId: string): Promise<Submission> {
+  const [row] = await db.select().from(submission).where(eq(submission.id, submissionId))
+  if (!row) throw new DbError('NOT_FOUND', `Submission ${submissionId} does not exist.`)
+  return row
 }
 
 /** Every submission of the round in creation order, whatever its status. */

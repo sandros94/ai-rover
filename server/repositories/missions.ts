@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import type { Mission, MissionConfig } from '../database/schema'
@@ -15,6 +15,17 @@ export async function createMission(
 export async function getMission(db: DB, missionId: string): Promise<Mission> {
   const [row] = await db.select().from(mission).where(eq(mission.id, missionId))
   if (!row) throw new DbError('NOT_FOUND', `Mission ${missionId} does not exist.`)
+  return row
+}
+
+/** The most recently created active mission; undefined when none is active. */
+export async function getActiveMission(db: DB): Promise<Mission | undefined> {
+  const [row] = await db
+    .select()
+    .from(mission)
+    .where(eq(mission.status, 'active'))
+    .orderBy(desc(mission.createdAt), desc(mission.id))
+    .limit(1)
   return row
 }
 

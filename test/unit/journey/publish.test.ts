@@ -92,6 +92,8 @@ describe('publishSegment', () => {
     )
     expect(last.outcome).toEqual(record.outcome)
     expect(result.written).toHaveLength(slices.length + 1)
+    // The drive ends when its last slice is released.
+    expect(result.endsAt).toBe(startedAt + slices.length * manifest.sliceSeconds * 1000)
   })
 
   it('refuses a bad segment id or start time before writing anything', async () => {

@@ -1,0 +1,107 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { DB } from '#server/database/db'
+import { listRoundSubmissions, withdrawSubmission } from '#server/repositories/submissions'
+import { createMissionAtStop } from '#server/utils/mission/create'
+import { LifecycleError } from '#server/utils/mission/errors'
+import { submitGoal } from '#server/utils/mission/submit'
+import { tickMission } from '#server/utils/mission/tick'
+import { at, createTestDb, dbErrorOf, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
+
+vi.setConfig({ testTimeout: 60_000 })
+
+let db: DB
+let close: () => Promise<void>
+beforeAll(async () => ({ db, close } = await createTestDb()))
+afterAll(() => close())
+
+async function landed(judge?: Parameters<typeof fakeJev>[0]) {
+  const { store } = memoryStore()
+  const created = await createMissionAtStop(db, {
+    store,
+    seed: 'mars',
+    at: { x: 0, y: 0 },
+    now: T0,
+  })
+  const jev = fakeJev(judge)
+  const [ada, bob] = await users(db, 'Ada', 'Bob')
+  const submit = (userId: string, goal: { x: number; y: number }, now = at(T0, MINUTE)) =>
+    submitGoal(db, { store, jev: jev.client, missionId: created.mission.id, userId, goal, now })
+  return { ...created, store, jev, ada: ada!, bob: bob!, submit }
+}
+
+describe('submitGoal', () => {
+  it('refuses goals outside the distance band without asking Jev', async () => {
+    const { ada, submit, jev, round } = await landed()
+    expect(await submit(ada.id, { x: 0, y: 20 })).toEqual({
+      accepted: false,
+      reason: 'too-near',
+      submission: null,
+    })
+    expect(await submit(ada.id, { x: 0, y: 300 })).toEqual({
+      accepted: false,
+      reason: 'too-far',
+      submission: null,
+    })
+    expect(jev.summaries).toHaveLength(0)
+    expect(await listRoundSubmissions(db, round.id)).toEqual([])
+  })
+
+  it('stores a valid goal as an open submission with its judgment, metrics and summary', async () => {
+    const { ada, submit, jev, round } = await landed()
+    const result = await submit(ada.id, { x: 0.4, y: 80.3 })
+    expect(result.accepted).toBe(true)
+    const { submission } = result
+    expect(submission).toMatchObject({
+      roundId: round.id,
+      userId: ada.id,
+      status: 'open',
+      goalX: 0,
+      goalY: 80,
+      createdAt: at(T0, MINUTE),
+      judgment: { verdict: 'accept', risk: { score: 1 } },
+      metrics: { reached: true },
+    })
+    expect(submission!.judgment).not.toHaveProperty('cached')
+    expect(jev.summaries).toEqual([submission!.summary])
+  })
+
+  it('stores a rejected verdict as a rejected submission and reports it', async () => {
+    const { ada, submit, round } = await landed(() => ({ feasible: 0.1, verdict: 'reject' }))
+    const result = await submit(ada.id, { x: 0, y: 80 })
+    expect(result).toMatchObject({
+      accepted: false,
+      reason: 'judged-infeasible',
+      submission: { status: 'rejected', judgment: { verdict: 'reject' } },
+    })
+    // A rejection holds no place in the round: the user may submit again.
+    const [listed] = await listRoundSubmissions(db, round.id)
+    expect(listed?.status).toBe('rejected')
+    expect((await submit(ada.id, { x: 80, y: 0 })).submission?.status).toBe('rejected')
+  })
+
+  it('refuses a second open submission by the same user, and accepts one after withdrawal', async () => {
+    const { ada, submit, jev } = await landed()
+    const first = await submit(ada.id, { x: 0, y: 80 })
+    const error = await dbErrorOf(submit(ada.id, { x: 80, y: 0 }))
+    expect(error?.code).toBe('ALREADY_SUBMITTED')
+    // Refused before planning, so Jev is not paid for it.
+    expect(jev.summaries).toHaveLength(1)
+    await withdrawSubmission(db, first.submission!.id, { userId: ada.id })
+    const again = await submit(ada.id, { x: 80, y: 0 })
+    expect(again).toMatchObject({ accepted: true, submission: { status: 'open', goalX: 80 } })
+  })
+
+  it('keeps the author of the drive in progress out of the next round', async () => {
+    const { ada, bob, submit, store, mission } = await landed()
+    await submit(ada.id, { x: 0, y: 80 })
+    const closed = at(T0, MINUTE + 5 * MINUTE)
+    const tick = await tickMission(db, { store, missionId: mission.id, now: closed })
+    expect(tick.started).not.toBeNull()
+    const during = at(closed, MINUTE)
+    const refused = await submit(ada.id, { x: 0, y: 160 }, during).catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(LifecycleError)
+    expect((refused as LifecycleError).code).toBe('AUTHOR_DRIVING')
+    const other = await submit(bob.id, { x: 0, y: 160 }, during)
+    expect(other.accepted).toBe(true)
+  })
+})

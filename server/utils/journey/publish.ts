@@ -6,6 +6,7 @@ import {
   segmentManifestKey,
   segmentSliceKey,
   sliceRecord,
+  sliceReleaseAt,
 } from '#shared/utils/drive'
 import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import {
@@ -50,12 +51,13 @@ export async function publishStop(
 /**
  * Publishes a segment record as time-gated slices of the default length, each served once its
  * window has passed, then its manifest stamped with the segment id and wall-clock start (epoch
- * milliseconds). The manifest goes last, so a reader that finds it finds every slice.
+ * milliseconds). The manifest goes last, so a reader that finds it finds every slice. `endsAt` is
+ * the release time of the last slice, epoch milliseconds: the drive's public end.
  */
 export async function publishSegment(
   store: JourneyStore,
   options: { record: SegmentRecord; segmentId: string; startedAt: number },
-): Promise<{ manifestKey: string; written: PutResult[] }> {
+): Promise<{ manifestKey: string; written: PutResult[]; endsAt: number }> {
   const { record, segmentId, startedAt } = options
   assertSegmentId(segmentId)
   if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
@@ -74,5 +76,6 @@ export async function publishSegment(
   const stored: StoredSegmentManifest = { ...manifest, segmentId, startedAt }
   const manifestKey = segmentManifestKey(segmentId)
   written.push(await store.putJson(manifestKey, stored))
-  return { manifestKey, written }
+  const endsAt = sliceReleaseAt(startedAt, slices.length - 1, manifest.sliceSeconds)
+  return { manifestKey, written, endsAt }
 }

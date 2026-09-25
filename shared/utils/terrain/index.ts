@@ -33,6 +33,7 @@ export {
   REVEALED_HEADER_BYTES,
   revealDisk,
   revealedOverDisk,
+  revealVertices,
 } from './revealed'
 export type { StopManifest } from './manifest'
 export {

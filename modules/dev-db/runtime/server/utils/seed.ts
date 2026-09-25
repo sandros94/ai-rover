@@ -1,20 +1,8 @@
-import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
-import {
-  computeStopDisk,
-  createRevealedMask,
-  defineWorld,
-  revealDisk,
-  revealedKey,
-  worldHash,
-} from '#shared/utils/terrain'
 import { mission } from '#server/database/schema'
-import { createMission, setCurrentStop } from '#server/repositories/missions'
-import { openRound } from '#server/repositories/rounds'
-import { createStop } from '#server/repositories/stops'
 import { useDB } from '#server/utils/db'
-import { publishStop } from '#server/utils/journey/publish'
 import type { JourneyStore } from '#server/utils/journey/store'
 import { createJourneyStore } from '#server/utils/journey/store'
+import { createMissionAtStop } from '#server/utils/mission/create'
 import {
   assertLoopback,
   DatabaseRefusedError,
@@ -54,10 +42,7 @@ export class MissionExistsError extends Error {
   }
 }
 
-/**
- * Lands a mission: stop 0 published to the journey store, then the mission, its stop 0 (made
- * current) and an open round from it, in one transaction.
- */
+/** Lands a mission on an empty local database through the lifecycle's own landing. */
 export async function seedLocalMission(
   url: string | undefined,
   directory: string,
@@ -71,41 +56,22 @@ export async function seedLocalMission(
   const [existing] = await db.select({ id: mission.id }).from(mission).limit(1)
   if (existing) throw new MissionExistsError(existing.id)
 
-  const seed = input.seed ?? 'mars'
-  const at = { x: input.x ?? 0, y: input.y ?? 0 }
-  const world = defineWorld({ seed })
-  const hash = worldHash(world)
-  const disk = computeStopDisk(world, { center: at })
-  const mask = revealDisk(createRevealedMask(world), disk)
-  const published = await publishStop(input.store ?? createJourneyStore(), {
-    world,
-    disk,
-    mask,
-    stopIndex: 0,
-  })
-
-  const ids = await db.transaction(async (tx) => {
-    const created = await createMission(tx, {
-      seed,
-      worldHash: hash,
-      config: { world: {}, rules: DEFAULT_MISSION_RULES },
-    })
-    const stop = await createStop(tx, {
-      missionId: created.id,
-      index: 0,
-      ...at,
-      headingRad: 0,
-      manifestKey: published.manifestKey,
-      revealedKey: revealedKey(hash, 0),
-    })
-    const round = await openRound(tx, { missionId: created.id, fromStopId: stop.id })
-    await setCurrentStop(tx, created.id, stop.id)
-    return { missionId: created.id, stopId: stop.id, roundId: round.id }
+  const {
+    mission: created,
+    stop,
+    round,
+    published,
+  } = await createMissionAtStop(db, {
+    store: input.store ?? createJourneyStore(),
+    seed: input.seed ?? 'mars',
+    at: { x: input.x ?? 0, y: input.y ?? 0 },
   })
 
   return {
-    ...ids,
-    worldHash: hash,
+    missionId: created.id,
+    stopId: stop.id,
+    roundId: round.id,
+    worldHash: created.worldHash,
     manifestKey: published.manifestKey,
     skippedChunks: published.skipped.length,
     bytes: {

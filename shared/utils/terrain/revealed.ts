@@ -57,6 +57,59 @@ export function revealDisk(mask: RevealedMask, disk: StopDisk): RevealedMask {
 }
 
 /**
+ * A new mask with the given disk-grid vertices (`j · width + i`, as a segment record's reveals
+ * list them) OR-ed in; `mask` is left untouched. A vertex on a chunk edge is set in every chunk
+ * that stores it, as {@link revealDisk} does.
+ */
+export function revealVertices(
+  mask: RevealedMask,
+  disk: StopDisk,
+  vertices: ArrayLike<number>,
+): RevealedMask {
+  assertDiskAligned(mask, disk, 'revealVertices')
+  const { vertexCount } = mask
+  const cells = vertexCount - 1
+  const { width, height } = disk.grid
+  const chunks = new Map(mask.chunks)
+  const copied = new Set<string>()
+  for (let n = 0; n < vertices.length; n++) {
+    const k = vertices[n]!
+    if (!Number.isSafeInteger(k) || k < 0 || k >= width * height) {
+      throw new TerrainError(
+        'OUT_OF_BOUNDS',
+        `revealVertices: vertex ${k} is outside the ${width}×${height} disk grid; pass indices from a record driven over this disk.`,
+      )
+    }
+    const gi = k % width
+    const i = disk.origin.i + gi
+    const j = disk.origin.j + (k - gi) / width
+    const cx = Math.floor(i / cells)
+    const cy = Math.floor(j / cells)
+    const a = i - cx * cells
+    const b = j - cy * cells
+    for (const [ox, oy] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      if ((ox && a !== 0) || (oy && b !== 0)) continue
+      const key = `${cx - ox},${cy - oy}`
+      const at = (b + oy * cells) * vertexCount + a + ox * cells
+      let bits = chunks.get(key)
+      if (bits?.[at]) continue
+      if (!copied.has(key)) {
+        bits = bits ? bits.slice() : new Uint8Array(vertexCount * vertexCount)
+        chunks.set(key, bits)
+        copied.add(key)
+      }
+      bits![at] = 1
+    }
+  }
+  return { version: 1, cellSize: mask.cellSize, vertexCount, chunks }
+}
+
+/**
  * Per disk-grid vertex: 1 where the mask holds it as seen. Covers the whole grid, including
  * vertices outside the disk radius and in chunks the disk does not list.
  */

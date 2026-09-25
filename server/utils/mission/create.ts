@@ -1,0 +1,70 @@
+import type { DB } from '../../database/db'
+import type { Mission, Round, Stop } from '../../database/schema'
+import { createMission, setCurrentStop } from '../../repositories/missions'
+import { openRound } from '../../repositories/rounds'
+import { createStop } from '../../repositories/stops'
+import { publishStop } from '../journey/publish'
+import type { JourneyStore } from '../journey/store'
+import type { MissionRules } from '#shared/utils/mission'
+import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import type { WorldConfig } from '#shared/utils/terrain'
+import {
+  computeStopDisk,
+  createRevealedMask,
+  defineWorld,
+  revealDisk,
+  revealedKey,
+  worldHash,
+} from '#shared/utils/terrain'
+
+export interface NewMissionAtStop {
+  store: JourneyStore
+  /** World seed. */
+  seed: string
+  /** The landing stop, world metres. */
+  at: { x: number; y: number }
+  /** World overrides stored with the mission; default none. */
+  world?: Omit<WorldConfig, 'seed'>
+  /** Default {@link DEFAULT_MISSION_RULES}. */
+  rules?: MissionRules
+  /** Mission start (the sol clock's zero) and the opening of round 0. Default: now. */
+  now?: Date
+}
+
+export interface MissionAtStop {
+  mission: Mission
+  stop: Stop
+  round: Round
+  published: Awaited<ReturnType<typeof publishStop>>
+}
+
+/**
+ * Lands a mission: publishes stop 0 (its disk, the viewshed from it as the first revealed mask,
+ * its manifest), then creates the mission, stop 0 made current and round 0 open from it, in one
+ * transaction. Blobs go first so a stop row never names a blob that is not there.
+ */
+export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Promise<MissionAtStop> {
+  const { store, seed, at, now = new Date() } = input
+  const config = { world: input.world ?? {}, rules: input.rules ?? DEFAULT_MISSION_RULES }
+  const world = defineWorld({ seed, ...config.world })
+  const hash = worldHash(world)
+  const disk = computeStopDisk(world, { center: at })
+  const mask = revealDisk(createRevealedMask(world), disk)
+  const published = await publishStop(store, { world, disk, mask, stopIndex: 0 })
+
+  return db.transaction(async (tx) => {
+    const created = await createMission(tx, { seed, worldHash: hash, config, solsEpoch: now })
+    const stop = await createStop(tx, {
+      missionId: created.id,
+      index: 0,
+      x: at.x,
+      y: at.y,
+      headingRad: 0,
+      manifestKey: published.manifestKey,
+      revealedKey: revealedKey(hash, 0),
+    })
+    const round = await openRound(tx, { missionId: created.id, fromStopId: stop.id, opensAt: now })
+    const mission = await setCurrentStop(tx, created.id, stop.id)
+    return { mission, stop, round, published }
+  })
+}

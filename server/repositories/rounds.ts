@@ -1,8 +1,8 @@
-import { and, eq, ne } from 'drizzle-orm'
+import { and, asc, eq, isNull, ne } from 'drizzle-orm'
 import type { DB } from '../database/db'
 import { DbError, isUniqueViolation } from '../database/errors'
 import type { Round } from '../database/schema'
-import { round, stop, submission } from '../database/schema'
+import { round, segment, stop, submission } from '../database/schema'
 
 /** Refuses while the mission has an open round, and a stop of another mission. */
 export async function openRound(
@@ -41,6 +41,18 @@ export async function getOpenRound(db: DB, missionId: string): Promise<Round | u
     .from(round)
     .where(and(eq(round.missionId, missionId), eq(round.status, 'open')))
   return row
+}
+
+/** The oldest closed round of the mission whose winner has no segment yet. */
+export async function findUnresolvedRound(db: DB, missionId: string): Promise<Round | undefined> {
+  const [row] = await db
+    .select({ round })
+    .from(round)
+    .leftJoin(segment, eq(segment.roundId, round.id))
+    .where(and(eq(round.missionId, missionId), eq(round.status, 'closed'), isNull(segment.id)))
+    .orderBy(asc(round.closesAt), asc(round.id))
+    .limit(1)
+  return row?.round
 }
 
 /**
