@@ -18,3 +18,5 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 14. Client-side planner preview performance on phones over a 500 m disk of terrain.
 15. Turn-in-place rate of 3°/s: no published Perseverance figure found.
 16. Slip model constants (gain 1.2, stuck above 0.6 for 3 m, loose-regolith noise at 80 m wavelength): judgement calls, untested against the JPL slip data beyond the qualitative 50–94 % figures.
+17. `drizzle-orm/netlify-db` driver against a deployed Netlify Database (HTTP + WebSocket pool inside Functions): only PGlite and the local emulation have run.
+18. Migration application: Netlify applies `netlify/database/migrations/*/migration.sql` at deploy; the local emulation applies nothing, so development needs its own migrate step.

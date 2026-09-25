@@ -17,7 +17,9 @@
     "test:unit": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",
     "test:nuxt": "vitest run --project nuxt",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
   },
   "dependencies": {
     "@iconify-json/lucide": "npm:@iconify-json/lucide@^1.2.135",
@@ -27,22 +29,26 @@
     "@nuxt/icon": "npm:@nuxt/icon@^2.5.1",
     "@nuxt/ui": "npm:@nuxt/ui@^4.11.1",
     "@typesafe-ai/sdk": "npm:@typesafe-ai/sdk@^0.6.0",
+    "drizzle-orm": "npm:drizzle-orm@1.0.0-rc.4",
     "h3": "npm:h3@2.0.1-rc.29",
     "nitro": "npm:nitro@3.0.260610-beta",
     "nuxt": "npm:nuxt-nightly@5.0.0-29796419.a2fd06ab",
     "simplex-noise": "^4.0.3",
     "tailwindcss": "npm:tailwindcss@^4.3.3",
+    "unsecure": "npm:unsecure@^0.3.1",
     "valibot": "npm:valibot@^1.5.0",
     "vue": "npm:vue@^3.5.43"
   },
   "devDependencies": {
     "@dxup/unimport": "npm:@dxup/unimport@^0.1.2",
+    "@electric-sql/pglite": "npm:@electric-sql/pglite@0.5.8",
     "@golar/vue": "npm:@golar/vue@^0.1.10",
     "@netlify/database-dev": "npm:@netlify/database-dev@^1.0.1",
     "@netlify/nuxt": "npm:@netlify/nuxt@^1.0.1",
     "@nuxt/test-utils": "npm:@nuxt/test-utils-nightly@4.1.1-20260826-115945-218c180",
     "@playwright/test": "npm:@playwright/test@^1.63.0",
     "@vue/test-utils": "npm:@vue/test-utils@^2.5.1",
+    "drizzle-kit": "npm:drizzle-kit@1.0.0-rc.4",
     "golar": "npm:golar@^0.1.10",
     "h3-next": "npm:h3@2.0.1-rc.29",
     "happy-dom": "npm:happy-dom@^20.14.5",

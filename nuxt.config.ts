@@ -10,6 +10,7 @@ const TERRAIN = fileURLToPath(new URL('./shared/utils/terrain/index.ts', import.
 const NAV = fileURLToPath(new URL('./shared/utils/nav/index.ts', import.meta.url))
 const ROVER = fileURLToPath(new URL('./shared/utils/rover/index.ts', import.meta.url))
 const DRIVE = fileURLToPath(new URL('./shared/utils/drive/index.ts', import.meta.url))
+const MISSION = fileURLToPath(new URL('./shared/utils/mission/index.ts', import.meta.url))
 
 export default defineNuxtConfig({
   compatibilityDate: 'latest',
@@ -24,8 +25,8 @@ export default defineNuxtConfig({
     typesafeToken: '',
   },
 
-  imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE] },
-  nitro: { imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE] } },
+  imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION] },
+  nitro: { imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION] } },
 
   /**
    * Local Netlify emulation under `dev` and `test`. Edge Functions are off: the project deploys
