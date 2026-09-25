@@ -19,6 +19,12 @@ Current, settled design decisions with their reasons. This file describes the pr
 - **Each stationary point has a manifest.** A JSON manifest (validated with valibot) carries an integer `version` for future migrations, the world config hash, the chunk coordinates and blob keys of the disk, and the key of the accumulated revealed mask, stored as its own sparse binary blob per stop while chunks stay immutable and cacheable forever. Blob keys are pure functions of the world hash: `terrain/{hash}/chunks/{cx}_{cy}.bin`, `terrain/{hash}/revealed/{stop}.bin`, `terrain/{hash}/stops/{stop}.json`.
 - **Terrain is computed on demand, server-side, and served as data.** The height function is deterministic from the mission seed, but the expensive parts (chunks, cost map, pathability, viewshed) are computed only for a disk of about twice the maximum segment length (500 m) around each newly reached stationary point. The resulting chunks and revealed mask are stored as blobs and served through the CDN; browsers fetch them and never generate terrain themselves, so everyone sees the same ground and the client cannot manipulate it. CPU time, cost and speed of this step are benchmarked and optimised over time.
 
+## Navigation
+
+- **Route by Theta\*, execute as arcs.** The server plans a segment with any-angle Theta\* over the 1 m cost map (slope² cost, impassable above the slope limit, unrevealed cells at a penalty as in AutoNav), then smooths the polyline into turn-in-place and constant-curvature arc motions for execution. Plain A\* is the fallback if server compute proves too heavy in testing.
+- **Navigation metrics are first-class.** Every plan reports path length, straight-line distance, detour ratio, slope statistics, unrevealed fraction, turn count, expansions and compute time. They serve development, feed Jev's state, and are shown publicly as the mission's navigation telemetry.
+- **Biomes are planned.** Terrain generation will carry distinct biomes (plains, crater fields, dune fields, rocky ground and so on), and the rover "analyses" the ground it sees so that people can read those findings on the map and plan differently for each. Not designed yet; recorded so the terrain model keeps room for it.
+
 ## Architecture
 
 - **Code plans and simulates; Jev judges.** Jev returns typed judgments (Choice / Noul / Score) over state that code supplies and is documented as unreliable at arithmetic, so it never produces driving commands. Code runs the path planner and the producer; one Jev request per submission returns `feasible`, `distance_band`, `distance_confidence`, `time_confidence` and `risk`. The confidence scores are the vote tie-break weights. A candidate-route Choice (code generates 3–8 routes, Jev picks) is to be tested early as an addition, not a replacement. See `research/typesafe-jev.md`.
@@ -38,7 +44,9 @@ Current, settled design decisions with their reasons. This file describes the pr
 ## Code layout and data formats
 
 - **Terrain code is shared, pure TypeScript.** Height function, masks, planner and viewshed live under `shared/utils/terrain/` (the folder Nuxt auto-imports) with no Node or browser API, so the server computes disks with exactly the code the browser's preview planner runs over fetched chunks.
-- **Chunks are binary.** Each chunk is one blob: a small fixed header, `Float32` heights, `Uint8` masks. No parse cost, compact storage. Compression is added at the storage layer if the decompression cost on the client stays negligible.
+- **Chunks are binary and deflated.** Each chunk is one blob: a small fixed header, `Float32` heights, `Uint8` masks, deflated at write time with the web-standard `CompressionStream` and inflated natively in the browser. No parse cost, compact storage.
+- **The browser loads progressively.** The chunks under the pick ring and the viewport come first so the page shows ground immediately; the rest of the disk and any replay data load lazily, since a visitor checking in mid-segment may never replay it.
+- **Dev-only code is tagged.** Throwaway routes, pages and fixtures carry a `TODO(dev-only)` comment so they can be found and removed in one search.
 - **Scale parameters are world configuration, not constants.** Chunk size (64 m), cell size (1 m), mast height (2 m), slope limit (16°) and crater statistics are fields of the world definition, so they can be tuned without touching the algorithms.
 
 ## Withdrawn
@@ -48,7 +56,8 @@ Current, settled design decisions with their reasons. This file describes the pr
 
 ## Open questions
 
-- **Per-stop payload to the browser:** a 500 m disk is 224 chunks, ~4.7 MB raw. Options: deflate at the storage layer, fetch only the chunks within the pick ring first, or a 16-bit centimetre height encoding.
+- **Deflate ratio on chunk blobs:** unmeasured; a 500 m disk is ~4.7 MB raw. A 16-bit centimetre height encoding stays in reserve if deflate alone is not enough.
+- **Biome design:** which biomes, how they are generated (noise-selected regions blending parameter sets), what the rover's analysis reports and how Jev uses it.
 
 - **Vote updates:** like counts ride the same polled mission-state endpoint (short CDN TTL with stale-while-revalidate, purged by tag on each like) or get their own endpoint with a shorter TTL. The reference site checked for a Netlify WebSocket pattern turned out to run on Vercel with a separate PartyKit worker on Cloudflare for its live counters which is the split-worker option, not a Netlify-native one.
 - **Terrain scale defaults:** the 64 m / 1 m / 16° defaults are starting points and the default relief is benign (almost everything traversable, see `research/measurements.md`). `research/rover-geometry-mars-terrain.md` recommends, from MOLA and HiRISE statistics: ~10 m RMS relief at 1 km with Hurst exponent 0.7 (octave gain ~0.62), ~250 craters/km² with a D^-2.8 cumulative size law, shallower degraded bowls (depth/diameter 0.05–0.1, 0.2 only when fresh), plus a rock population (cumulative fractional area k ≈ 0.07–0.10) the model does not have yet. Apply once the planner exists and blocked ground can be judged.

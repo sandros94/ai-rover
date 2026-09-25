@@ -20,7 +20,9 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 
 ## Phase 2 — Planner + producer (server, pure functions over Phase 1)
 
-- A*/Theta* over the 1 m costmap (slope² + roughness + distance) on revealed cells, unseen cells at penalty cost; 0.25 m clearance checks along the path sampled from the analytic height function (ENav/ACE-shaped). Roughness lives here, not in the 1 m chunk masks, where a smooth height function leaves it near zero.
+- Dev-only 2D shaded-relief viewer of a stop disk (tagged `TODO(dev-only)`) to see the ground while tuning relief and craters.
+
+- Theta* over the 1 m costmap (slope² + distance) on revealed cells, unrevealed cells at penalty cost, polyline smoothed into turn-in-place + arc motions; navigation metrics with every plan; 0.25 m clearance checks along the path sampled from the analytic height function (ENav/ACE-shaped). Roughness lives here, not in the 1 m chunk masks, where a smooth height function leaves it near zero.
 - Producer drives the true terrain and replans on discovery; stops at the last safe pose when the way is blocked.
 - Kinematic terrain-following producer (Mars gravity, lunar look) → keyframes; failure detection (slope, obstacle, slip) → failed record with death pose.
 - Safe-stop detection → intermediate checkpoint record (progress kept) vs hazard → failed record.
@@ -49,5 +51,9 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment.
 
 ## Phase 7 — Failure voting, resets, moderation
+
+## Later — Biomes
+
+- Biome regions in the height function (parameter sets selected by low-frequency noise), rover ground analysis surfaced on the map, biome labels in Jev state.
 
 - Community "not moving" vote fallback, 3-strike reset to the previous checkpoint, exclusion zone around failed spots for new submissions.
