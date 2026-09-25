@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local database</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1f2328;
+        --muted: #656d76;
+        --bg: #ffffff;
+        --line: #d0d7de;
+        --ok: #1a7f37;
+        --bad: #cf222e;
+        --warn: #9a6700;
+        font:
+          14px/1.45 system-ui,
+          sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6edf3;
+          --muted: #8d96a0;
+          --bg: #151b23;
+          --line: #3d444d;
+          --ok: #3fb950;
+          --bad: #f85149;
+          --warn: #d29922;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 20px 0 6px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 4px 8px 4px 0;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      code {
+        font:
+          12px ui-monospace,
+          monospace;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 10px;
+      }
+      input[type='number'] {
+        width: 6em;
+      }
+      button:hover {
+        border-color: var(--muted);
+      }
+      button.danger {
+        color: var(--bad);
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .bad {
+        color: var(--bad);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .refusal {
+        border: 1px solid var(--bad);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-top: 8px;
+      }
+      #log {
+        font:
+          12px/1.4 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px;
+        max-height: 240px;
+        overflow: auto;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Local database <span id="state"></span></h1>
+    <div class="row">
+      <span>Host <code id="host">…</code></span>
+      <span id="blobs"></span>
+    </div>
+    <div id="refusal" class="refusal" hidden></div>
+
+    <h2>Actions</h2>
+    <div class="row">
+      <button id="refresh">Refresh</button>
+      <button id="migrate">Apply migrations</button>
+      <button id="reset" class="danger">Reset database</button>
+      <button id="clear" class="danger">Clear journey blobs</button>
+    </div>
+    <div class="row" style="margin-top: 8px">
+      <label>Seed <input id="seed" value="mars" size="10" /></label>
+      <label>x <input id="x" type="number" value="0" /></label>
+      <label>y <input id="y" type="number" value="0" /></label>
+      <label><input id="force" type="checkbox" /> reset first</label>
+      <button id="seed-mission">Seed mission</button>
+    </div>
+
+    <h2>Migrations</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>State</th>
+          <th>Digest recorded</th>
+        </tr>
+      </thead>
+      <tbody id="migrations"></tbody>
+    </table>
+
+    <h2>Tables</h2>
+    <table>
+      <tbody id="counts"></tbody>
+    </table>
+
+    <h2>Log</h2>
+    <pre id="log"></pre>
+
+    <script>
+      const BASE = '/__jev/db'
+      const $ = (id) => document.getElementById(id)
+
+      function log(line, cls) {
+        const entry = document.createElement('div')
+        entry.textContent = `${new Date().toLocaleTimeString()}  ${line}`
+        if (cls) entry.className = cls
+        $('log').prepend(entry)
+      }
+
+      function cell(tr, text, cls) {
+        const td = tr.insertCell()
+        td.textContent = text
+        if (cls) td.className = cls
+      }
+
+      function render(status) {
+        $('host').textContent = status.url
+        $('state').textContent = !status.loopback
+          ? '· not on this machine'
+          : status.ready
+            ? '· ready'
+            : status.refusal
+              ? '· refused'
+              : '· pending migrations'
+        $('state').className = status.ready
+          ? 'ok'
+          : status.refusal || !status.loopback
+            ? 'bad'
+            : 'warn'
+        $('blobs').textContent =
+          `· ${status.blobs.keys} key(s) in blob store "${status.blobs.store}"`
+        $('refusal').hidden = !status.refusal
+        $('refusal').textContent = status.refusal ?? ''
+
+        const migrations = $('migrations')
+        migrations.replaceChildren()
+        for (const m of status.applied) {
+          const tr = migrations.insertRow()
+          cell(tr, m.name)
+          if (m.fileDigest === null) cell(tr, 'applied, file removed', 'bad')
+          else if (m.drifted) cell(tr, 'applied, file edited since', 'bad')
+          else cell(tr, 'applied', 'ok')
+          cell(tr, m.recordedAt ? new Date(m.recordedAt).toLocaleString() : '—')
+        }
+        for (const name of status.pending) {
+          const tr = migrations.insertRow()
+          cell(tr, name)
+          cell(tr, 'pending', 'warn')
+          cell(tr, '—')
+        }
+
+        const counts = $('counts')
+        counts.replaceChildren()
+        for (const [table, n] of Object.entries(status.counts)) {
+          const tr = counts.insertRow()
+          cell(tr, table)
+          cell(tr, String(n))
+        }
+      }
+
+      async function call(method, path, body) {
+        const response = await fetch(BASE + path, {
+          method,
+          headers: body ? { 'content-type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        })
+        const data = await response.json().catch(() => null)
+        if (!response.ok)
+          throw new Error(data?.message ?? `${response.status} ${response.statusText}`)
+        return data
+      }
+
+      async function act(label, run) {
+        try {
+          const result = await run()
+          log(`${label}: ${JSON.stringify(result)}`, 'ok')
+        } catch (error) {
+          log(`${label}: ${error.message}`, 'bad')
+        }
+        try {
+          render(await call('GET', '/status'))
+        } catch (error) {
+          log(`status: ${error.message}`, 'bad')
+        }
+      }
+
+      $('refresh').onclick = () => act('refresh', async () => 'ok')
+      $('migrate').onclick = () =>
+        act('migrate', async () => (await call('POST', '/migrate')).applied.map((m) => m.name))
+      $('reset').onclick = () => {
+        if (confirm('Drop every schema of the local database and apply the migrations again?')) {
+          act('reset', async () => (await call('POST', '/reset')).applied.map((m) => m.name))
+        }
+      }
+      $('clear').onclick = () => {
+        if (confirm('Delete every key of the local journey blob store?')) {
+          act('clear journey', () => call('POST', '/journey/clear'))
+        }
+      }
+      $('seed-mission').onclick = () =>
+        act('seed', () =>
+          call('POST', '/seed', {
+            seed: $('seed').value,
+            x: Number($('x').value),
+            y: Number($('y').value),
+            force: $('force').checked,
+          }),
+        )
+
+      act('status', async () => 'loaded')
+    </script>
+  </body>
+</html>

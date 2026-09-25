@@ -16,6 +16,8 @@ export interface BlobStore {
     options: { type: 'arrayBuffer' },
   ): Promise<{ data: ArrayBuffer; metadata: Record<string, unknown> } | null>
   getMetadata(key: string): Promise<{ metadata: Record<string, unknown> } | null>
+  list(options: { prefix?: string }): Promise<{ blobs: { key: string }[] }>
+  delete(key: string): Promise<unknown>
 }
 
 const MetadataSchema = v.object({
@@ -46,6 +48,9 @@ export interface JourneyStore {
   ): Promise<{ bytes: Uint8Array<ArrayBuffer>; metadata: JourneyBlobMetadata } | null>
   getInflated(key: string): Promise<Uint8Array<ArrayBuffer> | null>
   getJson(key: string): Promise<unknown>
+  /** Every stored key starting with `prefix`, in no particular order. */
+  listKeys(prefix?: string): Promise<string[]>
+  delete(key: string): Promise<void>
 }
 
 /**
@@ -53,7 +58,8 @@ export interface JourneyStore {
  * Blobs store named {@link JOURNEY_STORE_NAME}, so a reader sees a blob as soon as it is written.
  */
 export function createJourneyStore(options: { store?: BlobStore } = {}): JourneyStore {
-  const blobs = options.store ?? getStore({ name: JOURNEY_STORE_NAME, consistency: 'strong' })
+  const blobs: BlobStore =
+    options.store ?? getStore({ name: JOURNEY_STORE_NAME, consistency: 'strong' })
 
   async function putImmutable(
     key: string,
@@ -100,6 +106,10 @@ export function createJourneyStore(options: { store?: BlobStore } = {}): Journey
     getJson: async (key) => {
       const bytes = await getInflated(key)
       return bytes && JSON.parse(new TextDecoder().decode(bytes))
+    },
+    listKeys: async (prefix = '') => (await blobs.list({ prefix })).blobs.map((blob) => blob.key),
+    delete: async (key) => {
+      await blobs.delete(key)
     },
   }
 }

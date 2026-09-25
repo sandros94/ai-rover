@@ -67,4 +67,21 @@ describe('journey store', () => {
     await blobs.set('raw', new ArrayBuffer(4), { metadata: {} })
     await expect(createJourneyStore({ store: blobs }).get('raw')).rejects.toThrow(/metadata/)
   })
+
+  it('lists keys under a prefix and deletes one', async () => {
+    const blobs = new MemoryBlobs()
+    const store = createJourneyStore({ store: blobs })
+    for (const key of ['terrain/a/chunks/0_0.bin', 'terrain/a/stops/0.json', 'segments/s/0.bin']) {
+      await store.putJson(key, {})
+    }
+    expect((await store.listKeys('terrain/')).toSorted()).toEqual([
+      'terrain/a/chunks/0_0.bin',
+      'terrain/a/stops/0.json',
+    ])
+    expect(await store.listKeys()).toHaveLength(3)
+
+    await store.delete('terrain/a/stops/0.json')
+    expect(await store.has('terrain/a/stops/0.json')).toBe(false)
+    expect(await store.listKeys('terrain/')).toEqual(['terrain/a/chunks/0_0.bin'])
+  })
 })

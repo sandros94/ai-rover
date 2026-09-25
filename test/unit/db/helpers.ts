@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url'
-import { PGlite } from '@electric-sql/pglite'
-import { drizzle } from 'drizzle-orm/pglite'
-import { migrate } from 'drizzle-orm/pglite/migrator'
+import { getDatabase } from '@netlify/database'
+import { applyMigrations, NetlifyDB } from '@netlify/database-dev'
+import { drizzle } from 'drizzle-orm/netlify-db'
 import type { DB } from '#server/database/db'
 import type { MissionConfig, StoredJudgment } from '#server/database/schema'
 import { relations } from '#server/database/schema'
@@ -13,17 +13,28 @@ import { createStop } from '#server/repositories/stops'
 import { openRound } from '#server/repositories/rounds'
 import { createUser } from '#server/repositories/users'
 import type { NewSubmission } from '#server/repositories/submissions'
+import { executorOver } from '~~/modules/dev-db/runtime/server/utils/executor'
 
 export const MIGRATIONS_DIR = fileURLToPath(
   new URL('../../../netlify/database/migrations/', import.meta.url),
 )
 
-/** A fresh in-memory database with every generated migration applied. */
+/**
+ * A fresh in-memory platform database with every generated migration applied by the platform's
+ * applier, reached through the same connector and driver as `useDB()`.
+ */
 export async function createTestDb(): Promise<{ db: DB; close: () => Promise<void> }> {
-  const client = new PGlite()
-  const db = drizzle({ client, relations })
-  await migrate(db, { migrationsFolder: MIGRATIONS_DIR })
-  return { db, close: () => client.close() }
+  const server = new NetlifyDB({ logger: () => {} })
+  const connection = getDatabase({ connectionString: await server.start() })
+  const db = drizzle({ client: connection, relations })
+  await applyMigrations(executorOver(db), MIGRATIONS_DIR)
+  return {
+    db,
+    async close() {
+      await connection.pool.end()
+      await server.stop()
+    },
+  }
 }
 
 /** The DbError `promise` rejects with, or undefined when it resolves or rejects otherwise. */

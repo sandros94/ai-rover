@@ -19,4 +19,15 @@ export class MemoryBlobs implements BlobStore {
     const blob = this.blobs.get(key)
     return blob ? { metadata: structuredClone(blob.metadata) } : null
   }
+
+  async list(options: { prefix?: string } = {}) {
+    const prefix = options.prefix ?? ''
+    return {
+      blobs: [...this.blobs.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+    }
+  }
+
+  async delete(key: string) {
+    this.blobs.delete(key)
+  }
 }
