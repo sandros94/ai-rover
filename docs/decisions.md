@@ -1,0 +1,53 @@
+# Decisions
+
+Current, settled design decisions with their reasons. This file describes the present; history lives in git. Open questions are at the end.
+
+## Product
+
+- **Fully autonomous rover.** Users interact only by submitting a destination for the next segment and liking others' submissions (no dislikes). One live submission per user; the author of the segment in progress may not submit until the rover has arrived.
+- **Real-time pacing.** A segment takes its real duration at real rover speed (100 m ≈ 40–60 min). The drive window is the submission-and-voting window, which is the project's natural rate limit. Replays scrub at 60–200×. Reason: the only mission is exploration, and this cadence suits a casual visitor checking in a few times a day.
+- **Perseverance is the reference** for mass (1,025 kg), size (3.0 × 2.7 × 2.2 m), wheels (6 × 52.5 cm, rocker-bogie), speed cap (152 m/h) and operational tilt limit (16°, up to 20°+ as risky). See `research/rover-physics-terrain.md`.
+- **Mars, throughout.** Gravity 3.71 m/s², the Mars sol, and Mars-like terrain (regolith plains, craters, ridges, dunes) so every Perseverance figure stays truthful with a single set of references. A lunar mission with its own rover is a possible later addition, not a variant of this one.
+
+## Submissions and the map
+
+- **A submission is a point.** The user clicks a spot on the 2D map inside a 50–250 m ring around the current planned destination; the server snaps it to the nearest pathable cell. No typed text: the vote card shows the submitter (name and avatar, via a foreign key to the user) and computed facts only: distance, estimated time, max slope, hazards, Jev confidences.
+- **Preview is client-side, judgment is server-side.** While the user hovers or drags, the browser runs the same deterministic planner over the same terrain data and draws the path and slope profile. Jev is called only when a submission is actually made, and the server re-plans authoritatively on submit; the client preview is never trusted. This bounds Jev spend to real submissions.
+- **The map is fogged by what the rover has seen.** At each stationary point the server computes a binary viewshed by line of sight from mast height (about 2 m) over the heightmap, on CPU, and accumulates it over the journey, so ridges and crater rims hide what lies behind them. Only revealed cells are pickable; the picker still shows the revealed terrain's relief in 2D. A scouting drone that reveals terrain ahead is a planned later feature; the 50–250 m pick ring stays regardless.
+- **The planner knows only what the rover has seen.** A segment is planned on revealed terrain, with unseen cells carrying a penalty cost as in Perseverance's AutoNav. The producer then drives the real terrain and discovers hidden ground mid-drive.
+- **Intermediate checkpoints.** When hidden ground turns out blocked or unsafe (a cliff edge, a blocked pass), the rover stops at the last safe pose and that stop becomes a checkpoint in its own right rather than a failure: the segment's progress is kept, the journal records the shortfall, and new submissions start from there. Failure is reserved for hazard events.
+- **Each stationary point has a manifest.** A JSON manifest carries an integer `version` for future migrations, the world config hash, the chunk coordinates and blob keys of the disk, and the key of the accumulated revealed mask, stored as its own binary blob updated per stop while chunks stay immutable and cacheable forever.
+- **Terrain is computed on demand, server-side, and served as data.** The height function is deterministic from the mission seed, but the expensive parts (chunks, cost map, pathability, viewshed) are computed only for a disk of about twice the maximum segment length (500 m) around each newly reached stationary point. The resulting chunks and revealed mask are stored as blobs and served through the CDN; browsers fetch them and never generate terrain themselves, so everyone sees the same ground and the client cannot manipulate it. CPU time, cost and speed of this step are benchmarked and optimised over time.
+
+## Architecture
+
+- **Code plans and simulates; Jev judges.** Jev returns typed judgments (Choice / Noul / Score) over state that code supplies and is documented as unreliable at arithmetic, so it never produces driving commands. Code runs the path planner and the producer; one Jev request per submission returns `feasible`, `distance_band`, `distance_confidence`, `time_confidence` and `risk`. The confidence scores are the vote tie-break weights. A candidate-route Choice (code generates 3–8 routes, Jev picks) is to be tested early as an addition, not a replacement. See `research/typesafe-jev.md`.
+- **Keyframes are the source of truth.** Every attempt (successful or failed) is one immutable record: plan, keyframes at a fixed rate, events (stop, replan, slip, failure), outcome. Clients interpolate; they never re-simulate. Replay determinism therefore survives engine changes.
+- **Keyframes are binary at 2 Hz.** Fixed-size frames (time, position, orientation, wheel angles, suspension angles, speed) in a typed-array block with a small JSON header for events and outcome; about 300 KB per hour of driving. Interpolation between frames is a controlled, tested function shared by client and server, not left to the renderer.
+- **Ground contact is verified numerically, not visually.** Tests sample interpolated poses between keyframes and check every wheel contact point against the analytic terrain height within a tolerance, and check suspension angles against the ground under each wheel, so a rover floating above or sinking into rough ground is caught without a screenshot. Browser screenshots remain a secondary check.
+- **Kinematic producer.** Pose from heightmap samples and surface normals along the planned path, speed limited by slope and roughness, slip as a deterministic function of slope, clearance checked at rover scale. This mirrors how JPL's own planner checks safety (its clearance evaluator is kinematic). Rigid-body simulation is deferred unless the kinematic model proves inadequate.
+- **No push transport.** Netlify hosts no server-side WebSockets and streams for at most 60 s. Live state therefore comes from precomputed keyframes served through Blobs and the CDN, played back locally against wall-clock, plus a small CDN-cached mission-state endpoint polled every few seconds. A split Cloudflare worker for WebSocket fan-out may be studied later. See `research/platform-nuxt5-netlify.md` §4.
+- **Persistence.** Netlify Database (Postgres) holds live relational state: users, submissions, likes, segment lifecycle. Netlify Blobs hold the immutable journal, one blob per attempt, served through a function with durable CDN caching and cache tags.
+- **Auth.** JWE cookie session via `unauth` (h3 v2) + `unjwt`, with a nuxt-auth-utils-like DX (`defineOAuth…EventHandler`, `useUserSession`) implemented on that toolset. GitHub OAuth hand-rolled. AT Protocol OAuth hand-rolled as a _public_ client (`token_endpoint_auth_method: none`), login-only: PAR + PKCE + DPoP proofs signed with `unjwt` (ES256), randomness and hashing from `unsecure`, handle → DID → PDS → authorization-server discovery in project code, encrypted state cookie, no tokens stored. Zero extra dependencies.
+- **Stack.** Nuxt 5 nightly (`nuxt-nightly@5x`, Nitro 3, h3 v2), Nuxt UI 4, valibot, TypeSafe JS SDK pinned to `jev-1.13.0`, Jev responses cached by hash of state + questions + model and recorded as test fixtures.
+- **Netlify dev libraries are patched locally where needed.** `@netlify/nuxt` targets h3 v1 and `@netlify/database-dev` pins an older PGlite major while Netlify Database runs PostgreSQL 18; both are kept working through pnpm overrides or patches in this repo rather than by dropping emulation or downgrading Nuxt.
+- **Segment resolution runs lazily.** The first request after a drive window closes plans and simulates the winner inside a synchronous function under a database lock; concurrent requests wait for the record. A background function takes over only if the measured producer time exceeds the synchronous budget.
+- **Segment length is 50–250 m** (about 20 minutes to 1.5 hours of driving), destination snapped to the rover's pathable component. Tunable.
+- **Route-choice experiment is offline.** A script over recorded terrain fixtures has code generate 3–8 routes and Jev pick one, compared against the planner's own cost ranking; the result decides whether route selection ships.
+
+## Code layout and data formats
+
+- **Terrain code is shared, pure TypeScript.** Height function, masks, planner and viewshed live under `shared/utils/terrain/` (the folder Nuxt auto-imports) with no Node or browser API, so the server computes disks with exactly the code the browser's preview planner runs over fetched chunks.
+- **Chunks are binary.** Each chunk is one blob: a small fixed header, `Float32` heights, `Uint8` masks. No parse cost, compact storage. Compression is added at the storage layer if the decompression cost on the client stays negligible.
+- **Scale parameters are world configuration, not constants.** Chunk size (64 m), cell size (1 m), mast height (2 m), slope limit (16°) and crater statistics are fields of the world definition, so they can be tuned without touching the algorithms.
+
+## Withdrawn
+
+- "The AI model generates the sequence of driving commands (JSONL)": withdrawn because Jev cannot generate text; do not resurrect.
+- Porting the WebSocket transport module server-side: withdrawn for Netlify hosting; revisit only with a Cloudflare worker.
+
+## Open questions
+
+- **Vote updates:** like counts ride the same polled mission-state endpoint (short CDN TTL with stale-while-revalidate, purged by tag on each like) or get their own endpoint with a shorter TTL. The reference site checked for a Netlify WebSocket pattern turned out to run on Vercel with a separate PartyKit worker on Cloudflare for its live counters which is the split-worker option, not a Netlify-native one.
+- **Terrain scale defaults:** the 64 m / 1 m / 16° defaults are starting points and the default relief is benign (almost everything traversable, see `research/measurements.md`); relief amplitude, crater density and the clearance-check resolution (0.25 m proposed, sampled from the analytic height function) need tuning once the planner exists.
+- **Failure rules:** auto-detection thresholds, exclusion radius around a failed spot, "not moving" community vote fallback.
