@@ -18,7 +18,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Viewshed by XDraw sweep from mast height (measured ~15 ms per 500 m disk), accumulated into the revealed mask.
 - Segment record schema (JSONL keyframes + events + outcome) — the wire format the journal, the replay and the live view all consume. This is the contract that survives engine swaps.
 
-## Phase 2 — Planner + producer (server, pure functions over Phase 1) — dev viewer and planner exist; kinematics, producer and keyframes pending
+## Phase 2 — Planner + producer (server, pure functions over Phase 1) — dev viewer, planner and kinematics exist; producer and keyframes pending
 
 - Dev-only 2D shaded-relief viewer of a stop disk (tagged `TODO(dev-only)`) to see the ground while tuning relief and craters.
 

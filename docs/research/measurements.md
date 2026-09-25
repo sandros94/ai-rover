@@ -63,6 +63,10 @@ Desktop, 2026-09-25, 500 m disk, goal 250 m away, revealed = the stop's own view
 
 Theta\* on the 1 m grid plans a full segment in well under a second on a desktop, comparable to the disk build itself, so the plain A\* fallback is not needed. Default cost weights (slope weight 4, unrevealed penalty 3) and the blend rule (2 m radius, turn in place above 30°) are untuned.
 
+## Rover kinematics as implemented (`shared/utils/rover`)
+
+Desktop, 2026-09-25, `poseOnTerrain` on the `mars` world, 2,000 random poses, belly sampling included: ~0.09 ms per solve (~11,000 solves/s), ~141 height samples per solve (80 belly samples, ~61 for about three Newton iterations). An hour and a half of driving at 10 Hz is ~54k solves, about 5 s. A 20k-step drive in 4 mm steps had a worst wheel-height error of 1.4e-11 m. Default flat link angles: rocker 37.9°, bogie 60.7°.
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:

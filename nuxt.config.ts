@@ -8,6 +8,7 @@ import { useNuxt } from 'nuxt/kit'
  */
 const TERRAIN = fileURLToPath(new URL('./shared/utils/terrain/index.ts', import.meta.url))
 const NAV = fileURLToPath(new URL('./shared/utils/nav/index.ts', import.meta.url))
+const ROVER = fileURLToPath(new URL('./shared/utils/rover/index.ts', import.meta.url))
 
 export default defineNuxtConfig({
   compatibilityDate: 'latest',
@@ -17,8 +18,8 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
-  imports: { dirs: [TERRAIN, NAV] },
-  nitro: { imports: { dirs: [TERRAIN, NAV] } },
+  imports: { dirs: [TERRAIN, NAV, ROVER] },
+  nitro: { imports: { dirs: [TERRAIN, NAV, ROVER] } },
 
   /**
    * Local Netlify emulation under `dev` and `test`. Edge Functions are off: the project deploys
