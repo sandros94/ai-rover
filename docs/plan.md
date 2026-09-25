@@ -30,13 +30,13 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Safe-stop detection → intermediate checkpoint record (progress kept) vs hazard → failed record.
 - Golden tests: fixed seed + fixed destination → byte-identical keyframes.
 
-## Phase 3 — Jev judgments (over Phase 2 outputs)
+## Phase 3 — Jev judgments (over Phase 2 outputs) — done: summary labels, one-request judgment, cache, fixtures, offline experiment
 
 - One request per submission: `feasible` (Noul), `distance_band` (Choice), `distance_confidence` / `time_confidence` (Score), `risk` (Score). Semantic labels in state, numbers computed in code.
 - Early experiment: candidate-route Choice over 3–8 code-generated routes, compared against the code planner's own pick on recorded fixtures.
 - Cache keyed by hash(state, questions, model); pin `jev-1.13.0`. Recorded fixtures for tests; live calls only in a tagged manual suite.
 
-## Phase 4 — Persistence + lifecycle (Netlify DB + Blobs)
+## Phase 4 — Persistence + lifecycle (Netlify DB + Blobs) — blob side done (slices, deflated store, time-gated routes); database and lifecycle pending
 
 - Schema: user, submission, like, segment (attempt), checkpoint; state machine idle → collecting → driving → arrived | failed.
 - Journal writer: one immutable blob per attempt; CDN route with cache tags.

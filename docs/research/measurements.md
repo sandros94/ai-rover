@@ -83,6 +83,32 @@ Interpolation at 2 Hz against re-solved poses over 500 random times: max wheel h
 
 The default terrain produced no replans and no slip events on any run: the relief tuning is what will make drives eventful.
 
+## Storage as implemented (`server/utils/journey`, local Netlify Blobs emulation)
+
+Deflate (`CompressionStream('deflate')`, served with `content-encoding: deflate`):
+
+| Blob                         | Raw     | Deflated | Ratio |
+| ---------------------------- | ------- | -------- | ----- |
+| 224 chunks of one 500 m disk | 4.74 MB | 3.34 MB  | 0.70  |
+| Revealed mask after one stop | 50 KB   | 8 KB     | 0.16  |
+| 59 slices of a 150 m drive   | 570 KB  | 418 KB   | 0.73  |
+| Two manifests                | 15.6 KB | 1.6 KB   | 0.10  |
+
+Publishing a stop takes ~660 ms cold and ~170 ms when every chunk already exists; a segment ~70 ms. A chunk served through the route is ~15.6 KB on the wire.
+
+## Jev judgment as measured (`server/utils/jev`, six recorded submissions, 2026-09-25)
+
+| Case | Route summary | Feasible | Distance conf. | Time conf. | Risk | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| mars, north, short | 81 m, nearly straight, moderate slope, mostly seen, mostly loose | 0.60 | 3.19 | 2.42 | 1.48 | review |
+| mars, east, long unseen | 235 m, nearly straight, gentle, mostly unseen, mostly loose | 0.18 | 1.00 | 1.35 | 2.55 | reject |
+| jezero, detour | 119 m, long detour, moderate, mostly seen, some loose ground | 0.44 | 1.92 | 2.46 | 1.02 | review |
+| jezero, blocked | no route (goal blocked) | 0.03 | 0.16 | 0.09 | 2.99 | reject |
+| gale, mostly unseen | 140 m, nearly straight, moderate, mostly unseen | 0.24 | 1.05 | 1.16 | 2.66 | review |
+| gale, detour | 176 m, moderate detour, moderate, mostly seen | 0.81 | 2.99 | 2.20 | 1.03 | accept |
+
+About 1,150 input tokens per judgment (~$0.00005); nine live requests recorded everything (12.7k tokens). The route-choice experiment (three seeds, six cost settings each) showed Jev's top pick never matching the planner's cheapest route and probability piling onto the first of identically labelled candidates; see the withdrawn decision.
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:
