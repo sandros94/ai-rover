@@ -28,3 +28,4 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 24. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
 25. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
 26. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
+27. Chunk blobs carry the true heights and traversable bits of unrevealed ground; a client reading them with the public plan can anticipate a stopped-short point before the slices release (audit 2026-09-27). Decision pending: accept, or serve per-stop chunk views with unrevealed vertices flattened.
