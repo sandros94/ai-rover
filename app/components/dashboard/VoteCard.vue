@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { goalBearing } from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
 import type { MissionStateJson } from '~/composables/useMissionState'
@@ -24,19 +25,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{ like: [liked: boolean]; highlight: [] }>()
 
-const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
-
 /** Distance and bearing, clockwise from north (world +y), of the goal from the anchor. */
-const goal = computed(() => {
-  const dx = props.submission.goal.x - props.anchor.x
-  const dy = props.submission.goal.y - props.anchor.y
-  const degrees = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360
-  return {
-    distanceM: Math.hypot(dx, dy),
-    degrees: Math.round(degrees) % 360,
-    compass: COMPASS[Math.round(degrees / 45) % 8]!,
-  }
-})
+const goal = computed(() => goalBearing(props.anchor, props.submission.goal))
 
 const route = computed(() => {
   const r = props.submission.summary.route

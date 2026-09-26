@@ -6,6 +6,7 @@ import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
   FOG_FILL,
   framePlacement,
+  fullModelLedger,
   HILLSHADE_LIGHT,
   LOD_FAR_M,
   rgbHex,
@@ -15,8 +16,11 @@ import type { ResolvedRoverGeometry } from '#shared/utils/rover'
 import type { RoverVariant } from '~/composables/useRoverVariant'
 import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
+import GoalMarkers from './GoalMarkers.vue'
 import RouteLine from './RouteLine.vue'
 import RoverModel from './RoverModel.vue'
+import type { Pickable } from './ScenePicker.vue'
+import ScenePicker from './ScenePicker.vue'
 import SceneAtmosphere from './SceneAtmosphere.vue'
 import TerrainChunks from './TerrainChunks.vue'
 import TrailLayer from './TrailLayer.vue'
@@ -38,13 +42,22 @@ const props = withDefaults(
     /** Sim seconds, for the path driven so far. */
     t?: number
     route?: { x: number; y: number }[]
-    deaths?: { x: number; y: number; z: number; headingRad: number }[]
+    deaths?: { x: number; y: number; z: number; headingRad: number; id?: string }[]
     /** Radius of the red circle around each death, metres. */
     deathRadiusM?: number
     /** The stop disk's fog over `chunks`; without it every chunk shows its true ground. */
     fog?: ChunkFog & { rects?: GridRect[] }
     /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
     roverVariant?: RoverVariant
+    /** The open round's goals, on the ground, flagged. */
+    goals?: readonly { id: string; x: number; y: number; z: number }[]
+    /** What the pointer can inspect; without any, nothing is picked. */
+    pickables?: readonly Pickable[]
+    /** The focused object's id, and where the camera looks while it is focused (else the rover). */
+    focusedId?: string | null
+    focusTarget?: { x: number; y: number; z: number }
+    /** Changes with every focus, so the camera eases to the new target. */
+    focusKey?: number
   }>(),
   {
     geometry: undefined,
@@ -60,18 +73,30 @@ const props = withDefaults(
     deathRadiusM: undefined,
     fog: undefined,
     roverVariant: undefined,
+    goals: () => [],
+    pickables: () => [],
+    focusedId: null,
+    focusTarget: undefined,
+    focusKey: 0,
   },
 )
 
 const emit = defineEmits<{
   /** The rover drawn changed: the procedural one, or a JPL model once loaded. */
   roverReady: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+  /** The mouse is over an object, or none. */
+  hover: [id: string | null, client: { x: number; y: number }]
+  /** A tap or click on an object, or on none. */
+  tap: [id: string | null, pointerType: string, client: { x: number; y: number }]
 }>()
+
+/** The rover and a focused ghost: never more full rover models than that in the scene. */
+const ledger = fullModelLedger()
 
 const rover = computed(() => framePlacement(props.frame).position)
 const focus = computed(() => ({ x: rover.value.x, y: rover.value.y }))
-/** Camera target: the body's middle rather than its ground-level origin. */
-const target = computed(() => ({ ...rover.value, z: rover.value.z + 1 }))
+/** Camera target: the body's middle rather than its ground-level origin, or the focused object. */
+const target = computed(() => props.focusTarget ?? { ...rover.value, z: rover.value.z + 1 })
 
 /**
  * Lighting for the rover only (the terrain's shading is baked): the hillshade's sun from the
@@ -106,7 +131,11 @@ onBeforeUnmount(() => plane.dispose())
     :clear-color="sky"
   >
     <SceneAtmosphere :color="sky" :near="HAZE.near" :far="HAZE.far" />
-    <FollowCamera :target="target" :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]" />
+    <FollowCamera
+      :target="target"
+      :target-key="focusKey"
+      :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]"
+    />
     <TresHemisphereLight
       :sky-color="HEMISPHERE.sky"
       :ground-color="HEMISPHERE.ground"
@@ -130,12 +159,23 @@ onBeforeUnmount(() => plane.dispose())
       :height-at="heightAt"
       :geometry="geometry"
       :radius-m="deathRadiusM"
+      :focused-id="focusedId"
+      :ledger="ledger"
     />
+    <GoalMarkers v-if="goals.length > 0" :goals="goals" :focused-id="focusedId" />
     <RoverModel
       :frame="frame"
       :geometry="geometry"
       :variant="roverVariant"
+      :ledger="ledger"
       @ready="emit('roverReady', $event)"
+    />
+    <ScenePicker
+      v-if="pickables.length > 0"
+      :pickables="pickables"
+      :rover="rover"
+      @hover="(id, client) => emit('hover', id, client)"
+      @tap="(id, type, client) => emit('tap', id, type, client)"
     />
   </TresCanvas>
 </template>

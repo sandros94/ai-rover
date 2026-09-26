@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
+import { mapObjects, ROVER_ID } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
 import type { PanelId } from '#shared/utils/client/hud'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import SceneHud from '~/components/hud/SceneHud.vue'
+import { objectTitle } from '~/components/inspect/ObjectCard.vue'
+import ObjectDetails from '~/components/inspect/ObjectDetails.vue'
 import LiveStage from '~/components/map/LiveStage.vue'
 import type { MapTrack } from '~/components/map/MissionMap.vue'
 import MissionMap from '~/components/map/MissionMap.vue'
@@ -65,7 +68,7 @@ const playback = useSegmentPlayback(() => playing.value?.id, {
   serverOffsetMs: () => props.serverOffsetMs,
 })
 
-const { snapshot, rover, plan, driven } = usePlaybackTrack(playback)
+const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 
 /**
  * A drive in progress from the current stop lifts its reveals from the fog as it plays. Once
@@ -151,6 +154,7 @@ const track: MapTrack = {
   frame: playback.frame,
   keyframes: computed(() => snapshot.value.keyframes),
   t: computed(() => snapshot.value.t),
+  motion,
 }
 
 const instruments = computed(() => {
@@ -195,6 +199,39 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
   const s = round.value?.submissions.find((entry) => entry.id === highlightId.value)
   return s ? { id: s.id, goal: s.goal } : null
 })
+
+/* Inspecting: what the map shows can be focused, and the focused object's details open. */
+
+const mapFocus = useMapFocus()
+onBeforeUnmount(mapFocus.clear)
+const objects = computed(() => (props.state ? mapObjects(props.state) : []))
+const focused = computed(() => {
+  const id = mapFocus.focused.value
+  const object = id && id !== ROVER_ID ? objects.value.find((o) => o.id === id) : undefined
+  return object && object.kind !== 'rover' ? object : undefined
+})
+// A focus whose object left the state (a round closed, a new stop) is dropped.
+watch(objects, () => {
+  const id = mapFocus.focused.value
+  if (props.state && id && id !== ROVER_ID && !focused.value) mapFocus.clear()
+})
+// A focused submission's route is drawn; moving the focus off it hides the route again.
+watch(focused, (next, previous) => {
+  if (next?.kind === 'submission') highlightId.value = next.submissionId
+  else if (previous?.kind === 'submission' && highlightId.value === previous.submissionId) {
+    highlightId.value = null
+  }
+})
+const detail = computed(() =>
+  focused.value ? { key: focused.value.id, title: objectTitle(focused.value) } : null,
+)
+const focusedSubmission = computed(() => {
+  const object = focused.value
+  return object?.kind === 'submission'
+    ? round.value?.submissions.find((s) => s.id === object.submissionId)
+    : undefined
+})
+const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clear }]
 </script>
 
 <template>
@@ -207,6 +244,7 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
       :signed-in="loggedIn"
       :highlight="highlight"
       :track="track"
+      :objects="objects"
       @submitted="onSubmitted"
       @stale="emit('changed')"
       @ground="ground = $event"
@@ -215,8 +253,11 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
         v-model:view="view"
         :panels="panels"
         :playback="hudPlayback"
+        :shortcuts="shortcuts"
+        :detail="detail"
         @toggle="playback.togglePlay"
         @live="playback.goLive"
+        @close-detail="mapFocus.clear"
       >
         <template #scene>
           <LiveStage
@@ -306,6 +347,16 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
               @changed="emit('changed')"
             />
           </div>
+        </template>
+        <template #panel-details>
+          <ObjectDetails
+            v-if="focused"
+            :key="focused.id"
+            :object="focused"
+            :mission-id="state.mission.id"
+            :rules="state.mission.rules"
+            :submission="focusedSubmission"
+          />
         </template>
         <template v-for="group in INSTRUMENT_GROUPS" #[`panel-${group}`]>
           <Instrument :group="group" v-bind="instruments" />

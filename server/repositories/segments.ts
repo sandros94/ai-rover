@@ -163,9 +163,13 @@ export interface SettledSegment {
   id: string
   status: 'arrived' | 'stopped-short' | 'failed'
   startedAt: Date
+  /** Release of the last slice, when the ending became public. */
+  endsAt: Date
   fromStopId: string
   /** Ground distance the drive covered, metres. */
   distanceM: number
+  /** Why the drive fell short or failed; empty on an arrival. */
+  reasons: string[]
   /** Where the rover was lost; null unless failed. */
   death: { x: number; y: number } | null
 }
@@ -177,6 +181,7 @@ export async function listSettledSegments(db: DB, missionId: string): Promise<Se
       id: segment.id,
       status: segment.status,
       startedAt: segment.startedAt,
+      endsAt: segment.endsAt,
       fromStopId: segment.fromStopId,
       outcome: segment.outcome,
       deathX: segment.deathX,
@@ -189,9 +194,11 @@ export async function listSettledSegments(db: DB, missionId: string): Promise<Se
     id: row.id,
     status: row.status as SettledSegment['status'],
     startedAt: row.startedAt,
+    endsAt: row.endsAt,
     fromStopId: row.fromStopId,
     // A segment settles only once its outcome is written.
     distanceM: row.outcome!.distanceM,
+    reasons: [...row.outcome!.reasons],
     // The settled check constraint makes both coordinates non-null on a failed segment.
     death: row.status === 'failed' ? { x: row.deathX!, y: row.deathY! } : null,
   }))

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import type { Component } from 'vue'
-import { defineComponent, h, nextTick, ref } from 'vue'
+import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import { useState } from '#imports'
 import { UApp, USlider } from '#components'
@@ -94,7 +94,7 @@ function state(overrides: Partial<MissionStateJson> = {}): MissionStateJson {
     flags: null,
     pause: null,
     lastSegment: null,
-    trail: [{ index: 0, x: 0, y: 0 }],
+    trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
     deaths: [],
     tally: {
       distanceM: 0,
@@ -206,6 +206,7 @@ afterEach(() => {
   useState('jev-user-session').value = {}
   useState('jev-rover:panels').value = null
   useState('jev-rover:hud').value = { visible: true, instruments: false, vote: false }
+  useMapFocus().clear()
   localStorage.clear()
   vi.restoreAllMocks()
   document.body.innerHTML = ''
@@ -495,6 +496,130 @@ describe('the full-viewport layout', () => {
     expect(wrapper.find('[data-test=panel]').exists()).toBe(false)
     await press('h')
     expect(wrapper.find('[data-test=panel]').exists()).toBe(true)
+  })
+})
+
+/** A mission one failure and one arrival in, with a pick waiting in the round. */
+function inspected(): MissionStateJson {
+  const base = state()
+  return state({
+    currentStop: { ...base.currentStop, index: 1, x: 0, y: 80 },
+    trail: [
+      { index: 0, x: 0, y: 0, reachedBy: null },
+      {
+        index: 1,
+        x: 0,
+        y: 80,
+        reachedBy: {
+          segmentId: 'seg-2',
+          number: 2,
+          fromIndex: 0,
+          at: '2026-09-20T12:00:00.000Z',
+        },
+      },
+    ],
+    deaths: [
+      {
+        x: 30,
+        y: 40,
+        segmentId: 'seg-1',
+        number: 1,
+        fromIndex: 0,
+        reasons: ['stuck'],
+        at: '2026-09-19T12:00:00.000Z',
+        distanceM: 42.25,
+      },
+    ],
+    round: { ...base.round!, anchor: { x: 0, y: 80 }, submissions: [SUBMISSION] },
+  } as Partial<MissionStateJson>)
+}
+
+describe('inspecting the map', () => {
+  const details = () => document.body.querySelector('[data-test=object-details]')
+
+  it('opens a detail panel for the focused death, with its replay and its death zone', async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    expect(wrapper.find('[data-panel=details]').exists()).toBe(false)
+    useMapFocus().focusOn('death:seg-1')
+    await flushPromises()
+    const panel = wrapper.find('[data-panel=details]')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('Segment 1')
+    expect(panel.text()).toContain('stuck')
+    expect(panel.find('[data-test=death-replay]').attributes('href')).toBe('/drives/seg-1')
+    expect(panel.find('[data-test=death-zone]').text()).toContain('30 m')
+  })
+
+  it("shows a focused submission's judgment and draws its route", async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn(`submission:${SUBMISSION.id}`)
+    await flushPromises()
+    const panel = wrapper.find('[data-panel=details]')
+    expect(panel.find('[data-test=verdict]').exists()).toBe(true)
+    expect(panel.text()).toContain('Ada')
+    expect(wrapper.findComponent(MapStub).props('highlight')).toEqual({
+      id: SUBMISSION.id,
+      goal: SUBMISSION.goal,
+    })
+  })
+
+  it('lists the segments that left a focused stop', async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn('stop:0')
+    await flushPromises()
+    const links = wrapper
+      .findAll('[data-panel=details] [data-test=stop-departure]')
+      .map((link) => link.attributes('href'))
+    expect(links).toEqual(['/drives/seg-1', '/drives/seg-2'])
+  })
+
+  it('clears the focus and closes the panel with Escape', async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn('death:seg-1')
+    await flushPromises()
+    await press('Escape')
+    expect(useMapFocus().focused.value).toBeNull()
+    expect(wrapper.find('[data-panel=details]').exists()).toBe(false)
+  })
+
+  it('clears the focus when the panel is closed', async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn('death:seg-1')
+    await flushPromises()
+    await wrapper.find('[data-panel=details] [data-test=panel-close]').trigger('click')
+    await flushPromises()
+    expect(useMapFocus().focused.value).toBeNull()
+  })
+
+  it('opens no panel for the rover: recentring leaves the instruments to it', async () => {
+    const wrapper = await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn('death:seg-1')
+    await flushPromises()
+    useMapFocus().recentre()
+    await flushPromises()
+    expect(useMapFocus().focused.value).toBe('rover')
+    expect(wrapper.find('[data-panel=details]').exists()).toBe(false)
+  })
+
+  it('drops a focus whose object is gone', async () => {
+    const props = reactive({ state: inspected(), error: null, serverOffsetMs: 0 })
+    await mountDashboard(props)
+    useMapFocus().focusOn(`submission:${SUBMISSION.id}`)
+    await flushPromises()
+    // The round closed: its submissions are gone from the state.
+    props.state = state({ round: null })
+    await flushPromises()
+    expect(useMapFocus().focused.value).toBeNull()
+  })
+
+  it('shows the details in a sheet on a phone', async () => {
+    viewport(false)
+    await mountDashboard({ state: inspected(), error: null, serverOffsetMs: 0 })
+    useMapFocus().focusOn('death:seg-1')
+    await flushPromises()
+    expect(inBody('[data-sheet=details] [data-test=object-details]')).not.toBeNull()
+    expect(details()?.textContent).toContain('stuck')
+    expect(document.body.textContent).toContain('Segment 1: rover lost')
   })
 })
 

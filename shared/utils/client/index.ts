@@ -53,3 +53,28 @@ export {
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'
 export { serverClockOffset } from './server-clock'
+export type {
+  Compass,
+  DeathObject,
+  MapObject,
+  MapObjectKind,
+  MapObjectsSource,
+  MarsMoment,
+  RoverObject,
+  RoverStatus,
+  SegmentRef,
+  StopObject,
+  SubmissionObject,
+} from './map-objects'
+export {
+  easeFocus,
+  FOCUS_EASE_MS,
+  goalBearing,
+  HIT_TOLERANCE_PX,
+  hitMapObject,
+  mapObjects,
+  ROVER_ID,
+  roverObject,
+  roverStatus,
+  sameMapObject,
+} from './map-objects'

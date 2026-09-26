@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PreviewResult } from '#shared/utils/client'
+import type { MapObject, PreviewResult, RoverObject } from '#shared/utils/client'
 import { liftSeen } from '#shared/utils/client'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
@@ -53,6 +53,12 @@ const props = withDefaults(
     highlightId?: string | null
     preview?: PreviewResult
     picked?: MapPoint | null
+    /**
+     * What can be inspected on both views: stops, deaths and submissions, a list that changes
+     * with the mission state; and the rover, which moves every frame.
+     */
+    objects?: readonly MapObject[]
+    roverObject?: RoverObject
   }>(),
   {
     terrain: undefined,
@@ -73,6 +79,8 @@ const props = withDefaults(
     highlightId: null,
     preview: undefined,
     picked: null,
+    objects: () => [],
+    roverObject: undefined,
   },
 )
 
@@ -102,6 +110,8 @@ const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveal
       :highlight-id="highlightId"
       :preview="preview"
       :picked="picked"
+      :objects="objects"
+      :rover-object="roverObject"
       @hover="emit('hover', $event)"
       @pick="emit('pick', $event)"
     >
@@ -122,6 +132,8 @@ const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveal
       :deaths="deaths"
       :death-radius-m="deathRadiusM"
       :reveals="reveals"
+      :objects="objects"
+      :rover-object="roverObject"
     />
     <div v-else :class="['relative', BLANK]">
       <TerrainProgress :ready="false" v-bind="loading" />

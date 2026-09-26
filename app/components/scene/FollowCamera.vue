@@ -3,17 +3,23 @@ import { useLoop, useTres } from '@tresjs/core'
 import type { PerspectiveCamera } from 'three'
 import { Vector3 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { easeFocus } from '#shared/utils/client'
 
 const props = withDefaults(
   defineProps<{
-    /** The point orbited and followed: the rover, in world metres. */
+    /** The point orbited and followed, world metres: the rover, or what is focused. */
     target: { x: number; y: number; z: number }
+    /**
+     * Changes when the target moves to another object: the camera eases there instead of
+     * jumping, then follows it again.
+     */
+    targetKey?: number
     /** Camera offset from the target when the scene opens, world metres. */
     offset?: [number, number, number]
     minDistance?: number
     maxDistance?: number
   }>(),
-  { offset: () => [-9, -9, 6], minDistance: 3, maxDistance: 160 },
+  { targetKey: 0, offset: () => [-9, -9, 6], minDistance: 3, maxDistance: 160 },
 )
 
 /** The scene is z-up like the terrain data, so no axis swap anywhere. */
@@ -23,6 +29,17 @@ const { renderer } = useTres()
 const { onBeforeRender } = useLoop()
 const goal = new Vector3()
 let controls: OrbitControls | undefined
+/** A move onto a new target under way: where it started and when. */
+let ease: { from: { x: number; y: number; z: number }; started: number } | undefined
+
+watch(
+  () => props.targetKey,
+  () => {
+    if (!controls) return
+    const { x, y, z } = controls.target
+    ease = { from: { x, y, z }, started: performance.now() }
+  },
+)
 
 watch(
   camera,
@@ -47,7 +64,13 @@ watch(
 
 onBeforeRender(() => {
   if (!controls || !camera.value) return
-  goal.set(props.target.x, props.target.y, props.target.z)
+  let { x, y, z } = props.target
+  if (ease) {
+    const elapsed = performance.now() - ease.started
+    ;({ x, y, z } = easeFocus(ease.from, props.target, elapsed))
+    if (x === props.target.x && y === props.target.y && z === props.target.z) ease = undefined
+  }
+  goal.set(x, y, z)
   // Carry the camera with the target so the orbit offset the user chose is kept.
   camera.value.position.add(goal).sub(controls.target)
   controls.target.copy(goal)

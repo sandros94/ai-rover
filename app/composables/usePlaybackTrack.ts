@@ -30,11 +30,13 @@ const QX = KEYFRAME_FIELDS.indexOf('qx')
 const QY = KEYFRAME_FIELDS.indexOf('qy')
 const QZ = KEYFRAME_FIELDS.indexOf('qz')
 const QW = KEYFRAME_FIELDS.indexOf('qw')
+const SPEED = KEYFRAME_FIELDS.indexOf('speed')
 
 /**
  * What the map and the instruments read from a playing segment: a snapshot sampled at
  * {@link INSTRUMENT_HZ}, the rover at the playback frame (the one layer that moves every frame),
- * the route followed at the playback time and the path driven so far.
+ * the route followed at the playback time, the path driven so far, and the rover's speed and
+ * share of the opening plan's path driven, at the snapshot's rate.
  */
 export function usePlaybackTrack(playback: PlaybackSource) {
   const snapshot = useThrottled(
@@ -91,5 +93,20 @@ export function usePlaybackTrack(playback: PlaybackSource) {
     return points
   })
 
-  return { snapshot, rover, plan, driven }
+  const motion = computed(() => {
+    const frame = snapshot.value.frame
+    if (!frame) return undefined
+    const pathM = playback.manifest.value?.plan.metrics.pathLengthM
+    let drivenM = 0
+    const line = driven.value
+    for (let k = 1; k < line.length; k++) {
+      drivenM += Math.hypot(line[k]!.x - line[k - 1]!.x, line[k]!.y - line[k - 1]!.y)
+    }
+    return {
+      speedMps: frame[SPEED]!,
+      progress: pathM ? Math.min(1, drivenM / pathM) : null,
+    }
+  })
+
+  return { snapshot, rover, plan, driven, motion }
 }

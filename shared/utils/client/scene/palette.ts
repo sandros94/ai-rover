@@ -105,6 +105,10 @@ export const SCENE_COLORS = Object.freeze({
   driven: '#fb923c',
   stop: '#d6d3d1',
   death: '#ef4444',
+  /** A submission's goal flag. */
+  goal: '#e7e5e4',
+  /** Whatever is focused. */
+  focus: '#f59e0b',
 })
 
 /** Rover part colours by tone (see `PartTone`): white body, grey links, aluminium wheels. */

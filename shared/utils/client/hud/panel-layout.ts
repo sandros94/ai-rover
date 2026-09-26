@@ -17,6 +17,7 @@ export const PANEL_IDS = [
   'planner',
   'journey',
   'segment',
+  'details',
 ] as const
 
 export type PanelId = (typeof PANEL_IDS)[number]
@@ -45,8 +46,9 @@ const OPEN_BY_DEFAULT: readonly PanelId[] = ['map2d', 'vote', 'segment', 'attitu
 
 /**
  * The arrangement of a first visit in an area of `bounds`: attitude and speed side by side at
- * the top left, the 2D map at the bottom left, the vote (or a replay's segment) down the right;
- * the rest in a cascade in the middle, closed until asked for.
+ * the top left, the 2D map at the bottom left, the vote (or a replay's segment) down the right
+ * with a focused object's details over its foot; the rest in a cascade in the middle, closed until
+ * asked for. The details panel shows while an object is focused, whatever its `open` flag says.
  */
 export function defaultPanelLayout(bounds: PanelSize): PanelLayout {
   const m = PANEL_MARGIN_PX
@@ -69,6 +71,8 @@ export function defaultPanelLayout(bounds: PanelSize): PanelLayout {
     vote: at(w - m - 380, m, 380, Math.min(640, h - 2 * m)),
     // A replay's own panel, where the live page has the vote.
     segment: at(w - m - 380, m, 380, Math.min(640, h - 2 * m)),
+    // A focused object's, over the foot of that column: the focused object is in the middle.
+    details: at(w - m - 380, h - m - 360, 380, 360),
   }
   const panels = {} as Record<PanelId, PanelPlacement>
   let cascade = 0

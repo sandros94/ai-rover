@@ -1,3 +1,19 @@
+<script lang="ts">
+/** Jev's verdicts as the interface shows them. */
+export const VERDICT = {
+  accept: { color: 'success', icon: 'i-lucide-circle-check', label: 'Accept' },
+  review: { color: 'warning', icon: 'i-lucide-circle-help', label: 'Review' },
+  reject: { color: 'error', icon: 'i-lucide-circle-x', label: 'Reject' },
+} as const
+/** Jev's risk levels, safest first, in the status colours they stand for. */
+export const RISK = [
+  { label: 'Clear', fill: 'var(--viz-good)' },
+  { label: 'Minor', fill: 'var(--viz-warning)' },
+  { label: 'Real', fill: 'var(--viz-serious)' },
+  { label: 'Likely', fill: 'var(--viz-critical)' },
+]
+</script>
+
 <script setup lang="ts">
 import type { MissionStateJson } from '~/composables/useMissionState'
 
@@ -7,18 +23,6 @@ type Judgment = Omit<Public, 'probabilities'> & { probabilities?: Public['probab
 
 const props = defineProps<{ judgment: Judgment }>()
 
-const VERDICT = {
-  accept: { color: 'success', icon: 'i-lucide-circle-check', label: 'Accept' },
-  review: { color: 'warning', icon: 'i-lucide-circle-help', label: 'Review' },
-  reject: { color: 'error', icon: 'i-lucide-circle-x', label: 'Reject' },
-} as const
-/** Jev's risk levels, safest first, in the status colours they stand for. */
-const RISK = [
-  { label: 'Clear', fill: 'var(--viz-good)' },
-  { label: 'Minor', fill: 'var(--viz-warning)' },
-  { label: 'Real', fill: 'var(--viz-serious)' },
-  { label: 'Likely', fill: 'var(--viz-critical)' },
-]
 /** Both confidences are Score answers over five levels; the weight is the expected level over 4. */
 const CONFIDENCE_LEVELS = 5
 

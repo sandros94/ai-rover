@@ -26,6 +26,7 @@ export const PANEL_SPECS: Record<PanelId, { title: string; icon: string }> = {
   planner: { title: 'Planner', icon: 'i-lucide-route' },
   journey: { title: 'Journey', icon: 'i-lucide-flag' },
   segment: { title: 'This segment', icon: 'i-lucide-scale' },
+  details: { title: 'Details', icon: 'i-lucide-info' },
 }
 
 /** Storage writes wait for this quiet time, so a burst of changes writes once. */

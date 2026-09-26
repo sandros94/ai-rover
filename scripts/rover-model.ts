@@ -1,9 +1,11 @@
 /**
- * Builds the articulated rover model `public/models/rover/rover.glb` from NASA/JPL's
+ * Builds the articulated rover models under `public/models/rover/` from NASA/JPL's
  * `m2020-urdf-models` (pinned commit): the chassis, the remote sensing mast and its head, the
- * rockers, bogies, differential, steering links and wheels, one node per URDF joint, at full
- * resolution (vertices welded only where bitwise identical), with the 2k atlas as WebP and
- * meshopt-compressed geometry. Deterministic for a given source commit; re-running overwrites it.
+ * rockers, bogies, differential, steering links and wheels, one node per URDF joint, with
+ * meshopt-compressed geometry. `rover.glb` is the rover itself, at full resolution (vertices
+ * welded only where bitwise identical) with the 2k atlas as WebP; `rover-ghost.glb` is the
+ * death markers' silhouette, decimated to about 9k triangles with no texture, since ghosts are
+ * drawn in a flat tint. Deterministic for a given source commit; re-running overwrites both.
  *
  * Run from the repository root (sources are downloaded to the directory given, or to a temporary
  * directory, never into the repository):
@@ -26,13 +28,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Material, Node as GltfNode } from '@gltf-transform/core'
 import { Document, NodeIO } from '@gltf-transform/core'
+import { MeshoptSimplifier } from 'meshoptimizer'
 
 const REPO = 'nasa-jpl/m2020-urdf-models'
 const COMMIT = 'c422fc6d96f2684521fb64049448d611e670f140'
 const RAW = `https://raw.githubusercontent.com/${REPO}/${COMMIT}`
 const OUT_DIR = fileURLToPath(new URL('../public/models/rover/', import.meta.url))
 
-const OUT_FILE = 'rover.glb'
 /** The source atlas: `1k`, `2k`, `4k` or `8k`, re-encoded as WebP at its own size. */
 const ATLAS = '2k'
 /**
@@ -41,6 +43,58 @@ const ATLAS = '2k'
  * eighth of a texel on the 2k atlas.
  */
 const QUANTIZE = { position: 14, texcoord: 14 }
+
+/**
+ * A model built from the kept links: at full resolution with the atlas, or decimated to a
+ * per-mesh triangle budget with positions alone.
+ */
+type Variant =
+  | { file: string; kind: 'full' }
+  | {
+      file: string
+      kind: 'silhouette'
+      /** Target triangles per source mesh. */
+      triangles: (stem: string) => number
+      /** Simplifier error ceiling, as a fraction of each mesh's extent. */
+      error: number
+    }
+
+type MeshKind = 'chassis' | 'mast' | 'head' | 'steerFront' | 'steerRear' | 'wheel' | 'link' | 'diff'
+
+/**
+ * The ghost's budget, about 9k triangles: the chassis keeps its deck outline, wheels and links
+ * their shape; a flat translucent tint shows nothing finer.
+ */
+const GHOST_BUDGET: Record<MeshKind, number> = {
+  chassis: 3_400,
+  mast: 200,
+  head: 600,
+  steerFront: 300,
+  steerRear: 220,
+  wheel: 360,
+  link: 360,
+  diff: 120,
+}
+
+function kindOf(stem: string): MeshKind {
+  if (stem === 'CHASSIS') return 'chassis'
+  if (stem === 'RSM') return 'mast'
+  if (stem === 'RSM_Head') return 'head'
+  if (stem === 'CenterDifferential') return 'diff'
+  if (stem.startsWith('Wheel_')) return 'wheel'
+  if (stem.startsWith('Steer_')) return stem.endsWith('Front') ? 'steerFront' : 'steerRear'
+  return 'link'
+}
+
+const VARIANTS: Variant[] = [
+  { file: 'rover.glb', kind: 'full' },
+  {
+    file: 'rover-ghost.glb',
+    kind: 'silhouette',
+    triangles: (stem) => GHOST_BUDGET[kindOf(stem)],
+    error: 0.08,
+  },
+]
 
 /** A kept URDF link and the app node it becomes. */
 interface KeptLink {
@@ -359,6 +413,62 @@ async function welded(io: NodeIO, src: string, work: string, stem: string): Prom
   }
 }
 
+/**
+ * The link's mesh decimated to about `target` triangles, positions only: vertices sharing a
+ * position are merged first (the atlas seams would otherwise pin the simplifier), then meshopt
+ * simplifies within `error` of the mesh's extent.
+ */
+async function silhouette(
+  io: NodeIO,
+  src: string,
+  work: string,
+  stem: string,
+  options: { target: number; error: number },
+): Promise<Omit<MeshData, 'uvs'>> {
+  const full = await welded(io, src, work, stem)
+  const byPosition = new Map<string, number>()
+  const positions: number[] = []
+  const remap = new Uint32Array(full.positions.length / 3)
+  for (let v = 0; v < remap.length; v++) {
+    const p = full.positions.subarray(3 * v, 3 * v + 3)
+    const key = `${p[0]},${p[1]},${p[2]}`
+    let kept = byPosition.get(key)
+    if (kept === undefined) {
+      kept = positions.length / 3
+      byPosition.set(key, kept)
+      positions.push(p[0]!, p[1]!, p[2]!)
+    }
+    remap[v] = kept
+  }
+  const merged = Float32Array.from(positions)
+  let indices: Uint32Array = full.indices.map((v) => remap[v]!)
+  if (options.target * 3 < indices.length) {
+    await MeshoptSimplifier.ready
+    ;[indices] = MeshoptSimplifier.simplify(indices, merged, 3, options.target * 3, options.error, [
+      'Prune',
+    ])
+  }
+  return compact(merged, indices)
+}
+
+/** Only the vertices `indices` uses, renumbered in first-use order. */
+function compact(
+  positions: Float32Array,
+  indices: Uint32Array,
+): { positions: Float32Array<ArrayBuffer>; indices: Uint32Array<ArrayBuffer> } {
+  const remap = new Int32Array(positions.length / 3).fill(-1)
+  const kept: number[] = []
+  const out = new Uint32Array(indices.length)
+  indices.forEach((vertex, k) => {
+    if (remap[vertex] === -1) {
+      remap[vertex] = kept.length / 3
+      kept.push(...positions.subarray(3 * vertex, 3 * vertex + 3))
+    }
+    out[k] = remap[vertex]!
+  })
+  return { positions: Float32Array.from(kept), indices: out }
+}
+
 interface Built {
   triangles: number
   /** Joint values baked into the node transforms, radians, by URDF joint name. */
@@ -367,23 +477,26 @@ interface Built {
   bytes: { meshopt: number; plain: number }
 }
 
-async function build(src: string, work: string): Promise<Built> {
+async function build(src: string, work: string, variant: Variant): Promise<Built> {
   const io = new NodeIO()
   const urdf = parseUrdf(readFileSync(join(src, 'm2020.urdf'), 'utf8'))
   const baked = deployedMast(urdf.joints)
   const poses = linkPoses(urdf.joints, baked)
+  const textured = variant.kind === 'full'
 
   const doc = new Document()
   const buffer = doc.createBuffer()
-  const atlas = doc
-    .createTexture('atlas')
-    .setMimeType('image/jpeg')
-    .setImage(readFileSync(join(src, 'meshes', 'Textures', `M2020_Rover_Texture_${ATLAS}.jpg`)))
-  const material: Material = doc
-    .createMaterial('rover')
-    .setBaseColorTexture(atlas)
-    .setRoughnessFactor(1)
-    .setMetallicFactor(0)
+  const material: Material = doc.createMaterial('rover').setRoughnessFactor(1).setMetallicFactor(0)
+  if (textured) {
+    material.setBaseColorTexture(
+      doc
+        .createTexture('atlas')
+        .setMimeType('image/jpeg')
+        .setImage(
+          readFileSync(join(src, 'meshes', 'Textures', `M2020_Rover_Texture_${ATLAS}.jpg`)),
+        ),
+    )
+  }
   const scene = doc.createScene('rover')
   const nodes = new Map<string, GltfNode>()
   let triangles = 0
@@ -415,8 +528,14 @@ async function build(src: string, work: string): Promise<Built> {
     if (!visual) continue
     // Mesh vertices into the node's frame: the visual origin, then app axes.
     const toNode = toApp(visual.origin)
-    const data = await welded(io, src, work, visual.stem)
-    console.log(`  ${visual.stem}: ${data.indices.length / 3} triangles`)
+    const data: Omit<MeshData, 'uvs'> & { uvs?: MeshData['uvs'] } =
+      variant.kind === 'full'
+        ? await welded(io, src, work, visual.stem)
+        : await silhouette(io, src, work, visual.stem, {
+            target: variant.triangles(visual.stem),
+            error: variant.error,
+          })
+    console.log(`  ${variant.file} ${visual.stem}: ${data.indices.length / 3} triangles`)
     for (let k = 0; k < data.positions.length; k += 3) {
       const p = transformPoint(
         toNode,
@@ -432,11 +551,13 @@ async function build(src: string, work: string): Promise<Built> {
         'POSITION',
         doc.createAccessor().setType('VEC3').setArray(data.positions).setBuffer(buffer),
       )
-      .setAttribute(
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(data.indices).setBuffer(buffer))
+    if (data.uvs) {
+      primitive.setAttribute(
         'TEXCOORD_0',
         doc.createAccessor().setType('VEC2').setArray(data.uvs).setBuffer(buffer),
       )
-      .setIndices(doc.createAccessor().setType('SCALAR').setArray(data.indices).setBuffer(buffer))
+    }
     // Mesh on a child node: quantization rescales mesh nodes, the joint node stays exact.
     const meshNode = doc
       .createNode(`${kept.node}:${visual.stem}`)
@@ -449,15 +570,18 @@ async function build(src: string, work: string): Promise<Built> {
     source: `github.com/${REPO}@${COMMIT}`,
   }
 
-  const assembled = join(work, 'assembled.glb')
+  const assembled = join(work, `assembled-${variant.file}`)
   await io.write(assembled, doc)
-  const webp = join(work, 'webp.glb')
-  cli('webp', assembled, webp, '--quality', '82')
+  let plain = assembled
+  if (textured) {
+    plain = join(work, `webp-${variant.file}`)
+    cli('webp', assembled, plain, '--quality', '82')
+  }
   mkdirSync(OUT_DIR, { recursive: true })
-  const out = join(OUT_DIR, OUT_FILE)
+  const out = join(OUT_DIR, variant.file)
   cli(
     'meshopt',
-    webp,
+    plain,
     out,
     '--level',
     'medium',
@@ -466,7 +590,7 @@ async function build(src: string, work: string): Promise<Built> {
     '--quantize-texcoord',
     String(QUANTIZE.texcoord),
   )
-  return { triangles, baked, bytes: { meshopt: statSync(out).size, plain: statSync(webp).size } }
+  return { triangles, baked, bytes: { meshopt: statSync(out).size, plain: statSync(plain).size } }
 }
 
 function keptAncestor(link: string, poses: LinkPoses): KeptLink | undefined {
@@ -512,10 +636,16 @@ const meshStems = KEPT.map((k) => urdf.links.get(k.link)?.visual?.stem).filter(
 )
 await ensureSources(src, meshStems)
 
-const { triangles, baked, bytes } = await build(src, work)
-for (const [joint, value] of baked) {
-  console.log(`baked ${joint} = ${value.toFixed(6)} rad (${((value * 180) / Math.PI).toFixed(3)}°)`)
+for (const variant of VARIANTS) {
+  const { triangles, baked, bytes } = await build(src, work, variant)
+  if (variant.kind === 'full') {
+    for (const [joint, value] of baked) {
+      console.log(
+        `baked ${joint} = ${value.toFixed(6)} rad (${((value * 180) / Math.PI).toFixed(3)}°)`,
+      )
+    }
+  }
+  console.log(
+    `${variant.file}: ${triangles} triangles, ${bytes.meshopt} bytes (${bytes.plain} before meshopt)`,
+  )
 }
-console.log(
-  `${OUT_FILE}: ${triangles} triangles, ${bytes.meshopt} bytes (${bytes.plain} before meshopt)`,
-)

@@ -116,6 +116,75 @@ export function journeyTally(
   return tally
 }
 
+/** A settled segment as a stop or a death names it: its number among settled drives, from 1. */
+export interface PublicSegmentRef {
+  segmentId: string
+  number: number
+  /** Index of the stop it left. */
+  fromIndex: number
+}
+
+/** A stop reached, with the settled drive that reached it; null for the landing stop. */
+export interface PublicStop {
+  index: number
+  x: number
+  y: number
+  reachedBy: (PublicSegmentRef & { at: Date }) | null
+}
+
+/** Where a settled drive lost the rover, why, when its ending became public, how far it drove. */
+export interface PublicDeath extends PublicSegmentRef {
+  x: number
+  y: number
+  reasons: string[]
+  at: Date
+  distanceM: number
+}
+
+/**
+ * The public stops and deaths of `stops` and `segments` (settled, in start order: a segment's
+ * number is its place in that order).
+ */
+export function publicStopsAndDeaths(
+  stops: readonly {
+    id: string
+    index: number
+    x: number
+    y: number
+    fromSegmentId: string | null
+  }[],
+  segments: readonly SettledSegment[],
+): { trail: PublicStop[]; deaths: PublicDeath[] } {
+  const indexOf = new Map(stops.map((s) => [s.id, s.index]))
+  const refs = new Map(
+    segments.map((s, k) => [
+      s.id,
+      {
+        segment: s,
+        ref: { segmentId: s.id, number: k + 1, fromIndex: indexOf.get(s.fromStopId)! },
+      },
+    ]),
+  )
+  const trail = stops.map(({ index, x, y, fromSegmentId }): PublicStop => {
+    const by = fromSegmentId ? refs.get(fromSegmentId) : undefined
+    return { index, x, y, reachedBy: by ? { ...by.ref, at: by.segment.endsAt } : null }
+  })
+  const deaths = [...refs.values()].flatMap(({ segment, ref }): PublicDeath[] =>
+    segment.death
+      ? [
+          {
+            ...segment.death,
+            ...ref,
+            reasons: [...segment.reasons],
+            at: segment.endsAt,
+            distanceM: segment.distanceM,
+          },
+        ]
+      : [],
+  )
+  return { trail, deaths }
+}
+
 /**
  * The mission as anyone may see it at `now`. While a drive plays, nothing names where it ends:
  * no outcome and no end time; the open round leaves from the stop the rover left and is anchored
@@ -164,9 +233,9 @@ export interface PublicMissionState {
     at: Date
   } | null
   /** Every stop reached so far, by index; a stop exists only once its drive has settled. */
-  trail: { index: number; x: number; y: number }[]
-  /** Death positions of settled failures, oldest first: goals and routes must keep clear. */
-  deaths: { x: number; y: number }[]
+  trail: PublicStop[]
+  /** Settled failures, oldest first: goals and routes must keep clear of their positions. */
+  deaths: PublicDeath[]
   /** The most recently started settled segment, for replay; null before the first settles. */
   lastSegment: Pick<
     SettledSegment,
@@ -272,9 +341,8 @@ export async function publicMissionState(
           at: pause.at,
         }
       : null,
-    trail: stops.map(({ index, x, y }) => ({ index, x, y })),
     // Segments of a mission never overlap, so start order is also the order their deaths became public.
-    deaths: settled.flatMap((segment) => (segment.death ? [{ ...segment.death }] : [])),
+    ...publicStopsAndDeaths(stops, settled),
     lastSegment: last
       ? {
           id: last.id,

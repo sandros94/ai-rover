@@ -17,7 +17,8 @@ import PhoneSheet from './PhoneSheet.vue'
  * own through `shortcuts`, listed with the rest.
  *
  * Slots: `title` (the top bar's left end), `scene`, `top` and `bottom` (widgets centred on those
- * edges), and `panel-<id>` for each offered panel's content.
+ * edges), and `panel-<id>` for each offered panel's content. With a `detail`, `panel-details`
+ * shows as its own window (a sheet on a phone) until closed, which emits `closeDetail`.
  */
 const props = withDefaults(
   defineProps<{
@@ -34,11 +35,13 @@ const props = withDefaults(
     } | null
     /** The page's own keys, registered and listed in the help. */
     shortcuts?: readonly { key: string; label: string; run: () => void }[]
+    /** A focused object's details to show, titled; none without a focus. */
+    detail?: { key: string; title: string } | null
   }>(),
-  { playback: null, shortcuts: () => [] },
+  { playback: null, shortcuts: () => [], detail: null },
 )
 
-const emit = defineEmits<{ toggle: []; live: [] }>()
+const emit = defineEmits<{ toggle: []; live: []; closeDetail: [] }>()
 const view = defineModel<MapViewMode>('view', { required: true })
 
 /** Kept across pages and stop changes, which remount the HUD; not across visits. */
@@ -51,12 +54,37 @@ const { layout } = panelLayout
 const offered = computed(() => props.panels.filter((id) => id !== 'map2d' || view.value === '3d'))
 const floating = computed(() => {
   const current = layout.value
-  if (!current || !wide.value || !hud.value.visible) return []
+  if (!current || !wide.value) return []
+  // A focused object's details show even with the HUD hidden: the visitor asked for them.
+  const shown: PanelId[] = [
+    ...(hud.value.visible ? offered.value.filter((id) => current.panels[id].open) : []),
+    ...(props.detail ? (['details'] as const) : []),
+  ]
   // Drawn in a fixed order, stacked by z: moving a panel's node would drop its pointer capture.
-  return offered.value
-    .filter((id) => current.panels[id].open)
-    .map((id) => ({ id, placement: current.panels[id], z: 10 + current.order.indexOf(id) }))
+  return shown.map((id) => ({
+    id,
+    placement: current.panels[id],
+    z: 10 + current.order.indexOf(id),
+    title: id === 'details' && props.detail ? props.detail.title : PANEL_SPECS[id].title,
+  }))
 })
+// A newly focused object's details come to the front.
+watch(
+  () => props.detail?.key,
+  (key) => {
+    if (key && layout.value) panelLayout.raise('details')
+  },
+)
+const detailSheet = computed({
+  get: () => props.detail !== null,
+  set: (open) => {
+    if (!open) emit('closeDetail')
+  },
+})
+function closePanel(id: PanelId): void {
+  if (id === 'details') emit('closeDetail')
+  else panelLayout.close(id)
+}
 /** Everything but the map and the vote, which have views of their own on a phone. */
 const sheetIds = computed(() => props.panels.filter((id) => id !== 'map2d' && id !== 'vote'))
 const hasVote = computed(() => props.panels.includes('vote'))
@@ -241,7 +269,7 @@ defineShortcuts(
           v-for="p in floating"
           :key="p.id"
           :panel-id="p.id"
-          :title="PANEL_SPECS[p.id].title"
+          :title="p.title"
           :icon="PANEL_SPECS[p.id].icon"
           :rect="p.placement.rect"
           :minimised="p.placement.minimised"
@@ -250,7 +278,7 @@ defineShortcuts(
           @focus="panelLayout.raise(p.id)"
           @move="panelLayout.move(p.id, $event)"
           @minimise="panelLayout.minimise(p.id, $event)"
-          @close="panelLayout.close(p.id)"
+          @close="closePanel(p.id)"
         >
           <slot :name="`panel-${p.id}`" />
         </FloatingPanel>
@@ -271,6 +299,17 @@ defineShortcuts(
       >
         <template v-for="id in sheetIds" #[id]>
           <slot :name="`panel-${id}`" />
+        </template>
+      </PhoneSheet>
+      <PhoneSheet
+        v-if="detail"
+        v-model:open="detailSheet"
+        sheet="details"
+        :title="detail.title"
+        :ids="['details']"
+      >
+        <template #details>
+          <slot name="panel-details" />
         </template>
       </PhoneSheet>
       <PhoneSheet

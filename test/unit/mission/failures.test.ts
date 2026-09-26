@@ -83,7 +83,7 @@ describe('failures', () => {
         missionId: m.missionId,
         now: segment.startedAt,
       })
-      expect(playing.deaths).toEqual(
+      expect(playing.deaths.map(({ x, y }) => ({ x, y }))).toEqual(
         deaths.slice(0, k).map((d) => ({ x: stop1.x + d.x, y: stop1.y + d.y })),
       )
       const next = (await getOpenRound(db, m.missionId))!
@@ -92,10 +92,26 @@ describe('failures', () => {
       const settled = await m.tick(segment.endsAt)
       expect(settled.settled).toEqual({ segmentId: segment.id, status: 'failed' })
       const after = await publicMissionState(db, { missionId: m.missionId, now: segment.endsAt })
-      expect(after.deaths.at(-1)).toEqual({ x: stop1.x + death.x, y: stop1.y + death.y })
+      // A settled death names its segment, why and when it ended and how far it drove.
+      expect(after.deaths.at(-1)).toEqual({
+        x: stop1.x + death.x,
+        y: stop1.y + death.y,
+        segmentId: segment.id,
+        number: 2 + k,
+        fromIndex: 1,
+        reasons: ['stuck'],
+        at: segment.endsAt,
+        distanceM: segment.outcome!.distanceM,
+      })
+      // A stop names the segment that reached it and when; the landing stop has none.
       expect(after.trail).toEqual([
-        { index: 0, x: m.stop.x, y: m.stop.y },
-        { index: 1, x: stop1.x, y: stop1.y },
+        { index: 0, x: m.stop.x, y: m.stop.y, reachedBy: null },
+        {
+          index: 1,
+          x: stop1.x,
+          y: stop1.y,
+          reachedBy: { segmentId: reach.id, number: 1, fromIndex: 0, at: reach.endsAt },
+        },
       ])
       expect(await getRound(db, next.id)).toMatchObject({
         status: 'void',

@@ -1,17 +1,30 @@
 <script setup lang="ts">
-import type { GridRect, MapBounds, MapView, PreviewResult, ReliefFog } from '#shared/utils/client'
+import type {
+  GridRect,
+  MapBounds,
+  MapObject,
+  MapView,
+  PreviewResult,
+  ReliefFog,
+  RoverObject,
+} from '#shared/utils/client'
 import {
   clampView,
   CONTOUR_INTERVAL_M,
   CONTOUR_MAJOR_EVERY,
   contourLines,
+  easeFocus,
   expandRect,
   fitView,
+  FOCUS_EASE_MS,
   FOG_EDGE_CELLS,
   FOG_FILL,
   fogCover,
+  HIT_TOLERANCE_PX,
+  hitMapObject,
   panBy,
   reliefPixels,
+  ROVER_ID,
   screenToWorld,
   worldToScreen,
   zoomAbout,
@@ -19,6 +32,7 @@ import {
 import { RELIEF_STOPS, rgbHex } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
+import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -44,6 +58,12 @@ const props = withDefaults(
     preview?: PreviewResult
     /** The tapped point waiting for confirmation. */
     picked?: MapPoint | null
+    /**
+     * What can be inspected: hovering (or a first tap) shows its card, a click (or a second tap)
+     * focuses it. With `roverObject` the rover is inspectable too.
+     */
+    objects?: readonly MapObject[]
+    roverObject?: RoverObject
   }>(),
   {
     terrain: undefined,
@@ -60,6 +80,8 @@ const props = withDefaults(
     highlightId: null,
     preview: undefined,
     picked: null,
+    objects: () => [],
+    roverObject: undefined,
   },
 )
 
@@ -433,6 +455,7 @@ function onPointerDown(event: PointerEvent): void {
   if (event.pointerType === 'mouse' && event.button !== 0) return
   const at = local(event)
   pressed.set(event.pointerId, at)
+  endEase()
   ;(event.target as Element | null)?.setPointerCapture?.(event.pointerId)
   if (pressed.size === 1) tap = { ...at, moved: false }
   else {
@@ -447,7 +470,11 @@ function onPointerMove(event: PointerEvent): void {
   if (!current) return
   const before = pressed.get(event.pointerId)
   if (!before) {
-    if (event.pointerType === 'mouse') emit('hover', screenToWorld(current, at))
+    if (event.pointerType === 'mouse') {
+      emit('hover', screenToWorld(current, at))
+      const hit = hitAt(at)
+      hovered.value = hit ? { id: hit.id, client: { x: event.clientX, y: event.clientY } } : null
+    }
     return
   }
   pressed.set(event.pointerId, at)
@@ -460,19 +487,19 @@ function onPointerMove(event: PointerEvent): void {
     })
     settle(panBy(zoomed, { dx: next.mid.x - pinch.mid.x, dy: next.mid.y - pinch.mid.y }))
     pinch = next
+    release()
     return
   }
   if (tap && !tap.moved && Math.hypot(at.x - tap.x, at.y - tap.y) <= TAP_SLOP_PX) return
   if (tap) tap.moved = true
   settle(panBy(current, { dx: at.x - before.x, dy: at.y - before.y }))
+  release()
 }
 
 function onPointerUp(event: PointerEvent): void {
   if (!pressed.delete(event.pointerId)) return
   if (pressed.size < 2) pinch = undefined
-  if (pressed.size === 0 && tap && !tap.moved && view.value) {
-    emit('pick', screenToWorld(view.value, local(event)))
-  }
+  if (pressed.size === 0 && tap && !tap.moved && view.value) onTap(event)
   if (pressed.size === 0) tap = undefined
 }
 
@@ -487,7 +514,8 @@ function onWheel(event: WheelEvent): void {
   if (!current) return
   settle(
     zoomAbout(current, {
-      at: local(event),
+      // A followed rover stays in the middle.
+      at: following ? { x: current.width / 2, y: current.height / 2 } : local(event),
       factor: Math.exp(-event.deltaY * 0.0015),
       ...limits.value,
     }),
@@ -506,9 +534,115 @@ function zoomBy(factor: number): void {
   )
 }
 
-function recenter(): void {
+function fitDisk(): void {
+  release()
   if (fitted.value) view.value = fitted.value
 }
+
+/* Inspecting: cards on hover or a first tap, focus on a click or a second tap. */
+
+const mapFocus = useMapFocus()
+/** The object whose card shows, and the pointer it follows, in client pixels. */
+const hovered = shallowRef<{ id: string; client: { x: number; y: number } } | null>(null)
+const inspectable = computed((): readonly MapObject[] =>
+  props.roverObject ? [...props.objects, props.roverObject] : props.objects,
+)
+const hoveredObject = computed(() => {
+  const id = hovered.value?.id
+  return id ? inspectable.value.find((o) => o.id === id) : undefined
+})
+
+function hitAt(at: { x: number; y: number }): MapObject | undefined {
+  const current = view.value
+  if (!current || inspectable.value.length === 0) return undefined
+  return hitMapObject(inspectable.value, screenToWorld(current, at), {
+    toleranceM: HIT_TOLERANCE_PX / current.scale,
+  })
+}
+
+function onTap(event: PointerEvent): void {
+  const hit = hitAt(local(event))
+  if (!hit) {
+    hovered.value = null
+    emit('pick', screenToWorld(view.value!, local(event)))
+    return
+  }
+  // A finger has no hover: its first tap shows the card, the second focuses.
+  if (event.pointerType !== 'mouse' && hovered.value?.id !== hit.id) {
+    hovered.value = { id: hit.id, client: { x: event.clientX, y: event.clientY } }
+    return
+  }
+  if (event.pointerType !== 'mouse') hovered.value = null
+  mapFocus.focusOn(hit.id)
+}
+
+function onLeave(event: PointerEvent): void {
+  emit('hover', null)
+  // A lifted finger leaves too: a tapped card stays until the next tap.
+  if (event.pointerType === 'mouse') hovered.value = null
+}
+
+/** Where the focused object is: the rover as drawn, the others as listed. */
+function focusTarget(): MapPoint | undefined {
+  const id = mapFocus.focused.value
+  if (id === ROVER_ID && props.rover) return props.rover
+  const object = props.objects.find((o) => o.id === id)
+  return object && { x: object.x, y: object.y }
+}
+
+/** Following the rover: set by the recentre control, ended by panning. */
+let following = false
+let ease: { from: MapPoint; started: number } | undefined
+let easeFrame = 0
+
+function endEase(): void {
+  ease = undefined
+  if (easeFrame) cancelAnimationFrame(easeFrame)
+  easeFrame = 0
+}
+
+/** The visitor took the view: no more following or easing. */
+function release(): void {
+  following = false
+  endEase()
+}
+
+function stepEase(): void {
+  easeFrame = 0
+  const current = view.value
+  const to = focusTarget()
+  if (!ease || !current || !to) return endEase()
+  const elapsed = performance.now() - ease.started
+  settle({ ...current, center: easeFocus(ease.from, to, elapsed) })
+  if (elapsed >= FOCUS_EASE_MS) ease = undefined
+  else easeFrame = requestAnimationFrame(stepEase)
+}
+
+watch(mapFocus.seq, () => {
+  endEase()
+  const current = view.value
+  following = mapFocus.focused.value === ROVER_ID
+  if (!current || !focusTarget()) return
+  ease = { from: { ...current.center }, started: performance.now() }
+  easeFrame = requestAnimationFrame(stepEase)
+})
+
+watch(
+  () => props.rover,
+  (rover) => {
+    const current = view.value
+    if (following && !ease && rover && current) {
+      settle({ ...current, center: { x: rover.x, y: rover.y } })
+    }
+  },
+)
+
+onBeforeUnmount(endEase)
+
+const focusRing = computed(() => {
+  const target = view.value && mapFocus.focused.value !== null ? focusTarget() : undefined
+  return target && toScreen(target)
+})
 </script>
 
 <template>
@@ -520,7 +654,7 @@ function recenter(): void {
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
     @pointercancel="onPointerCancel"
-    @pointerleave="emit('hover', null)"
+    @pointerleave="onLeave"
     @wheel.prevent="onWheel"
   >
     <canvas ref="canvas" class="absolute inset-0 h-full w-full" />
@@ -573,7 +707,12 @@ function recenter(): void {
         stroke-width="2.5"
         stroke-linejoin="round"
       />
-      <g v-for="(death, k) in deaths" :key="`death-${k}`">
+      <g
+        v-for="(death, k) in deaths"
+        :key="`death-${k}`"
+        data-test="death-marker"
+        :data-at="`${Math.round(toScreen(death).x)},${Math.round(toScreen(death).y)}`"
+      >
         <circle
           :cx="toScreen(death).x"
           :cy="toScreen(death).y"
@@ -633,8 +772,18 @@ function recenter(): void {
           stroke-width="2"
         />
       </g>
+      <circle
+        v-if="focusRing"
+        data-test="focus-ring"
+        :cx="focusRing.x"
+        :cy="focusRing.y"
+        r="13"
+        class="fill-none stroke-(--ui-warning)"
+        stroke-width="2"
+      />
       <g
         v-if="roverMarker"
+        data-test="rover-marker"
         :transform="`translate(${roverMarker.x} ${roverMarker.y}) rotate(${roverMarker.degrees})`"
       >
         <path
@@ -670,7 +819,18 @@ function recenter(): void {
         variant="solid"
         aria-label="Fit the disk"
         @pointerdown.stop
-        @click="recenter"
+        @click="fitDisk"
+      />
+      <UButton
+        v-if="rover"
+        data-test="recenter"
+        icon="i-lucide-crosshair"
+        size="xs"
+        color="neutral"
+        variant="solid"
+        aria-label="Recentre on the rover and follow it"
+        @pointerdown.stop
+        @click="mapFocus.recentre()"
       />
     </div>
     <div
@@ -686,6 +846,11 @@ function recenter(): void {
         contours {{ CONTOUR_INTERVAL_M }} m, bold {{ CONTOUR_INTERVAL_M * CONTOUR_MAJOR_EVERY }} m
       </div>
     </div>
+    <FloatingObjectCard
+      v-if="hovered && hoveredObject"
+      :object="hoveredObject"
+      :client="hovered.client"
+    />
     <slot />
   </div>
 </template>

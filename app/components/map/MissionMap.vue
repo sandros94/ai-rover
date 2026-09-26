@@ -23,10 +23,14 @@ export interface MapTrack {
   frame: Ref<Float32Array | undefined>
   keyframes: Ref<KeyframeBlock | undefined>
   t: Ref<number>
+  /** The rover's speed and share of the segment driven, for its card; none without a drive. */
+  motion: Ref<{ speedMps: number; progress: number | null } | undefined>
 }
 </script>
 
 <script setup lang="ts">
+import type { MapObject } from '#shared/utils/client'
+import { roverObject, roverStatus } from '#shared/utils/client'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
@@ -48,6 +52,8 @@ const props = withDefaults(
     /** A submission whose route to show, in place of hover previews. */
     highlight?: { id: string; goal: MapPoint } | null
     track: MapTrack
+    /** The state's stops, deaths and submissions, to draw and inspect; the rover is added here. */
+    objects: readonly MapObject[]
   }>(),
   { signedIn: false, highlight: null },
 )
@@ -134,6 +140,8 @@ const { picked, submitting, refusal, onHover, onPick, cancel, confirm } = usePic
   onStale: () => emit('stale'),
 })
 
+const deathObjects = computed(() => props.objects.filter((o) => o.kind === 'death'))
+
 const submissions = computed(() =>
   (props.state.round?.submissions ?? []).map((s) => ({ id: s.id, goal: s.goal })),
 )
@@ -141,6 +149,9 @@ const submissions = computed(() =>
 /** The stage's props: changes every animation frame while a drive plays. */
 const stage = computed((): StageProps => {
   const { track } = props
+  const rover = track.rover.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad }
+  const status = roverStatus(props.state)
+  const motion = status === 'driving' ? track.motion.value : undefined
   return {
     terrain: terrain.value,
     seen: revealed.value,
@@ -152,11 +163,12 @@ const stage = computed((): StageProps => {
       ? { x: manifest.value.stop.x, y: manifest.value.stop.y }
       : { x: stop.x, y: stop.y },
     radius: manifest.value?.radius ?? 500,
-    rover: track.rover.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad },
+    rover,
     trail: props.state.trail,
     plan: track.plan.value,
     driven: track.driven.value,
-    deaths: props.state.deaths,
+    // The deaths as objects: the 3D view knows each ghost by its id.
+    deaths: deathObjects.value,
     deathRadiusM: rules.value.failureZone.destinationRadiusM,
     frame: track.frame.value,
     keyframes: track.keyframes.value,
@@ -167,6 +179,12 @@ const stage = computed((): StageProps => {
     highlightId: props.highlight?.id ?? null,
     preview: preview.result.value,
     picked: picked.value,
+    objects: props.objects,
+    roverObject: roverObject(rover, {
+      status,
+      speedMps: motion?.speedMps ?? null,
+      progress: motion?.progress ?? null,
+    }),
   }
 })
 /** Read by `LiveStage` where it draws, so only the stage redraws every frame. */

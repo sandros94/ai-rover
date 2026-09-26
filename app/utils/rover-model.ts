@@ -13,19 +13,36 @@ export interface LoadedRoverModel {
   loadMs: number
 }
 
-let load: Promise<LoadedRoverModel> | undefined
+/**
+ * Which build of the JPL rover: `full`, the rover itself at full resolution with its texture
+ * atlas; `ghost`, the untextured low-poly silhouette the death markers draw.
+ */
+export type RoverModelFile = 'full' | 'ghost'
+
+const FILES: Record<RoverModelFile, string> = {
+  full: 'models/rover/rover.glb',
+  ghost: 'models/rover/rover-ghost.glb',
+}
+
+const loads = new Map<RoverModelFile, Promise<LoadedRoverModel>>()
 
 /**
- * The JPL rover model, `public/models/rover/rover.glb`, fetched once per page. Its meshes carry
- * no normals, so they are shaded flat, with Lambert materials over the texture atlas.
+ * A JPL rover model under `public/models/rover/`, fetched once per page. Its meshes carry no
+ * normals, so they are shaded flat, with Lambert materials (over the texture atlas, when the
+ * model has one).
  */
-export function loadRoverModel(baseURL: string): Promise<LoadedRoverModel> {
+export function loadRoverModel(
+  baseURL: string,
+  file: RoverModelFile = 'full',
+): Promise<LoadedRoverModel> {
+  let load = loads.get(file)
   if (!load) {
-    const started = parse(`${baseURL.replace(/\/?$/, '/')}models/rover/rover.glb`)
+    const started = parse(`${baseURL.replace(/\/?$/, '/')}${FILES[file]}`)
     // A failed load is not cached: a later mount tries again.
     started.catch(() => {
-      if (load === started) load = undefined
+      if (loads.get(file) === started) loads.delete(file)
     })
+    loads.set(file, started)
     load = started
   }
   return load

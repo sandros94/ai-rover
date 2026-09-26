@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import type { FogSurface, GridRect } from '#shared/utils/client'
-import { fogSurface, gridHeightAt, liftSeen } from '#shared/utils/client'
+import type { FogSurface, GridRect, MapObject, RoverObject } from '#shared/utils/client'
+import { fogSurface, gridHeightAt, liftSeen, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog } from '#shared/utils/client/scene'
 import { chunksFromGrid, flatFrame, FOG_FILL } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
+import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
+import type { Pickable } from './ScenePicker.vue'
 import StopScene from './StopScene.vue'
 
 /**
  * A stop disk in 3D with what the 2D map draws over it: the rover at the playback frame (or at
- * rest), the route, the path driven, past stops, deaths, and the fog over what neither the stop
- * nor the drive so far has seen. Load it lazily: it brings three.js.
+ * rest), the route, the path driven, past stops, deaths, the open round's goals, and the fog
+ * over what neither the stop nor the drive so far has seen. Objects are inspected as on the 2D
+ * map: a card on hover (or a first tap), focus on a click (or a second tap), the camera easing
+ * to the focused object; the recentre control returns it to the rover. Load it lazily: it brings
+ * three.js.
  */
 const props = withDefaults(
   defineProps<{
@@ -29,11 +34,18 @@ const props = withDefaults(
     t?: number
     route?: MapPoint[]
     stops?: MapPoint[]
-    /** Death positions; a ghost faces `headingRad` when known, else north-east. */
-    deaths?: (MapPoint & { headingRad?: number })[]
+    /**
+     * Death positions; a ghost faces `headingRad` when known, else north-east. A death with an
+     * `id` is the death object of that id: focused, its ghost gains the full model.
+     */
+    deaths?: (MapPoint & { headingRad?: number; id?: string })[]
     deathRadiusM?: number
     /** What the playing drive has seen so far, as disk-grid vertex indices. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
+    /** Stops, deaths and submissions to inspect; submissions are drawn as flagged goals. */
+    objects?: readonly MapObject[]
+    /** The rover, inspectable. */
+    roverObject?: RoverObject
   }>(),
   {
     seen: undefined,
@@ -45,6 +57,8 @@ const props = withDefaults(
     deaths: () => [],
     deathRadiusM: undefined,
     reveals: () => [],
+    objects: () => [],
+    roverObject: undefined,
   },
 )
 
@@ -147,8 +161,55 @@ const ghosts = computed(() =>
     y: d.y,
     z: groundAt(d),
     headingRad: d.headingRad ?? Math.PI / 4,
+    ...(d.id === undefined ? {} : { id: d.id }),
   })),
 )
+
+/* Inspecting. */
+
+const goals = computed(() =>
+  props.objects
+    .filter((o) => o.kind === 'submission')
+    .map((o) => ({ id: o.id, x: o.x, y: o.y, z: groundAt(o) })),
+)
+/** Changes only when the rover becomes inspectable or stops being: not with every frame. */
+const roverInspectable = computed(() => props.roverObject !== undefined)
+const pickables = computed((): Pickable[] => [
+  ...props.objects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, z: groundAt(o) })),
+  // The picker moves the rover's volume with the rover.
+  ...(roverInspectable.value ? [{ id: ROVER_ID, kind: 'rover' as const, x: 0, y: 0, z: 0 }] : []),
+])
+const find = (id: string | null | undefined): MapObject | undefined =>
+  id === ROVER_ID ? props.roverObject : props.objects.find((o) => o.id === id)
+
+const mapFocus = useMapFocus()
+/** Where the camera looks while an object other than the rover is focused: its middle. */
+const focusTarget = computed(() => {
+  const id = mapFocus.focused.value
+  const object = id && id !== ROVER_ID ? find(id) : undefined
+  return object && { x: object.x, y: object.y, z: groundAt(object) + 1 }
+})
+
+const hovered = shallowRef<{ id: string; client: { x: number; y: number } } | null>(null)
+const hoveredObject = computed(() => find(hovered.value?.id))
+
+function onHover(id: string | null, client: { x: number; y: number }): void {
+  hovered.value = id ? { id, client } : null
+}
+
+function onTap(id: string | null, pointerType: string, client: { x: number; y: number }): void {
+  if (!id) {
+    hovered.value = null
+    return
+  }
+  // A finger has no hover: its first tap shows the card, the second focuses.
+  if (pointerType !== 'mouse' && hovered.value?.id !== id) {
+    hovered.value = { id, client }
+    return
+  }
+  if (pointerType !== 'mouse') hovered.value = null
+  mapFocus.focusOn(id)
+}
 </script>
 
 <template>
@@ -169,6 +230,29 @@ const ghosts = computed(() =>
       :death-radius-m="deathRadiusM"
       :fog="fog"
       :drawn-height-at="drawnHeightAt"
+      :goals="goals"
+      :pickables="pickables"
+      :focused-id="mapFocus.focused.value"
+      :focus-target="focusTarget"
+      :focus-key="mapFocus.seq.value"
+      @hover="onHover"
+      @tap="onTap"
+    />
+    <div class="absolute right-2 bottom-20 flex flex-col gap-1">
+      <UButton
+        data-test="recenter"
+        icon="i-lucide-crosshair"
+        size="xs"
+        color="neutral"
+        variant="solid"
+        aria-label="Recentre on the rover"
+        @click="mapFocus.recentre()"
+      />
+    </div>
+    <FloatingObjectCard
+      v-if="hovered && hoveredObject"
+      :object="hoveredObject"
+      :client="hovered.client"
     />
   </div>
 </template>
