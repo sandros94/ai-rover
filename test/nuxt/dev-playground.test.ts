@@ -7,6 +7,12 @@ describe('playground registry', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('lists the 3D stop scene and the rover model', () => {
+    const groups = Object.fromEntries(PLAYGROUND_ENTRIES.map((entry) => [entry.id, entry.group]))
+    expect(groups['stop-scene']).toBe('scene')
+    expect(groups['rover-model']).toBe('instrument')
+  })
+
   it.each(PLAYGROUND_ENTRIES.map((entry) => [entry.id, entry] as const))(
     '%s resolves to a component',
     async (_id, entry) => {

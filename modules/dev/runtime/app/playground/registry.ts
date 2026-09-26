@@ -140,6 +140,14 @@ export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
       import('~/components/instruments/JourneyStats.vue'),
     (c) => ({ tally: c.tally }),
   ),
+  instrument(
+    'rover-model',
+    'Rover model (3D)',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/RoverModel3D.vue'),
+    (c) => ({ frame: c.frame }),
+  ),
   {
     id: 'stop-map',
     title: 'Stop map',
@@ -147,6 +155,15 @@ export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
     component: () =>
       // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
       import('../components/playground/StopMapScene.vue'),
+    needs: ['disk', 'record'],
+  },
+  {
+    id: 'stop-scene',
+    title: 'Stop scene (3D)',
+    group: 'scene',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/StopScene3D.vue'),
     needs: ['disk', 'record'],
   },
   {

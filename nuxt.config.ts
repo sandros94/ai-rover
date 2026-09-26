@@ -14,7 +14,7 @@ export default defineNuxtConfig({
   compatibilityDate: 'latest',
   devtools: { enabled: true },
 
-  modules: ['@nuxt/ui', '@netlify/nuxt', './modules/dev', './modules/auth'],
+  modules: ['@nuxt/ui', '@netlify/nuxt', '@tresjs/nuxt', './modules/dev', './modules/auth'],
 
   css: ['~/assets/css/main.css'],
 

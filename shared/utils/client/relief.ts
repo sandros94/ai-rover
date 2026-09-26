@@ -1,21 +1,8 @@
 import type { HeightGrid } from '../terrain/grid'
 import { ClientError } from './errors'
+import { fogRgb, hillshadeAt, reliefLight, reliefRgb } from './scene/palette'
 
-/** Hillshade light: from the north-west (azimuth 315°), 45° above the horizon. */
-const LIGHT_ALTITUDE = Math.PI / 4
-const LIGHT = {
-  x: -Math.cos(LIGHT_ALTITUDE) * Math.SQRT1_2,
-  y: Math.cos(LIGHT_ALTITUDE) * Math.SQRT1_2,
-  z: Math.sin(LIGHT_ALTITUDE),
-}
-
-/** Luma weights (Rec. 709) applied to the 8-bit channels, for greying fogged ground. */
-export const LUMA = [0.2126, 0.7152, 0.0722] as const
-
-/** Brightness kept on ground the rover has not seen: its luma times this. */
-export const FOG_DIM = 0.45
-/** Share of an unseen vertex's colour replaced by its own grey, 0 (none) to 1 (all). */
-export const FOG_DESATURATE = 0.8
+export { FOG_DESATURATE, FOG_DIM, LUMA } from './scene/palette'
 
 /**
  * Lambert shade in [0, 1] per vertex from central-difference normals (one-sided at the grid
@@ -32,8 +19,7 @@ export function hillshade(grid: HeightGrid): Float32Array {
       const i1 = Math.min(width - 1, i + 1)
       const gx = (heights[j * width + i1]! - heights[j * width + i0]!) / ((i1 - i0 || 1) * cellSize)
       const gy = (heights[j1 * width + i]! - heights[j0 * width + i]!) / ((j1 - j0 || 1) * cellSize)
-      const dot = (-gx * LIGHT.x - gy * LIGHT.y + LIGHT.z) / Math.sqrt(gx * gx + gy * gy + 1)
-      shade[j * width + i] = Math.max(0, dot)
+      shade[j * width + i] = hillshadeAt(gx, gy)
     }
   }
   return shade
@@ -72,24 +58,15 @@ export function reliefPixels(
       const k = j * width + i
       const h = heights[k]!
       if (Number.isNaN(h)) continue
-      const t = Math.min(1, Math.max(0, (h - range.min) / span))
-      let r = 90 + 150 * t
-      let g = 45 + 125 * t
-      let b = 30 + 95 * t
+      let rgb = reliefRgb((h - range.min) / span)
       const s = shade?.[k]
       // Vertices bordering missing heights have no normal; they stay unshaded.
       if (s !== undefined && !Number.isNaN(s)) {
-        const light = 0.25 + 0.95 * s
-        r *= light
-        g *= light
-        b *= light
+        const light = reliefLight(s)
+        rgb = [rgb[0] * light, rgb[1] * light, rgb[2] * light]
       }
-      if (seen && !seen[k]) {
-        const grey = LUMA[0] * r + LUMA[1] * g + LUMA[2] * b
-        r = FOG_DIM * (r + FOG_DESATURATE * (grey - r))
-        g = FOG_DIM * (g + FOG_DESATURATE * (grey - g))
-        b = FOG_DIM * (b + FOG_DESATURATE * (grey - b))
-      }
+      if (seen && !seen[k]) rgb = fogRgb(rgb)
+      const [r, g, b] = rgb
       const p = (row + i) * 4
       pixels[p] = r
       pixels[p + 1] = g
