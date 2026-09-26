@@ -50,7 +50,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 
 - Keyframe playback against wall-clock + polled CDN-cached mission-state endpoint (see `docs/decisions.md`).
 - Nuxt UI shell, Tres/Three terrain with chunk LOD, rover playback from keyframes, trail + failed ghosts, replay scrubber, mission clock.
-- 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment.
+- 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment. Done.
 
 ## Phase 7 — Failure voting, resets, moderation
 
