@@ -1,13 +1,8 @@
-// TODO(dev-only): terrain-tuning endpoint for `/_dev/disk`; removed before launch.
 import { defineHandler, getValidatedQuery, HTTPError } from 'nitro/h3'
 import * as v from 'valibot'
-
-/** Header before the arrays: u32 width, u32 height, f32 cellSize, i32 originI, i32 originJ, f32 centerX, f32 centerY. */
-const HEADER_BYTES = 28
-
-const FLAG_TRAVERSABLE = 1
-const FLAG_REACHABLE = 2
-const FLAG_VISIBLE = 4
+import type { StopDisk } from '#shared/utils/terrain'
+import { computeStopDisk, defineWorld, TerrainError } from '#shared/utils/terrain'
+import { encodeDiskWire } from '../../../shared/disk-wire'
 
 const number = v.pipe(v.string(), v.toNumber(), v.finite())
 
@@ -27,9 +22,8 @@ const QuerySchema = v.object({
   craters: v.optional(v.pipe(number, v.minValue(0))),
 })
 
+/** The stop disk of world `seed` around (x, y), in the viewer's binary layout (`disk-wire`). */
 export default defineHandler(async (event) => {
-  if (!import.meta.dev) throw HTTPError.status(404)
-
   const query = await getValidatedQuery(event, QuerySchema, {
     onError: (result) => ({
       status: 400,
@@ -60,28 +54,7 @@ export default defineHandler(async (event) => {
   }
   const computeMs = performance.now() - started
 
-  const { width, height, cellSize, heights } = disk.grid
-  const count = width * height
-  const body = new ArrayBuffer(HEADER_BYTES + count * 5)
-  const view = new DataView(body)
-  view.setUint32(0, width, true)
-  view.setUint32(4, height, true)
-  view.setFloat32(8, cellSize, true)
-  view.setInt32(12, disk.origin.i, true)
-  view.setInt32(16, disk.origin.j, true)
-  view.setFloat32(20, disk.center.x, true)
-  view.setFloat32(24, disk.center.y, true)
-  // Float32Array views use host byte order; the wire format is little-endian, so write through the view.
-  for (let k = 0; k < count; k++) view.setFloat32(HEADER_BYTES + k * 4, heights[k]!, true)
-  const flags = new Uint8Array(body, HEADER_BYTES + count * 4, count)
-  for (let k = 0; k < count; k++) {
-    flags[k] =
-      (disk.traversable[k] ? FLAG_TRAVERSABLE : 0) |
-      (disk.reachable[k] ? FLAG_REACHABLE : 0) |
-      (disk.visible[k] ? FLAG_VISIBLE : 0)
-  }
-
-  return new Response(body, {
+  return new Response(encodeDiskWire(disk), {
     headers: {
       'content-type': 'application/octet-stream',
       'cache-control': 'no-store',

@@ -9,22 +9,34 @@ import {
   addTypeTemplate,
   createResolver,
   defineNuxtModule,
+  extendPages,
 } from 'nuxt/kit'
 
 const ROUTE = '/__jev/db'
 
+/** Development-only API routes under `/api/_dev`, by path, method and runtime file. */
+const API_ROUTES = [
+  { route: '/api/_dev/disk', method: 'get', file: 'disk.get' },
+  { route: '/api/_dev/publish', method: 'post', file: 'publish.post' },
+  { route: '/api/_dev/login', method: 'post', file: 'login.post' },
+  { route: '/api/_dev/fixtures', method: 'get', file: 'fixtures.get' },
+  { route: '/api/_dev/fixtures/:name', method: 'get', file: 'fixture.get' },
+] as const
+
 /**
- * The local database under `nuxt dev`: migrations applied at boot, requests refused while the
- * database disagrees with its migration files, and a Database tab in Nuxt DevTools to inspect,
- * migrate, reset and seed it. Registers nothing outside a development server.
+ * Everything that exists only under `nuxt dev`, registered after the dev check so no other build
+ * bundles it: the local database (migrations applied at boot, requests refused while the
+ * database disagrees with its migration files, a Database tab in Nuxt DevTools to inspect,
+ * migrate, reset and seed it), the `/api/_dev` routes, and the `/_dev` pages: index with a dev
+ * sign-in, stop-disk viewer and the instrument playground.
  */
 export default defineNuxtModule({
-  meta: { name: 'jev-dev-db' },
+  meta: { name: 'jev-dev' },
   setup(_options, nuxt) {
     // Declared for every build so the type checker accepts the runtime files either way.
     addTypeTemplate(
       {
-        filename: 'types/jev-dev-db.d.ts',
+        filename: 'types/jev-dev.d.ts',
         getContents: () =>
           "declare module '#dev-migrations' {\n  const directory: string\n  export default directory\n}\n",
       },
@@ -59,6 +71,27 @@ export default defineNuxtModule({
         new Response(await readFile(resolver.resolve('./runtime/panel.html'), 'utf8'), {
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
         }),
+    })
+
+    const api = resolver.resolve('./runtime/server/routes/api')
+    for (const { route, method, file } of API_ROUTES) {
+      addServerHandler({ route, method, env: 'dev', handler: `${api}/${file}` })
+    }
+
+    const pages = resolver.resolve('./runtime/app/pages')
+    extendPages((routes) => {
+      routes.push(
+        { name: 'dev', path: '/_dev', file: `${pages}/index.vue` },
+        { name: 'dev-disk', path: '/_dev/disk', file: `${pages}/disk.vue` },
+        { name: 'dev-playground', path: '/_dev/playground', file: `${pages}/playground/index.vue` },
+        {
+          name: 'dev-playground-entry',
+          path: '/_dev/playground/:id',
+          file: `${pages}/playground/entry.vue`,
+          // As a prop: the typed router has no dev routes in builds where types are generated.
+          props: true,
+        },
+      )
     })
 
     onDevtoolsReady((ctx) => {

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import type { DB } from '#server/database/db'
-import { executorOver, rebindPlaceholders } from '~~/modules/dev-db/runtime/server/utils/executor'
+import { executorOver, rebindPlaceholders } from '~~/modules/dev/runtime/server/utils/executor'
 import { createTestDb } from '../db/helpers'
 
 describe('rebindPlaceholders', () => {

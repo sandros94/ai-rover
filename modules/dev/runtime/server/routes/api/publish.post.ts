@@ -1,4 +1,3 @@
-// TODO(dev-only): publishing smoke endpoint for the journey store; removed before launch.
 import { defineHandler, HTTPError, readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
 import { DriveError, driveSegment, SEGMENT_ID } from '#shared/utils/drive'
@@ -9,9 +8,9 @@ import {
   revealDisk,
   TerrainError,
 } from '#shared/utils/terrain'
-import { publishSegment, publishStop } from '../../utils/journey/publish'
-import type { PutResult } from '../../utils/journey/store'
-import { createJourneyStore } from '../../utils/journey/store'
+import { publishSegment, publishStop } from '#server/utils/journey/publish'
+import type { PutResult } from '#server/utils/journey/store'
+import { createJourneyStore } from '#server/utils/journey/store'
 
 const finite = v.pipe(v.number(), v.finite())
 
@@ -30,8 +29,6 @@ const BodySchema = v.object({
  * journey store with `startedAt = now + startedAtOffsetS`.
  */
 export default defineHandler(async (event) => {
-  if (!import.meta.dev) throw HTTPError.status(404)
-
   const body = await readValidatedBody(event, BodySchema, {
     onError: (result) => ({
       status: 400,

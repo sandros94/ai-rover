@@ -1,6 +1,9 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
 
+/* Pages and components registered by local modules live outside `app/`, which Nuxt UI sources. */
+@source '../../../modules';
+
 @theme static {
   --font-sans: 'Public Sans', sans-serif;
 }

@@ -13,7 +13,7 @@ import { createStop } from '#server/repositories/stops'
 import { openRound } from '#server/repositories/rounds'
 import { createUser } from '#server/repositories/users'
 import type { NewSubmission } from '#server/repositories/submissions'
-import { executorOver } from '~~/modules/dev-db/runtime/server/utils/executor'
+import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 
 export const MIGRATIONS_DIR = fileURLToPath(
   new URL('../../../netlify/database/migrations/', import.meta.url),

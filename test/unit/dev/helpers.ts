@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NetlifyDB, resetDatabase } from '@netlify/database-dev'
 import { useDB } from '#server/utils/db'
-import { executorOver } from '~~/modules/dev-db/runtime/server/utils/executor'
+import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 import { MIGRATIONS_DIR } from '../db/helpers'
 
 /**

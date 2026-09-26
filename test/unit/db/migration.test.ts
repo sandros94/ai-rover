@@ -6,7 +6,7 @@ import { sql as raw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import { describe, expect, it } from 'vitest'
 import { relations } from '#server/database/schema'
-import { executorOver } from '~~/modules/dev-db/runtime/server/utils/executor'
+import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 import { JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
 
 function migrationSql(): string {

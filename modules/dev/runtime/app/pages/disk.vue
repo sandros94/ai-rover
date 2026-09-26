@@ -1,12 +1,9 @@
 <script setup lang="ts">
-// TODO(dev-only): stop-disk viewer for tuning relief and craters; removed before launch.
-// The route exists only under `nuxt dev` (see the `pages:extend` hook in nuxt.config.ts).
-
-/** Mirrors the binary layout written by `server/api/_dev/disk.get.ts`. */
-const HEADER_BYTES = 28
-const FLAG_TRAVERSABLE = 1
-const FLAG_REACHABLE = 2
-const FLAG_VISIBLE = 4
+import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import type { HeightGrid } from '#shared/utils/terrain'
+import { DEFAULT_CRATERS, DEFAULT_RELIEF, slopeAt } from '#shared/utils/terrain'
+import type { DiskWire } from '../../shared/disk-wire'
+import { decodeDiskWire } from '../../shared/disk-wire'
 
 /** Hillshade light: from the north-west (azimuth 315°), 45° above the horizon. */
 const LIGHT_ALTITUDE = Math.PI / 4
@@ -16,11 +13,7 @@ const LIGHT = {
   z: Math.sin(LIGHT_ALTITUDE),
 }
 
-interface DiskData {
-  grid: HeightGrid
-  origin: GridCell
-  center: { x: number; y: number }
-  flags: Uint8Array
+interface DiskData extends DiskWire {
   /** Lambert shade in [0, 1] per vertex, NaN where the height is. */
   shade: Float32Array
   minHeight: number
@@ -62,34 +55,14 @@ async function render(): Promise<void> {
 }
 
 function parseDisk(buffer: ArrayBuffer, computeMs: string | null): DiskData {
-  const view = new DataView(buffer)
-  const width = view.getUint32(0, true)
-  const height = view.getUint32(4, true)
-  const cellSize = view.getFloat32(8, true)
-  const origin = { i: view.getInt32(12, true), j: view.getInt32(16, true) }
-  const center = { x: view.getFloat32(20, true), y: view.getFloat32(24, true) }
-  const count = width * height
-  const heights = new Float32Array(count)
+  const disk = decodeDiskWire(buffer)
   let minHeight = Infinity
   let maxHeight = -Infinity
-  for (let k = 0; k < count; k++) {
-    const h = view.getFloat32(HEADER_BYTES + k * 4, true)
-    heights[k] = h
+  for (const h of disk.grid.heights) {
     if (h < minHeight) minHeight = h
     if (h > maxHeight) maxHeight = h
   }
-  const flags = new Uint8Array(buffer, HEADER_BYTES + count * 4, count)
-  const grid: HeightGrid = { heights, width, height, cellSize }
-  return {
-    grid,
-    origin,
-    center,
-    flags,
-    shade: hillshade(grid),
-    minHeight,
-    maxHeight,
-    computeMs,
-  }
+  return { ...disk, shade: hillshade(disk.grid), minHeight, maxHeight, computeMs }
 }
 
 /** Central-difference normals (one-sided at the edges), dotted with the light. */
@@ -143,18 +116,17 @@ function draw(): void {
         g *= s
         b *= s
       }
-      const f = disk.flags[k]!
-      if (overlays.traversable && !(f & FLAG_TRAVERSABLE)) {
+      if (overlays.traversable && !disk.traversable[k]) {
         r = r * 0.45 + 220 * 0.55
         g *= 0.45
         b *= 0.45
       }
-      if (overlays.reachable && f & FLAG_REACHABLE) {
+      if (overlays.reachable && disk.reachable[k]) {
         r *= 0.6
         g = g * 0.6 + 200 * 0.4
         b = b * 0.6 + 220 * 0.4
       }
-      if (overlays.fog && !(f & FLAG_VISIBLE)) {
+      if (overlays.fog && !disk.visible[k]) {
         r *= 0.3
         g *= 0.3
         b *= 0.3
@@ -177,6 +149,15 @@ function draw(): void {
   context.stroke()
   context.fillStyle = 'white'
   context.fillRect(cx - 3, cy - 3, 6, 6)
+
+  // The flood-fill seed: a cyan ring, distinct from the centre square when the two differ.
+  const sx = disk.reachableFrom.i
+  const sy = height - 1 - disk.reachableFrom.j
+  context.strokeStyle = 'rgb(80, 220, 240)'
+  context.lineWidth = 2
+  context.beginPath()
+  context.arc(sx, sy, 5, 0, 2 * Math.PI)
+  context.stroke()
 }
 
 watch([data, overlays], draw, { flush: 'post' })
@@ -198,7 +179,6 @@ const readout = computed(() => {
   if (!disk || !cell) return null
   const { cellSize, width } = disk.grid
   const k = cell.j * width + cell.i
-  const f = disk.flags[k]!
   const slope = (Math.atan(slopeAt(disk.grid, cell)) * 180) / Math.PI
   return {
     x: (disk.origin.i + cell.i) * cellSize,
@@ -206,9 +186,9 @@ const readout = computed(() => {
     height: disk.grid.heights[k]!,
     slope,
     flags: [
-      f & FLAG_TRAVERSABLE ? 'traversable' : 'blocked',
-      f & FLAG_REACHABLE ? 'reachable' : null,
-      f & FLAG_VISIBLE ? 'visible' : 'fogged',
+      disk.traversable[k] ? 'traversable' : 'blocked',
+      disk.reachable[k] ? 'reachable' : null,
+      disk.visible[k] ? 'visible' : 'fogged',
     ]
       .filter(Boolean)
       .join(', '),
@@ -227,10 +207,9 @@ const stats = computed(() => {
   for (let k = 0; k < heights.length; k++) {
     if (Number.isNaN(heights[k]!)) continue
     valid++
-    const f = disk.flags[k]!
-    if (f & FLAG_TRAVERSABLE) traversable++
-    if (f & FLAG_REACHABLE) reachable++
-    if (f & FLAG_VISIBLE) visible++
+    traversable += disk.traversable[k]!
+    reachable += disk.reachable[k]!
+    visible += disk.visible[k]!
   }
   const share = (n: number): string => `${n.toLocaleString()} (${((100 * n) / valid).toFixed(1)}%)`
   return {
@@ -252,7 +231,7 @@ onMounted(render)
 
 <template>
   <UContainer class="py-6 space-y-4">
-    <h1 class="text-lg font-semibold">Stop disk viewer (dev only)</h1>
+    <h1 class="text-lg font-semibold">Stop disk viewer</h1>
 
     <form class="flex flex-wrap items-end gap-3" @submit.prevent="render">
       <UFormField label="Seed">
@@ -288,7 +267,7 @@ onMounted(render)
     <div class="flex flex-wrap gap-4">
       <USwitch v-model="overlays.hillshade" label="Hillshade" />
       <USwitch v-model="overlays.traversable" label="Untraversable (red)" />
-      <USwitch v-model="overlays.reachable" label="Reachable (cyan)" />
+      <USwitch v-model="overlays.reachable" label="Reachable (cyan, ring = seed)" />
       <USwitch v-model="overlays.fog" label="Fog outside viewshed" />
     </div>
 

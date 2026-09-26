@@ -10,7 +10,7 @@ import {
   prepareLocalDatabase,
   RESET_REMEDY,
   resetLocalDatabase,
-} from '~~/modules/dev-db/runtime/server/utils/migrate'
+} from '~~/modules/dev/runtime/server/utils/migrate'
 import { copyMigrations, INIT, MIGRATIONS, startLocalDatabase } from './helpers'
 
 let local: Awaited<ReturnType<typeof startLocalDatabase>>

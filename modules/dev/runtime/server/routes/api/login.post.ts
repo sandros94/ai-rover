@@ -1,16 +1,14 @@
-// TODO(dev-only): signs a throwaway local user in without a provider, for curl and browser smoke.
 import { eq } from 'drizzle-orm'
-import { defineHandler, HTTPError, readValidatedBody } from 'nitro/h3'
+import { defineHandler, readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
-import { userAccount } from '../../database/schema'
-import { createUser } from '../../repositories/users'
-import { useDB } from '../../utils/db'
+import { userAccount } from '#server/database/schema'
+import { createUser } from '#server/repositories/users'
+import { useDB } from '#server/utils/db'
 
 const BodySchema = v.object({ handle: v.pipe(v.string(), v.regex(/^[a-z0-9-]{1,32}$/)) })
 
-/** Finds or creates `dev:<handle>` and sets the real session cookie for it; 404 outside `nuxt dev`. */
+/** Finds or creates `dev:<handle>` and sets the real session cookie for it, no provider involved. */
 export default defineHandler(async (event) => {
-  if (!import.meta.dev) throw HTTPError.status(404)
   const { handle } = await readValidatedBody(event, BodySchema)
   const db = useDB()
   const [found] = await db

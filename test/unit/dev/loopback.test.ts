@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { databaseHost, isLoopback } from '~~/modules/dev-db/runtime/server/utils/loopback'
+import { databaseHost, isLoopback } from '~~/modules/dev/runtime/server/utils/loopback'
 
 describe('isLoopback', () => {
   it.each([

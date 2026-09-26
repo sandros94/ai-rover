@@ -24,6 +24,7 @@
     "**/test-results/**",
     "**/.pgdata/**",
     "**/drizzle/**",
-    "netlify/database/migrations/**"
+    "netlify/database/migrations/**",
+    "test/fixtures/records/**"
   ]
 }
