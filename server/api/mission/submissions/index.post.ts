@@ -1,6 +1,5 @@
 import { HTTPError, readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
-import { requireUserId } from '../../../utils/auth-shim'
 import { useDB } from '../../../utils/db'
 import { useJevClient } from '../../../utils/jev'
 import { defineMissionHandler } from '../../../utils/mission/http'
@@ -12,7 +11,7 @@ const BodySchema = v.object({ goal: v.object({ x: finite, y: finite }) })
 
 /** Submits a goal; a refused one answers 422 with its reason (and the stored rejection, if any). */
 export default defineMissionHandler(async (event, { missionId, store, now }) => {
-  const userId = await requireUserId(event)
+  const userId = (await requireUserSession(event)).user.id
   const { goal } = await readValidatedBody(event, BodySchema, BAD_INPUT)
   const result = await submitGoal(useDB(), {
     store,
