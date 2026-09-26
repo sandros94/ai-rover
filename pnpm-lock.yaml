@@ -54,6 +54,12 @@ importers:
       tailwindcss:
         specifier: npm:tailwindcss@^4.3.3
         version: 4.3.3
+      unauth:
+        specifier: https://pkg.pr.new/sandros94/unauth@d07ba91
+        version: https://pkg.pr.new/sandros94/unauth@d07ba91(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(unjwt@0.7.3(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(rou3@0.8.1))
+      unjwt:
+        specifier: ^0.7.3
+        version: 0.7.3(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(rou3@0.8.1)
       unsecure:
         specifier: npm:unsecure@^0.3.1
         version: 0.3.1
@@ -5707,6 +5713,21 @@ packages:
   ultrahtml@1.7.0:
     resolution: {integrity: sha512-2xRd0VHoAQE4M+vF/DvFFB7pUV0ZxTW1TLi7lHQWnF/Sb5TPeEUV/l+hxcNnGO00ZXGnR0voCMmYRKQf+rvJ2g==}
 
+  unauth@https://pkg.pr.new/sandros94/unauth@d07ba91:
+    resolution: {integrity: sha512-z40yR4su7r6SaICD8XKJXyZvTonbe16O4V6mfsxPfBgGrsWy1lNcMEGDZ1tM0w7CI6i3l7+ZwNrI0SqwERbajw==, tarball: https://pkg.pr.new/sandros94/unauth@d07ba91}
+    version: 0.0.8
+    peerDependencies:
+      cookie-es: ^1.2.3 || ^3.1.1
+      h3: ^1.15.4 || >=2.0.1-rc.22 || ^2.0.1
+      unjwt: ^0.7.1
+    peerDependenciesMeta:
+      cookie-es:
+        optional: true
+      h3:
+        optional: true
+      unjwt:
+        optional: true
+
   unbox-primitive@1.1.0:
     resolution: {integrity: sha512-nWJ91DjeOkej/TA8pXQ3myruKpKEYgqvpw9lz4OPHj/NWFNluYrjbz9j01CJ8yKQd2g4jFoOkINCTW2I5LEEyw==}
     engines: {node: '>= 0.4'}
@@ -5783,6 +5804,23 @@ packages:
     resolution: {integrity: sha512-6bc58dPYhCMHHuwxldQxO3RRNZ4eCogZ/st++0+fcC1nr0jiGUtAdBJ2qzmLQWSxbtz42pWt4QQMiZ9HvZf5cg==}
     engines: {node: '>=0.10.0'}
 
+  unjwt@0.7.3:
+    resolution: {integrity: sha512-I0qX3hpyOa+PQv4btPQvmpLzxWRrY77u2HqwAyqNM5K1lCjOpcAPZFmVLQzbNgwVj5T9XdwtLSOUjfIX9TnfHw==}
+    peerDependencies:
+      cookie-es: ^1.2.3 || ^3.1.1
+      elysia: ^1.4.0
+      h3: ^1.15.4 || >=2.0.1-rc.22 || ^2.0.1
+      rou3: ^0.8.1
+    peerDependenciesMeta:
+      cookie-es:
+        optional: true
+      elysia:
+        optional: true
+      h3:
+        optional: true
+      rou3:
+        optional: true
+
   unplugin-auto-import@21.1.0:
     resolution: {integrity: sha512-EzrSqWIBulEqCuP7idADXH+tVKYrbwKlR5+r/lOWik0o+Ksny1kitmtryHGNSv7puzzORlcIwT/x2JStiszlHA==}
     engines: {node: '>=20.19.0'}
@@ -5851,6 +5889,9 @@ packages:
 
   unrouting@0.2.3:
     resolution: {integrity: sha512-8wOFT/fBh8YeeDr1aVmkXCqYVTMbQ6vzfNzwzybKmSfXdRhGCq1Y2B1e9YeB0JEf85gbvSwJHAMu3D2IEcLGKA==}
+
+  unsecure@0.2.3:
+    resolution: {integrity: sha512-5twLFfxyuDvjzKdRL6zxtcjRSvfb+qBEYQVKuYGfavdss9FDDb6rZAmZnSwY6vX+2djw0AOjSJUyY/+HdNnm8A==}
 
   unsecure@0.3.1:
     resolution: {integrity: sha512-jOTdGOo7vEKI3qrXRZBQK0N2HUkKZNDZxZGxQEPHVHc8zIk3j9LNIFMGqDhyk5QKYxc2WFP0rjqG2WofITBhXg==}
@@ -12419,6 +12460,14 @@ snapshots:
 
   ultrahtml@1.7.0: {}
 
+  unauth@https://pkg.pr.new/sandros94/unauth@d07ba91(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(unjwt@0.7.3(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(rou3@0.8.1)):
+    dependencies:
+      unsecure: 0.2.3
+    optionalDependencies:
+      cookie-es: 3.1.1
+      h3: 2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22))
+      unjwt: 0.7.3(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(rou3@0.8.1)
+
   unbox-primitive@1.1.0:
     dependencies:
       call-bound: 1.0.4
@@ -12511,6 +12560,12 @@ snapshots:
     dependencies:
       normalize-path: 2.1.1
 
+  unjwt@0.7.3(cookie-es@3.1.1)(h3@2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22)))(rou3@0.8.1):
+    optionalDependencies:
+      cookie-es: 3.1.1
+      h3: 2.0.1-rc.29(crossws@0.4.12(srvx@0.11.22))
+      rou3: 0.8.1
+
   unplugin-auto-import@21.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0)))(@vueuse/core@14.4.0(vue@3.5.43(typescript@7.0.2)))(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0):
     dependencies:
       local-pkg: 1.2.1
@@ -12587,6 +12642,8 @@ snapshots:
     dependencies:
       escape-string-regexp: 5.0.0
       ufo: 1.6.4
+
+  unsecure@0.2.3: {}
 
   unsecure@0.3.1: {}
 

@@ -16,13 +16,21 @@ export default defineNuxtConfig({
   compatibilityDate: 'latest',
   devtools: { enabled: true },
 
-  modules: ['@nuxt/ui', '@netlify/nuxt', './modules/dev-db'],
+  modules: ['@nuxt/ui', '@netlify/nuxt', './modules/dev-db', './modules/auth'],
 
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
     /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
     typesafeToken: '',
+    /** JSON of an `oct` JWK for A256GCM sealing the session cookies, from `NUXT_SESSION_KEY`. */
+    sessionKey: '',
+    oauth: {
+      /** Comma list of origins sign-in may redirect to, from `NUXT_OAUTH_ORIGINS`. */
+      origins: '',
+      /** From `NUXT_OAUTH_GITHUB_CLIENT_ID` and `NUXT_OAUTH_GITHUB_CLIENT_SECRET`. */
+      github: { clientId: '', clientSecret: '' },
+    },
   },
 
   imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION] },
