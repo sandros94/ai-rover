@@ -1,8 +1,9 @@
 import type { Chunk } from '../../terrain/chunk'
 import type { GridCell, HeightGrid } from '../../terrain/grid'
 import { ClientError } from '../errors'
+import type { FogSurface, GridRect } from '../fog'
 import type { Rgb } from './palette'
-import { fogRgb, hillshadeAt, reliefLight, reliefRgb, srgbToLinear } from './palette'
+import { hillshadeAt, reliefLight, reliefRgb, srgbToLinear } from './palette'
 
 /** Vertex strides of the terrain levels: full resolution, then one vertex in four each way. */
 export const LOD_STEPS = [1, 4] as const
@@ -13,6 +14,11 @@ export const LOD_FAR_M = 150
 export const LOD_HYSTERESIS_M = 16
 /** Skirt depth below chunk edges: covers the gap where a coarse chunk meets a fine one. */
 export const DEFAULT_SKIRT_M = 3
+/**
+ * Vertex stride of a chunk the fog covers entirely: it shows only the smooth fog surface, so a
+ * few vertices carry it, and the skirts close the seams with finer neighbours.
+ */
+export const FOG_STEP = 16
 
 export type TerrainChunk = Pick<Chunk, 'cx' | 'cy' | 'vertexCount' | 'cellSize' | 'heights'>
 
@@ -23,13 +29,20 @@ export interface ChunkMeshOptions {
   step?: number
   /** Depth of the skirt hung below the edges; 0 (the default) hangs none. */
   skirtM?: number
-  /** One byte per chunk vertex, 0 where the rover has not seen; absent means all seen. */
-  seen?: Uint8Array
+  /** The disk's fog, laid out by `layout`, drawn in `rgb`; absent means nothing is fogged. */
+  fog?: ChunkFog
   /**
    * Height at a world vertex index outside the chunk, so edge shading uses the neighbour's
    * ground and matches it across the seam; undefined falls back to a one-sided difference.
    */
   heightOutside?: (i: number, j: number) => number | undefined
+}
+
+/** The fog surface of the stop disk a chunk belongs to. */
+export interface ChunkFog {
+  surface: FogSurface
+  layout: DiskLayout
+  rgb: Readonly<Rgb>
 }
 
 export interface ChunkMesh {
@@ -39,7 +52,7 @@ export interface ChunkMesh {
   side: number
   /** x, y, z per vertex: the surface grid row by row, then the skirt. */
   positions: Float32Array
-  /** Linear r, g, b per vertex: ramp × hillshade, fogged where unseen. */
+  /** Linear r, g, b per vertex: tint × hillshade, blended to the fog colour by the fog amount. */
   colors: Float32Array
   indices: Uint16Array | Uint32Array
 }
@@ -52,7 +65,7 @@ export interface ChunkMesh {
  */
 export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): ChunkMesh {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
-  const { step = 1, skirtM = 0, seen } = options
+  const { step = 1, skirtM = 0 } = options
   const cells = n - 1
   if (!Number.isInteger(step) || step < 1 || cells % step !== 0) {
     throw new ClientError(
@@ -60,10 +73,10 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
       `chunkMesh: step ${step} does not divide the chunk's ${cells} cells; pass a divisor.`,
     )
   }
-  if (heights.length !== n * n || (seen && seen.length !== n * n)) {
+  if (heights.length !== n * n) {
     throw new ClientError(
       'INVALID_INPUT',
-      `chunkMesh: chunk (${cx}, ${cy}) has ${heights.length} heights and ${seen?.length ?? n * n} seen flags for ${n}×${n} vertices; pass one per vertex.`,
+      `chunkMesh: chunk (${cx}, ${cy}) has ${heights.length} heights for ${n}×${n} vertices; pass one per vertex.`,
     )
   }
   const side = cells / step + 1
@@ -81,11 +94,9 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
       const a = p * step
       const b = q * step
       const k = q * side + p
-      const h = heights[b * n + a]!
       positions[3 * k] = a * cellSize
       positions[3 * k + 1] = b * cellSize
-      positions[3 * k + 2] = h
-      paint(colors, k, a, b)
+      paint(positions, colors, k, a, b)
     }
   }
   for (let e = 0; e < skirt; e++) {
@@ -93,9 +104,8 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
     const to = side * side + e
     positions[3 * to] = positions[3 * from]!
     positions[3 * to + 1] = positions[3 * from + 1]!
-    positions[3 * to + 2] = positions[3 * from + 2]! - skirtM
-    colors.copyWithin(3 * to, 3 * from, 3 * from + 3)
   }
+  hangSkirt(positions, colors, side, skirtM)
 
   const count = (side - 1) * (side - 1) * 6 + skirt * 6
   const indices = total > 0xffff ? new Uint32Array(count) : new Uint16Array(count)
@@ -131,20 +141,23 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
 }
 
 /**
- * Writes the linear colour of chunk vertex (a, b) at `colors[3k…3k+2]`: ramp × hillshade from
- * central differences over the step, fogged where `seen` is 0. The one colour rule both
- * {@link chunkMesh} and {@link recolourChunkMesh} use, so a recoloured vertex equals a rebuilt one.
+ * Writes the height and linear colour of chunk vertex (a, b) to vertex `k`: the tint × hillshade
+ * from central differences over the step on the true heights, and, with fog, the drawn height and
+ * the blend to the fog colour from the disk's fog surface. The one rule both {@link chunkMesh}
+ * and {@link refogChunkMesh} use, so a refogged vertex equals a rebuilt one.
  */
 function vertexPainter(
   chunk: TerrainChunk,
   options: ChunkMeshOptions,
-): (colors: Float32Array, k: number, a: number, b: number) => void {
+): (positions: Float32Array, colors: Float32Array, k: number, a: number, b: number) => void {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
-  const { heightRange, step = 1, seen, heightOutside } = options
+  const { heightRange, step = 1, fog, heightOutside } = options
   const cells = n - 1
   const baseI = cx * cells
   const baseJ = cy * cells
   const span = heightRange.max - heightRange.min || 1
+  const diskIndex = fog && diskIndexer(chunk, fog)
+  const fogLinear = fog && fog.rgb.map(srgbToLinear)
 
   const heightAt = (a: number, b: number): number | undefined => {
     if (a >= 0 && a < n && b >= 0 && b < n) return heights[b * n + a]
@@ -161,45 +174,109 @@ function vertexPainter(
     return 0
   }
 
-  return (colors, k, a, b) => {
-    const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
-    const ramp = reliefRgb((heights[b * n + a]! - heightRange.min) / span)
-    let rgb: Rgb = [ramp[0] * light, ramp[1] * light, ramp[2] * light]
-    if (seen && !seen[b * n + a]) rgb = fogRgb(rgb)
-    colors[3 * k] = srgbToLinear(rgb[0])
-    colors[3 * k + 1] = srgbToLinear(rgb[1])
-    colors[3 * k + 2] = srgbToLinear(rgb[2])
+  return (positions, colors, k, a, b) => {
+    const d = diskIndex?.(a, b)
+    const amount = d === undefined ? 0 : fog!.surface.amount[d]!
+    positions[3 * k + 2] = d === undefined ? heights[b * n + a]! : fog!.surface.heights[d]!
+    let r = 0
+    let g = 0
+    let bl = 0
+    if (amount < 1) {
+      const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
+      const tint = reliefRgb((heights[b * n + a]! - heightRange.min) / span)
+      r = srgbToLinear(tint[0] * light)
+      g = srgbToLinear(tint[1] * light)
+      bl = srgbToLinear(tint[2] * light)
+    }
+    if (amount > 0) {
+      r += (fogLinear![0]! - r) * amount
+      g += (fogLinear![1]! - g) * amount
+      bl += (fogLinear![2]! - bl) * amount
+    }
+    colors[3 * k] = r
+    colors[3 * k + 1] = g
+    colors[3 * k + 2] = bl
   }
 }
 
-/**
- * Recolours, in place, the listed chunk vertices (local indices `b · n + a`) of a mesh
- * {@link chunkMesh} built with the same step and skirt, to `options.seen`; vertices off the
- * mesh's step lattice are not drawn and are skipped. The skirt copies its edge colours again.
- * Positions and indices are untouched, so a fog change costs no rebuild.
- */
-export function recolourChunkMesh(
-  mesh: ChunkMesh,
+/** Disk-grid index of chunk vertex (a, b), or undefined off the disk grid. */
+function diskIndexer(
   chunk: TerrainChunk,
-  options: ChunkMeshOptions & { vertices: ArrayLike<number> },
-): void {
-  const { vertices, step = 1, skirtM = 0 } = options
-  const n = chunk.vertexCount
-  const side = mesh.side
-  const paint = vertexPainter(chunk, options)
-  for (let v = 0; v < vertices.length; v++) {
-    const local = vertices[v]!
-    const a = local % n
-    const b = (local - a) / n
-    if (a % step !== 0 || b % step !== 0 || b >= n) continue
-    paint(mesh.colors, (b / step) * side + a / step, a, b)
+  fog: Pick<ChunkFog, 'surface' | 'layout'>,
+): (a: number, b: number) => number | undefined {
+  const { width, origin } = fog.layout
+  const rows = fog.surface.amount.length / width
+  const cells = chunk.vertexCount - 1
+  const i0 = chunk.cx * cells - origin.i
+  const j0 = chunk.cy * cells - origin.j
+  return (a, b) => {
+    const i = i0 + a
+    const j = j0 + b
+    return i >= 0 && i < width && j >= 0 && j < rows ? j * width + i : undefined
   }
+}
+
+/** Sets the skirt, hung `skirtM` below the edge, to the edge's heights and colours. */
+function hangSkirt(
+  positions: Float32Array,
+  colors: Float32Array,
+  side: number,
+  skirtM: number,
+): void {
   if (skirtM <= 0) return
   const edge = boundary(side)
   for (let e = 0; e < edge.length; e++) {
     const from = edge[e]!
-    mesh.colors.copyWithin(3 * (side * side + e), 3 * from, 3 * from + 3)
+    const to = side * side + e
+    positions[3 * to + 2] = positions[3 * from + 2]! - skirtM
+    colors.copyWithin(3 * to, 3 * from, 3 * from + 3)
   }
+}
+
+/**
+ * Rewrites, in place, the heights and colours of a mesh {@link chunkMesh} built with the same
+ * step and skirt, to `options.fog`: what a reveal changes. Plan positions and indices are
+ * untouched, so a fog change costs no new geometry.
+ */
+export function refogChunkMesh(
+  mesh: ChunkMesh,
+  chunk: TerrainChunk,
+  options: ChunkMeshOptions,
+): void {
+  const { step = 1, skirtM = 0 } = options
+  const side = mesh.side
+  const paint = vertexPainter(chunk, options)
+  for (let q = 0; q < side; q++)
+    for (let p = 0; p < side; p++)
+      paint(mesh.positions, mesh.colors, q * side + p, p * step, q * step)
+  hangSkirt(mesh.positions, mesh.colors, side, skirtM)
+}
+
+/** Whether the fog covers every vertex of the chunk fully, so it may be drawn at {@link FOG_STEP}. */
+export function chunkFogged(
+  chunk: TerrainChunk,
+  fog: Pick<ChunkFog, 'surface' | 'layout'>,
+): boolean {
+  const n = chunk.vertexCount
+  const index = diskIndexer(chunk, fog)
+  for (let b = 0; b < n; b++) {
+    for (let a = 0; a < n; a++) {
+      const d = index(a, b)
+      if (d === undefined || fog.surface.amount[d] !== 1) return false
+    }
+  }
+  return true
+}
+
+/** The disk-grid rectangle a chunk's vertices cover. */
+export function chunkRect(
+  chunk: Pick<Chunk, 'cx' | 'cy' | 'vertexCount'>,
+  layout: DiskLayout,
+): GridRect {
+  const cells = chunk.vertexCount - 1
+  const i0 = chunk.cx * cells - layout.origin.i
+  const j0 = chunk.cy * cells - layout.origin.j
+  return { i0, j0, i1: i0 + chunk.vertexCount, j1: j0 + chunk.vertexCount }
 }
 
 /** Layout of the stop disk grid that reveal vertex indices (`j · width + i`) refer to. */
@@ -207,82 +284,6 @@ export interface DiskLayout {
   width: number
   /** World vertex index of disk vertex 0. */
   origin: GridCell
-}
-
-/** A chunk whose fog is to follow a drive's reveals. */
-export interface FogChunk {
-  chunk: TerrainChunk
-  /** The stop's own seen flags per chunk vertex; absent means all seen, so nothing to lift. */
-  base?: Uint8Array
-  /** The flags drawn now, when they differ from `base`. */
-  shown?: Uint8Array
-}
-
-export interface FogChange {
-  /** `cx,cy` of the chunk. */
-  key: string
-  /** The chunk's flags to draw: `base` lifted wherever a reveal names one of its vertices. */
-  seen: Uint8Array
-  /** Local vertex indices whose flag differs from what is drawn now. */
-  vertices: number[]
-}
-
-/**
- * What a drive's reveals change in the drawn fog: per chunk touched now or lifted before, the
- * flags to draw and the vertices that differ from `shown`. A vertex on a chunk edge is stored by
- * every chunk sharing it and is lifted in each. Fewer reveals than before (a seek back) re-fog
- * what they no longer name. Chunks with nothing to change are left out.
- */
-export function fogDelta(
-  chunks: readonly FogChunk[],
-  reveals: readonly { vertices: ArrayLike<number> }[],
-  layout: DiskLayout,
-): FogChange[] {
-  const byKey = new Map<string, FogChunk>()
-  for (const entry of chunks) {
-    if (entry.base) byKey.set(`${entry.chunk.cx},${entry.chunk.cy}`, entry)
-  }
-  const first = chunks[0]?.chunk
-  if (!first || byKey.size === 0) return []
-  const n = first.vertexCount
-  const cells = n - 1
-  const lifted = new Map<string, number[]>()
-  const lift = (cx: number, cy: number, a: number, b: number) => {
-    const key = `${cx},${cy}`
-    if (!byKey.has(key)) return
-    let list = lifted.get(key)
-    if (!list) lifted.set(key, (list = []))
-    list.push(b * n + a)
-  }
-  for (const group of reveals) {
-    for (let v = 0; v < group.vertices.length; v++) {
-      const k = group.vertices[v]!
-      const gi = k % layout.width
-      const i = layout.origin.i + gi
-      const j = layout.origin.j + (k - gi) / layout.width
-      const cx = Math.floor(i / cells)
-      const cy = Math.floor(j / cells)
-      const a = i - cx * cells
-      const b = j - cy * cells
-      lift(cx, cy, a, b)
-      if (a === 0) lift(cx - 1, cy, cells, b)
-      if (b === 0) lift(cx, cy - 1, a, cells)
-      if (a === 0 && b === 0) lift(cx - 1, cy - 1, cells, cells)
-    }
-  }
-  const out: FogChange[] = []
-  for (const [key, entry] of byKey) {
-    const list = lifted.get(key)
-    if (!list && !entry.shown) continue
-    const base = entry.base!
-    const seen = base.slice()
-    for (const local of list ?? []) seen[local] = 1
-    const drawn = entry.shown ?? base
-    const vertices: number[] = []
-    for (let k = 0; k < seen.length; k++) if (seen[k] !== drawn[k]) vertices.push(k)
-    if (vertices.length > 0) out.push({ key, seen, vertices })
-  }
-  return out
 }
 
 /** Surface vertex indices around the grid edge, counter-clockwise from above, from (0, 0). */
@@ -319,14 +320,13 @@ export function chunkDistance(
 /**
  * Cuts a stitched grid (as `assembleDiskGrid` or the dev disk route lays one out) back into its
  * chunks of `vertexCount` vertices, row by row from the south-west; chunks with any missing
- * height are skipped. `seen`, one byte per grid vertex, is cut alongside.
+ * height are skipped.
  */
 export function chunksFromGrid(
   grid: HeightGrid,
   origin: GridCell,
   vertexCount: number,
-  seen?: Uint8Array,
-): { chunk: TerrainChunk; seen: Uint8Array | undefined }[] {
+): { chunk: TerrainChunk }[] {
   const { heights, width, height, cellSize } = grid
   const cells = vertexCount - 1
   if (origin.i % cells !== 0 || origin.j % cells !== 0) {
@@ -337,18 +337,16 @@ export function chunksFromGrid(
   }
   const cx0 = origin.i / cells
   const cy0 = origin.j / cells
-  const out: { chunk: TerrainChunk; seen: Uint8Array | undefined }[] = []
+  const out: { chunk: TerrainChunk }[] = []
   for (let gy = 0; gy + cells < height; gy += cells) {
     for (let gx = 0; gx + cells < width; gx += cells) {
       const chunkHeights = new Float32Array(vertexCount * vertexCount)
-      const chunkSeen = seen && new Uint8Array(vertexCount * vertexCount)
       let complete = true
       for (let b = 0; b < vertexCount && complete; b++) {
         const from = (gy + b) * width + gx
         const row = heights.subarray(from, from + vertexCount)
         if (row.some(Number.isNaN)) complete = false
         chunkHeights.set(row, b * vertexCount)
-        chunkSeen?.set(seen!.subarray(from, from + vertexCount), b * vertexCount)
       }
       if (!complete) continue
       out.push({
@@ -359,7 +357,6 @@ export function chunksFromGrid(
           cellSize,
           heights: chunkHeights,
         },
-        seen: chunkSeen,
       })
     }
   }

@@ -4,12 +4,15 @@ import {
   chunkLevel,
   chunkMesh,
   chunksFromGrid,
-  fogDelta,
+  chunkFogged,
+  chunkRect,
+  FOG_STEP,
   LOD_FAR_M,
   LOD_HYSTERESIS_M,
-  recolourChunkMesh,
+  refogChunkMesh,
 } from '#shared/utils/client/scene/terrain-mesh'
-import { reliefLight, reliefRgb, srgbToLinear } from '#shared/utils/client/scene/palette'
+import { FOG_FILL, reliefLight, reliefRgb, srgbToLinear } from '#shared/utils/client/scene/palette'
+import { fogSurface, revealTimes, updateRevealTimes } from '#shared/utils/client/fog'
 
 const RANGE = { min: 0, max: 10 }
 
@@ -121,16 +124,30 @@ describe('chunkMesh', () => {
     }
   })
 
-  it('dims unseen vertices', () => {
-    const seen = new Uint8Array(9).fill(1)
-    seen[4] = 0
-    const mesh = chunkMesh(
-      chunk(3, () => 5),
-      { heightRange: RANGE, seen },
-    )
-    const sum = (k: number) =>
-      mesh.colors[3 * k]! + mesh.colors[3 * k + 1]! + mesh.colors[3 * k + 2]!
-    expect(sum(4)).toBeLessThan(sum(0) * 0.5)
+  it('lays fogged vertices on the fog surface in the flat fog colour', () => {
+    const c = chunk(5, (a, b) => 2 * a + b)
+    // The chunk is the whole 5 × 5 disk grid; only the west column is revealed.
+    const grid = { heights: c.heights, width: 5, height: 5, cellSize: 1 }
+    const seen = new Uint8Array(25)
+    for (let b = 0; b < 5; b++) seen[b * 5] = 1
+    const surface = fogSurface(grid, { seen })
+    const layout = { width: 5, origin: { i: 0, j: 0 } }
+    const mesh = chunkMesh(c, { heightRange: RANGE, fog: { surface, layout, rgb: FOG_FILL.dark } })
+    const plain = chunkMesh(c, { heightRange: RANGE })
+    const fogLinear = FOG_FILL.dark.map(srgbToLinear)
+    const at = (array: Float32Array, k: number, c: number) => array[3 * k + c]!
+    const revealed = [0, 5, 10, 15, 20]
+    const fogged = Array.from({ length: 25 }, (_, k) => k).filter((k) => !seen[k])
+    for (const k of revealed) {
+      expect(at(mesh.positions, k, 2)).toBe(c.heights[k])
+      for (let ch = 0; ch < 3; ch++) expect(at(mesh.colors, k, ch)).toBe(at(plain.colors, k, ch))
+    }
+    for (const k of fogged) {
+      expect(at(mesh.positions, k, 2)).toBeCloseTo(surface.heights[k]!, 6)
+      for (let ch = 0; ch < 3; ch++) expect(at(mesh.colors, k, ch)).toBeCloseTo(fogLinear[ch]!, 6)
+    }
+    // No fogged vertex shows its true height.
+    expect(mesh.positions[3 * 24 + 2]).not.toBeCloseTo(c.heights[24]!, 1)
   })
 
   it('shades edge vertices from the neighbour heights, so seams match across chunks', () => {
@@ -174,8 +191,7 @@ describe('chunksFromGrid', () => {
     const width = 5
     const heights = new Float32Array(25).map((_, k) => k)
     for (const k of [18, 19, 23, 24]) heights[k] = Number.NaN
-    const seen = new Uint8Array(25).fill(1)
-    const cut = chunksFromGrid({ heights, width, height: 5, cellSize: 1 }, { i: -2, j: 8 }, 3, seen)
+    const cut = chunksFromGrid({ heights, width, height: 5, cellSize: 1 }, { i: -2, j: 8 }, 3)
     expect(cut.map(({ chunk }) => [chunk.cx, chunk.cy])).toEqual([
       [-1, 4],
       [0, 4],
@@ -184,7 +200,6 @@ describe('chunksFromGrid', () => {
     const right = cut[1]!.chunk
     expect(Array.from(right.heights.subarray(0, 3))).toEqual([2, 3, 4])
     expect(right.heights[3]).toBe(7)
-    expect(cut[1]!.seen).toHaveLength(9)
   })
 
   it('refuses a grid whose origin is not on a chunk corner', () => {
@@ -193,61 +208,71 @@ describe('chunksFromGrid', () => {
   })
 })
 
-describe('fogDelta', () => {
-  // Two 5-vertex chunks side by side, (0, 0) and (1, 0), stitched into a 9 × 5 disk grid at
-  // world vertex (0, 0): disk index j · 9 + i. Vertex i = 4 is the shared edge.
-  const layout = { width: 9, origin: { i: 0, j: 0 } }
-  const flat = (cx: number) => chunk(5, (a, b) => 0.3 * (a + 4 * cx) + 0.1 * b, cx, 0)
-  const unseen = () => new Uint8Array(25)
-  const pair = () => [
-    { chunk: flat(0), base: unseen() },
-    { chunk: flat(1), base: unseen() },
-  ]
-
-  it('lifts revealed vertices in every chunk holding them, the shared edge in both', () => {
-    // (1, 1) lies in the left chunk only; (4, 2) on the edge both chunks store.
-    const changes = fogDelta(pair(), [{ vertices: [1 * 9 + 1] }, { vertices: [2 * 9 + 4] }], layout)
-    expect(changes.map((c) => c.key)).toEqual(['0,0', '1,0'])
-    expect(changes[0]!.vertices.toSorted((a, b) => a - b)).toEqual([6, 14])
-    expect(changes[1]!.vertices).toEqual([10])
-    expect(changes[0]!.seen[6]).toBe(1)
-    expect(changes[1]!.seen[10]).toBe(1)
-    expect(changes[1]!.seen.reduce((n, v) => n + v, 0)).toBe(1)
-  })
-
-  it('reports only what differs from the shown fog, and re-fogs after a seek back', () => {
-    const chunks = pair()
-    const first = fogDelta(chunks, [{ vertices: [1 * 9 + 1] }], layout)
-    const shown = chunks.map((c, k) => ({
-      ...c,
-      shown: first.find((f) => f.key === `${k},0`)?.seen,
-    }))
-    expect(fogDelta(shown, [{ vertices: [1 * 9 + 1] }], layout)).toEqual([])
-    const back = fogDelta(shown, [], layout)
-    expect(back).toHaveLength(1)
-    expect(back[0]).toMatchObject({ key: '0,0', vertices: [6] })
-    expect(back[0]!.seen[6]).toBe(0)
-  })
-
-  it('leaves chunks without fog and indices outside every chunk alone', () => {
-    const chunks = [{ chunk: flat(0) }, { chunk: flat(1), base: unseen() }]
-    expect(fogDelta(chunks, [{ vertices: [1 * 9 + 1, 9 * 5 + 3] }], layout)).toEqual([])
+describe('chunkRect', () => {
+  it('is the disk-grid rectangle of the chunk vertices', () => {
+    const c = chunk(5, () => 0, 1, 2)
+    expect(chunkRect(c, { width: 20, origin: { i: -4, j: 0 } })).toEqual({
+      i0: 8,
+      j0: 8,
+      i1: 13,
+      j1: 13,
+    })
   })
 })
 
-describe('recolourChunkMesh', () => {
-  it('matches a mesh built with the new fog, at both levels and on the skirt', () => {
-    const c = chunk(9, (a, b) => 0.2 * a + 0.05 * b * b)
-    const before = new Uint8Array(81)
-    const after = before.slice()
-    const lifted = [0, 4, 40, 44, 80, 13]
-    for (const k of lifted) after[k] = 1
-    for (const step of [1, 4]) {
-      const options = { heightRange: RANGE, step, skirtM: 3 }
-      const mesh = chunkMesh(c, { ...options, seen: before })
-      recolourChunkMesh(mesh, c, { ...options, seen: after, vertices: lifted })
-      const fresh = chunkMesh(c, { ...options, seen: after })
-      expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
+describe('fog on chunks', () => {
+  // One 9-vertex chunk at (1, 0) inside a 17 × 9 disk grid at world vertex (0, 0).
+  const layout = { width: 17, origin: { i: 0, j: 0 } }
+  const c = chunk(9, (a, b) => 0.2 * (a + 8) + 0.05 * b * b, 1, 0)
+  const disk = (() => {
+    const heights = new Float32Array(17 * 9)
+    for (let j = 0; j < 9; j++)
+      for (let i = 0; i < 17; i++) heights[j * 17 + i] = 0.2 * i + 0.05 * j * j
+    return { heights, width: 17, height: 9, cellSize: 1 }
+  })()
+  const westOnly = new Uint8Array(17 * 9)
+  for (let j = 0; j < 9; j++) for (let i = 0; i < 4; i++) westOnly[j * 17 + i] = 1
+
+  it('knows a chunk is wholly fogged until a reveal touches it', () => {
+    const surface = fogSurface(disk, { seen: westOnly })
+    expect(chunkFogged(c, { surface, layout })).toBe(true)
+    const lifted = westOnly.slice()
+    lifted[4 * 17 + 12] = 1
+    expect(chunkFogged(c, { surface: fogSurface(disk, { seen: lifted }), layout })).toBe(false)
+    expect(FOG_STEP).toBeGreaterThan(4)
+  })
+
+  it('refogs positions and colours in place to match a fresh build, at every level and the skirt', () => {
+    const lifted = westOnly.slice()
+    for (const [i, j] of [
+      [8, 0],
+      [12, 4],
+      [16, 8],
+      [9, 1],
+      [13, 5],
+    ] as const)
+      lifted[j * 17 + i] = 1
+    const revealedAt = revealTimes(westOnly)
+    updateRevealTimes(revealedAt, lifted, 100, 17)
+    const before = fogSurface(disk, { seen: westOnly })
+    for (const now of [100 + 300, 100 + 600]) {
+      const after = fogSurface(disk, { seen: lifted, revealedAt, now })
+      for (const step of [1, 4, 8]) {
+        const options = { heightRange: RANGE, step, skirtM: 3 }
+        const fog = { layout, rgb: FOG_FILL.light }
+        const mesh = chunkMesh(c, { ...options, fog: { ...fog, surface: before } })
+        refogChunkMesh(mesh, c, { ...options, fog: { ...fog, surface: after } })
+        const fresh = chunkMesh(c, { ...options, fog: { ...fog, surface: after } })
+        expect(Array.from(mesh.positions)).toEqual(Array.from(fresh.positions))
+        expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
+      }
     }
+    // Once the fade is over, a revealed vertex sits on its true height.
+    const done = fogSurface(disk, { seen: lifted, revealedAt, now: 100 + 600 })
+    const mesh = chunkMesh(c, {
+      heightRange: RANGE,
+      fog: { surface: done, layout, rgb: FOG_FILL.light },
+    })
+    expect(mesh.positions[3 * (4 * 9 + 4) + 2]).toBe(c.heights[4 * 9 + 4])
   })
 })

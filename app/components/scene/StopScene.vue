@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { TresCanvas } from '@tresjs/core'
 import { GridHelper, NoToneMapping, Vector3 } from 'three'
-import type { DiskLayout, TerrainChunk } from '#shared/utils/client/scene'
-import { framePlacement, HILLSHADE_LIGHT, SCENE_COLORS } from '#shared/utils/client/scene'
+import type { GridRect } from '#shared/utils/client'
+import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
+import {
+  FOG_FILL,
+  framePlacement,
+  HILLSHADE_LIGHT,
+  LOD_FAR_M,
+  rgbHex,
+} from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
 import type { RoverVariant } from '~/composables/useRoverVariant'
@@ -10,6 +17,7 @@ import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
 import RouteLine from './RouteLine.vue'
 import RoverModel from './RoverModel.vue'
+import SceneAtmosphere from './SceneAtmosphere.vue'
 import TerrainChunks from './TerrainChunks.vue'
 import TrailLayer from './TrailLayer.vue'
 
@@ -19,10 +27,12 @@ const props = withDefaults(
     frame: Float32Array
     geometry?: ResolvedRoverGeometry
     /** The stop disk's chunks; without any, the rover stands on a flat grid at its own height. */
-    chunks?: { chunk: TerrainChunk; seen?: Uint8Array }[]
+    chunks?: { chunk: TerrainChunk }[]
     /** Height span of the disk for the colour ramp; required with `chunks`. */
     heightRange?: { min: number; max: number }
     heightAt?: (x: number, y: number) => number | undefined
+    /** Height of the ground as drawn, fog included, for the route; by default `heightAt`. */
+    drawnHeightAt?: (x: number, y: number) => number | undefined
     stops?: { x: number; y: number }[]
     keyframes?: KeyframeBlock
     /** Sim seconds, for the path driven so far. */
@@ -31,9 +41,8 @@ const props = withDefaults(
     deaths?: { x: number; y: number; z: number; headingRad: number }[]
     /** Radius of the red circle around each death, metres. */
     deathRadiusM?: number
-    /** What the playing drive has seen so far, as disk-grid indices laid out by `layout`. */
-    reveals?: readonly { vertices: ArrayLike<number> }[]
-    layout?: DiskLayout
+    /** The stop disk's fog over `chunks`; without it every chunk shows its true ground. */
+    fog?: ChunkFog & { rects?: GridRect[] }
     /** The rover to draw; by default the JPL model at this device's detail. */
     roverVariant?: RoverVariant
   }>(),
@@ -42,14 +51,14 @@ const props = withDefaults(
     chunks: () => [],
     heightRange: () => ({ min: 0, max: 1 }),
     heightAt: undefined,
+    drawnHeightAt: undefined,
     stops: () => [],
     keyframes: undefined,
     t: 0,
     route: () => [],
     deaths: () => [],
     deathRadiusM: undefined,
-    reveals: () => [],
-    layout: undefined,
+    fog: undefined,
     roverVariant: undefined,
   },
 )
@@ -74,6 +83,14 @@ const target = computed(() => ({ ...rover.value, z: rover.value.z + 1 }))
 const SUN = new Vector3(HILLSHADE_LIGHT.x, HILLSHADE_LIGHT.y, HILLSHADE_LIGHT.z)
 /** Fill from a pale dusty sky above and the warm ground below. */
 const HEMISPHERE = { sky: '#e8dccb', ground: '#6b5a48' }
+/**
+ * Sky and distance fog in the colour of unseen ground, so what is too far to make out and what
+ * has not been seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
+ */
+const colorMode = useColorMode()
+const sky = computed(() => rgbHex(FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light']))
+const HAZE = { near: LOD_FAR_M, far: 4 * LOD_FAR_M }
+
 /** Ground for a scene without terrain: a 1 m grid in the rover's ground plane. */
 const plane = new GridHelper(40, 40, '#a8a29e', '#57534e')
 plane.rotation.x = Math.PI / 2
@@ -86,8 +103,9 @@ onBeforeUnmount(() => plane.dispose())
     :dpr="[1, 2]"
     power-preference="high-performance"
     :tone-mapping="NoToneMapping"
-    :clear-color="SCENE_COLORS.sky"
+    :clear-color="sky"
   >
+    <SceneAtmosphere :color="sky" :near="HAZE.near" :far="HAZE.far" />
     <FollowCamera :target="target" :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]" />
     <TresHemisphereLight
       :sky-color="HEMISPHERE.sky"
@@ -101,11 +119,10 @@ onBeforeUnmount(() => plane.dispose())
       :height-range="heightRange"
       :focus="focus"
       :height-at="heightAt"
-      :reveals="reveals"
-      :layout="layout"
+      :fog="fog"
     />
     <primitive v-else :object="plane" />
-    <RouteLine v-if="route.length > 1" :route="route" :height-at="heightAt" />
+    <RouteLine v-if="route.length > 1" :route="route" :height-at="drawnHeightAt ?? heightAt" />
     <TrailLayer :stops="stops" :keyframes="keyframes" :t="t" :height-at="heightAt" />
     <DeathGhosts
       v-if="deaths.length > 0"

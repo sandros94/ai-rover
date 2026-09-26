@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import type { MapBounds, MapView, PreviewResult } from '#shared/utils/client'
+import type { GridRect, MapBounds, MapView, PreviewResult, ReliefFog } from '#shared/utils/client'
 import {
   clampView,
+  CONTOUR_INTERVAL_M,
+  CONTOUR_MAJOR_EVERY,
+  contourLines,
+  expandRect,
   fitView,
+  FOG_EDGE_CELLS,
+  FOG_FILL,
+  fogCover,
   panBy,
   reliefPixels,
   screenToWorld,
   worldToScreen,
   zoomAbout,
 } from '#shared/utils/client'
+import { RELIEF_STOPS, rgbHex } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 
@@ -16,7 +24,7 @@ const props = withDefaults(
   defineProps<{
     /** The stop disk's stitched grid; the relief is drawn once it is present. */
     terrain?: { grid: HeightGrid; origin: GridCell }
-    /** One byte per grid vertex; unseen ground is drawn dimmed and grey. */
+    /** One byte per grid vertex; unseen ground is hidden under fog, and fades in as it grows. */
     seen?: Uint8Array
     center: MapPoint
     radius: number
@@ -106,27 +114,168 @@ function measure(): void {
   if (rect) size.value = { width: rect.width, height: rect.height }
 }
 
-/** The relief at one pixel per vertex, redrawn only when the ground or the fog changes. */
-const relief = shallowRef<HTMLCanvasElement>()
+/** Fixed for the disk, so tints do not shift as ground is revealed. */
+const heightRange = computed(() => {
+  let min = Infinity
+  let max = -Infinity
+  for (const h of props.terrain?.grid.heights ?? []) {
+    if (Number.isNaN(h)) continue
+    if (h < min) min = h
+    if (h > max) max = h
+  }
+  return min <= max ? { min, max } : undefined
+})
+
+const colorMode = useColorMode()
+const fogRgb = computed(() => FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light'])
+const fade = useRevealFade(
+  () => props.seen,
+  () => props.terrain?.grid,
+)
+
+/** Contours are built per tile of this many cells, so a reveal rebuilds only the tiles it touches. */
+const CONTOUR_TILE = 64
+interface ReliefImage {
+  canvas: HTMLCanvasElement
+  context: CanvasRenderingContext2D
+  data: ImageData
+  /** Per vertex, 1 where no fog covers it: where contours may be drawn. */
+  clear: Uint8Array
+  /** Per tile, the minor and index contours in grid vertex units. */
+  contours: Map<number, { minor: Path2D; major: Path2D }>
+}
+/**
+ * The relief at one pixel per vertex, repainted where the ground, the fog or its fade changes.
+ * The image lives outside Vue's reactivity; `painted` counts repaints to trigger a redraw.
+ */
+let relief: ReliefImage | undefined
+const painted = ref(0)
+
+/** Repaints the rectangles given, or everything without them. */
+function paint(changed?: readonly GridRect[]): void {
+  const terrain = props.terrain
+  if (!terrain || typeof document === 'undefined' || typeof ImageData === 'undefined') {
+    relief = undefined
+    painted.value++
+    return
+  }
+  const { grid } = terrain
+  const { width, height } = grid
+  const frame = fade.value
+  // Flags that do not fit the grid leave nothing to hide by: draw no ground rather than all of it.
+  if (props.seen && !frame) {
+    relief = undefined
+    painted.value++
+    return
+  }
+  if (!relief || relief.data.width !== width || relief.data.height !== height) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')
+    if (!context) return
+    relief = {
+      canvas,
+      context,
+      data: new ImageData(width, height),
+      clear: new Uint8Array(width * height),
+      contours: new Map(),
+    }
+    changed = undefined
+  }
+  const fog = frame && { ...frame.fog, rgb: fogRgb.value, origin: terrain.origin }
+  // The soft edge moves with a reveal: repaint that far around each change.
+  const areas = changed
+    ? changed.map((rect) => expandRect(rect, FOG_EDGE_CELLS + 1, grid))
+    : [{ i0: 0, j0: 0, i1: width, j1: height }]
+  for (const area of areas) paintArea(relief, grid, fog, area)
+  painted.value++
+}
+
+function paintArea(
+  image: ReliefImage,
+  grid: HeightGrid,
+  fog: ReliefFog | undefined,
+  area: GridRect,
+): void {
+  const { width, height } = grid
+  reliefPixels(grid, { heightRange: heightRange.value, fog, rect: area, into: image.data.data })
+  const cover = fog && fogCover(fog, grid, { rect: area })
+  const areaWidth = area.i1 - area.i0
+  for (let j = area.j0; j < area.j1; j++) {
+    for (let i = area.i0; i < area.i1; i++) {
+      image.clear[j * width + i] =
+        !cover || cover[(j - area.j0) * areaWidth + (i - area.i0)] === 0 ? 1 : 0
+    }
+  }
+  image.context.putImageData(
+    image.data,
+    0,
+    0,
+    area.i0,
+    height - area.j1,
+    areaWidth,
+    area.j1 - area.j0,
+  )
+  buildContours(image, area)
+}
+
+function buildContours(image: ReliefImage, area: GridRect): void {
+  const terrain = props.terrain
+  if (!terrain || typeof Path2D === 'undefined') return
+  const { width, height } = terrain.grid
+  const tilesX = Math.ceil((width - 1) / CONTOUR_TILE)
+  // A tile holds cells [t·T, (t+1)·T): the vertices up to (t+1)·T inclusive.
+  const first = (v: number) => Math.max(0, Math.floor((v - 1) / CONTOUR_TILE))
+  const last = (v: number, size: number) =>
+    Math.min(Math.ceil((size - 1) / CONTOUR_TILE), Math.ceil(v / CONTOUR_TILE)) - 1
+  for (let ty = first(area.j0); ty <= last(area.j1, height); ty++) {
+    for (let tx = first(area.i0); tx <= last(area.i1, width); tx++) {
+      const rect = {
+        i0: tx * CONTOUR_TILE,
+        j0: ty * CONTOUR_TILE,
+        i1: Math.min(width, (tx + 1) * CONTOUR_TILE + 1),
+        j1: Math.min(height, (ty + 1) * CONTOUR_TILE + 1),
+      }
+      const minor = new Path2D()
+      const major = new Path2D()
+      for (const level of contourLines(terrain.grid, { mask: image.clear, rect })) {
+        const path = level.major ? major : minor
+        const s = level.segments
+        for (let k = 0; k < s.length; k += 4) {
+          path.moveTo(s[k]!, s[k + 1]!)
+          path.lineTo(s[k + 2]!, s[k + 3]!)
+        }
+      }
+      image.contours.set(ty * tilesX + tx, { minor, major })
+    }
+  }
+}
+
 watch(
-  () => [props.terrain, props.seen] as const,
-  ([terrain, seen]) => {
-    relief.value = undefined
-    if (!terrain || typeof document === 'undefined') return
-    const { width, height } = terrain.grid
-    const image = document.createElement('canvas')
-    image.width = width
-    image.height = height
-    const context = image.getContext('2d')
-    if (!context || typeof ImageData === 'undefined') return
-    const pixels = reliefPixels(terrain.grid, {
-      seen: seen?.length === width * height ? seen : undefined,
-    })
-    context.putImageData(new ImageData(pixels, width, height), 0, 0)
-    relief.value = image
+  [() => props.terrain, fogRgb, heightRange, fade] as const,
+  (next, previous) => {
+    const onlyFade = previous?.slice(0, 3).every((value, k) => value === next[k])
+    paint(onlyFade ? next[3]?.rects : undefined)
   },
   { immediate: true },
 )
+
+/** Contour stroke widths in screen pixels, and the zoom (pixels per metre) where 1 m lines show. */
+const CONTOUR_STYLE = { minorPx: 0.6, majorPx: 1.2, minorFrom: 1, minorFull: 2.5 }
+
+const legend = computed(() => {
+  const range = heightRange.value
+  if (!range) return undefined
+  const stops = RELIEF_STOPS.map(
+    (rgb, k) => `${rgbHex(rgb)} ${(100 * k) / (RELIEF_STOPS.length - 1)}%`,
+  )
+  return {
+    gradient: `linear-gradient(to right, ${stops.join(', ')})`,
+    min: range.min.toFixed(0),
+    max: range.max.toFixed(0),
+  }
+})
 
 let frame = 0
 function scheduleDraw(): void {
@@ -148,7 +297,7 @@ function draw(): void {
   if (!context) return
   context.setTransform(ratio, 0, 0, ratio, 0, 0)
   context.clearRect(0, 0, current.width, current.height)
-  const image = relief.value
+  const image = relief
   const terrain = props.terrain
   if (!image || !terrain) return
   const { cellSize, height } = terrain.grid
@@ -159,10 +308,42 @@ function draw(): void {
   })
   const side = cellSize * current.scale
   context.imageSmoothingEnabled = side < 3
-  context.drawImage(image, topLeft.x, topLeft.y, image.width * side, image.height * side)
+  context.drawImage(
+    image.canvas,
+    topLeft.x,
+    topLeft.y,
+    image.canvas.width * side,
+    image.canvas.height * side,
+  )
+  if (image.contours.size === 0) return
+
+  // Contours are in grid vertex units: scale by the cell, flip north up, from vertex (0, 0).
+  const corner = worldToScreen(current, {
+    x: terrain.origin.i * cellSize,
+    y: terrain.origin.j * cellSize,
+  })
+  context.setTransform(ratio * side, 0, 0, -ratio * side, ratio * corner.x, ratio * corner.y)
+  context.strokeStyle = CONTOUR_COLOR
+  context.lineCap = 'round'
+  const { minorPx, majorPx, minorFrom, minorFull } = CONTOUR_STYLE
+  // 1 m lines closer than a pixel or two apart would be a smear: they fade in with the zoom.
+  const minorAlpha = Math.min(1, Math.max(0, (current.scale - minorFrom) / (minorFull - minorFrom)))
+  if (minorAlpha > 0) {
+    context.globalAlpha = 0.3 * minorAlpha
+    context.lineWidth = minorPx / side
+    for (const tile of image.contours.values()) context.stroke(tile.minor)
+  }
+  context.globalAlpha = 0.5
+  context.lineWidth = majorPx / side
+  for (const tile of image.contours.values()) context.stroke(tile.major)
+  context.globalAlpha = 1
+  context.setTransform(ratio, 0, 0, ratio, 0, 0)
 }
 
-watch([view, relief], scheduleDraw)
+/** Contours are a darker line over any tint. */
+const CONTOUR_COLOR = '#2a1408'
+
+watch([view, painted], scheduleDraw)
 
 let observer: ResizeObserver | undefined
 onMounted(() => {
@@ -491,6 +672,19 @@ function recenter(): void {
         @pointerdown.stop
         @click="recenter"
       />
+    </div>
+    <div
+      v-if="legend && terrain"
+      data-test="relief-legend"
+      class="pointer-events-none absolute bottom-2 left-2 rounded bg-(--ui-bg)/75 px-1.5 py-1 text-[10px] leading-tight text-muted tabular-nums"
+    >
+      <div class="h-1.5 w-20 rounded-sm" :style="{ background: legend.gradient }" />
+      <div class="flex justify-between gap-2">
+        <span>{{ legend.min }} m</span><span>{{ legend.max }} m</span>
+      </div>
+      <div>
+        contours {{ CONTOUR_INTERVAL_M }} m, bold {{ CONTOUR_INTERVAL_M * CONTOUR_MAJOR_EVERY }} m
+      </div>
     </div>
     <slot />
   </div>

@@ -1,7 +1,7 @@
 /**
- * The relief colours shared by the 2D map and the 3D scene: a Mars ochre height ramp, a
- * hillshade light and the fog applied to ground the rover has not seen. Channels are sRGB 0–255
- * unless a name says linear.
+ * The relief colours shared by the 2D map and the 3D scene: a hypsometric height tint, a
+ * hillshade light and the fill of ground the rover has not seen. Channels are sRGB 0–255 unless
+ * a name says linear.
  */
 
 /** Hillshade light: from the north-west (azimuth 315°), 45° above the horizon; world x east, y north, z up. */
@@ -12,41 +12,81 @@ export const HILLSHADE_LIGHT = Object.freeze({
   z: Math.sin(LIGHT_ALTITUDE),
 })
 
-/** Luma weights (Rec. 709) applied to the 8-bit channels, for greying fogged ground. */
-export const LUMA = [0.2126, 0.7152, 0.0722] as const
+/**
+ * Factor on slopes before shading: Martian ground within a stop is mostly gentle, and at its
+ * true steepness a 5° rise barely changes the light.
+ */
+export const HILLSHADE_EXAGGERATION = 2.5
 
-/** Brightness kept on ground the rover has not seen: its luma times this. */
-export const FOG_DIM = 0.45
-/** Share of an unseen vertex's colour replaced by its own grey, 0 (none) to 1 (all). */
-export const FOG_DESATURATE = 0.8
+/** Luma weights (Rec. 709) applied to the 8-bit channels. */
+export const LUMA = [0.2126, 0.7152, 0.0722] as const
 
 export type Rgb = [number, number, number]
 
-/** The ramp colour at `t`, 0 the lowest ground of the range and 1 the highest; clamped. */
+/**
+ * Tint stops from the lowest ground to the highest: dark umber, rust, ochre, sand, pale dust.
+ * Lightness rises at every stop and every channel with it, so the ramp reads in order without a
+ * legend and in greyscale.
+ */
+export const RELIEF_STOPS: readonly Readonly<Rgb>[] = Object.freeze([
+  [74, 38, 28],
+  [128, 62, 38],
+  [178, 104, 56],
+  [212, 152, 96],
+  [236, 206, 160],
+])
+
+/** The tint at `t`, 0 the lowest ground of the range and 1 the highest; clamped. */
 export function reliefRgb(t: number): Rgb {
-  const u = Math.min(1, Math.max(0, t))
-  return [90 + 150 * u, 45 + 125 * u, 30 + 95 * u]
+  const last = RELIEF_STOPS.length - 1
+  const u = Math.min(1, Math.max(0, t)) * last
+  const k = Math.min(last - 1, Math.floor(u))
+  const f = u - k
+  const a = RELIEF_STOPS[k]!
+  const b = RELIEF_STOPS[k + 1]!
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]
 }
 
-/** Lambert shade in [0, 1] of a surface with gradient (`gx`, `gy`) under {@link HILLSHADE_LIGHT}. */
-export function hillshadeAt(gx: number, gy: number): number {
+/**
+ * Lambert shade in [0, 1] of a surface with gradient (`gx`, `gy`) under {@link HILLSHADE_LIGHT},
+ * the gradient first scaled by `exaggeration`.
+ */
+export function hillshadeAt(
+  gx: number,
+  gy: number,
+  exaggeration: number = HILLSHADE_EXAGGERATION,
+): number {
   const L = HILLSHADE_LIGHT
-  return Math.max(0, (-gx * L.x - gy * L.y + L.z) / Math.sqrt(gx * gx + gy * gy + 1))
+  const x = gx * exaggeration
+  const y = gy * exaggeration
+  return Math.max(0, (-x * L.x - y * L.y + L.z) / Math.sqrt(x * x + y * y + 1))
 }
 
-/** Factor applied to the ramp colour for a hillshade value: a floor in full shade, above 1 in full light. */
+/** Factor applied to the tint for a hillshade value: a floor in full shade, above 1 in full light. */
 export function reliefLight(shade: number): number {
   return 0.25 + 0.95 * shade
 }
 
-/** The colour as shown on unseen ground: dimmed by {@link FOG_DIM}, greyed by {@link FOG_DESATURATE}. */
-export function fogRgb([r, g, b]: Rgb): Rgb {
-  const grey = LUMA[0] * r + LUMA[1] * g + LUMA[2] * b
-  return [
-    FOG_DIM * (r + FOG_DESATURATE * (grey - r)),
-    FOG_DIM * (g + FOG_DESATURATE * (grey - g)),
-    FOG_DIM * (b + FOG_DESATURATE * (grey - b)),
-  ]
+export type ColorMode = 'light' | 'dark'
+
+/** What unseen ground is drawn as, per colour mode; the 3D scene's distance fog and sky match it. */
+export const FOG_FILL: Readonly<Record<ColorMode, Readonly<Rgb>>> = Object.freeze({
+  light: Object.freeze([214, 208, 200] as Rgb),
+  dark: Object.freeze([43, 39, 37] as Rgb),
+})
+
+/** Relative brightness swing of the 2D fog texture around its fill. */
+export const FOG_GRAIN = 0.06
+
+/** `#rrggbb` of a colour, channels rounded and clamped. */
+export function rgbHex(rgb: Readonly<Rgb>): string {
+  return `#${rgb
+    .map((c) =>
+      Math.round(Math.min(255, Math.max(0, c)))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`
 }
 
 /** One sRGB channel, 0–255 and clamped, as a linear value in [0, 1]: what three.js vertex colours hold. */
@@ -65,7 +105,6 @@ export const SCENE_COLORS = Object.freeze({
   driven: '#fb923c',
   stop: '#d6d3d1',
   death: '#ef4444',
-  sky: '#1c1714',
 })
 
 /** Rover part colours by tone (see `PartTone`): white body, grey links, aluminium wheels. */

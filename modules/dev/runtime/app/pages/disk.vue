@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import { reliefPixels } from '#shared/utils/client'
+import { contourLines, FOG_FILL, reliefPixels } from '#shared/utils/client'
 import { DEFAULT_CRATERS, DEFAULT_RELIEF, slopeAt } from '#shared/utils/terrain'
 import type { DiskWire } from '../../shared/disk-wire'
 import { decodeDiskWire } from '../../shared/disk-wire'
@@ -20,7 +20,13 @@ const params = reactive({
   gain: DEFAULT_RELIEF.gain,
   craters: DEFAULT_CRATERS.meanPerCell,
 })
-const overlays = reactive({ hillshade: true, traversable: true, reachable: false, fog: true })
+const overlays = reactive({
+  hillshade: true,
+  contours: true,
+  traversable: true,
+  reachable: false,
+  trueRelief: false,
+})
 
 const canvas = useTemplateRef<HTMLCanvasElement>('canvas')
 const data = shallowRef<DiskData | null>(null)
@@ -69,7 +75,10 @@ function draw(): void {
   pixels.set(
     reliefPixels(disk.grid, {
       hillshade: overlays.hillshade,
-      seen: overlays.fog ? disk.visible : undefined,
+      // A development view may look through the fog; the app never does.
+      fog: overlays.trueRelief
+        ? undefined
+        : { seen: disk.visible, rgb: FOG_FILL.dark, origin: disk.origin },
       heightRange: { min: disk.minHeight, max: disk.maxHeight },
     }),
   )
@@ -93,6 +102,24 @@ function draw(): void {
     }
   }
   context.putImageData(image, 0, 0)
+
+  if (overlays.contours) {
+    // Grid vertex (i, j) is the centre of pixel (i, height − 1 − j).
+    context.setTransform(1, 0, 0, -1, 0.5, height - 0.5)
+    const mask = overlays.trueRelief ? undefined : disk.visible
+    for (const level of contourLines(disk.grid, { mask })) {
+      context.strokeStyle = level.major ? 'rgba(42, 20, 8, 0.55)' : 'rgba(42, 20, 8, 0.25)'
+      context.lineWidth = level.major ? 1 : 0.5
+      context.beginPath()
+      const s = level.segments
+      for (let k = 0; k < s.length; k += 4) {
+        context.moveTo(s[k]!, s[k + 1]!)
+        context.lineTo(s[k + 2]!, s[k + 3]!)
+      }
+      context.stroke()
+    }
+    context.setTransform(1, 0, 0, 1, 0, 0)
+  }
 
   const { cellSize } = disk.grid
   const cx = disk.center.x / cellSize - disk.origin.i
@@ -221,9 +248,10 @@ onMounted(render)
 
     <div class="flex flex-wrap gap-4">
       <USwitch v-model="overlays.hillshade" label="Hillshade" />
+      <USwitch v-model="overlays.contours" label="Contours (1 m, bold 5 m)" />
       <USwitch v-model="overlays.traversable" label="Untraversable (red)" />
       <USwitch v-model="overlays.reachable" label="Reachable (cyan, ring = seed)" />
-      <USwitch v-model="overlays.fog" label="Fog outside viewshed" />
+      <USwitch v-model="overlays.trueRelief" label="True relief (look through the fog)" />
     </div>
 
     <UAlert v-if="error" color="error" :title="error" />

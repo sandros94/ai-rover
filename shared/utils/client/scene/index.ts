@@ -1,34 +1,40 @@
-export type { Rgb } from './palette'
+export type { ColorMode, Rgb } from './palette'
 export {
-  fogRgb,
+  FOG_FILL,
+  FOG_GRAIN,
+  HILLSHADE_EXAGGERATION,
   hillshadeAt,
   HILLSHADE_LIGHT,
+  LUMA,
+  RELIEF_STOPS,
   reliefLight,
   reliefRgb,
+  rgbHex,
   ROVER_TONES,
   SCENE_COLORS,
   srgbToLinear,
 } from './palette'
 export type {
+  ChunkFog,
   ChunkMesh,
   ChunkMeshOptions,
   DiskLayout,
-  FogChange,
-  FogChunk,
   LodLevel,
   TerrainChunk,
 } from './terrain-mesh'
 export {
   chunkDistance,
+  chunkFogged,
   chunkLevel,
   chunkMesh,
+  chunkRect,
   chunksFromGrid,
   DEFAULT_SKIRT_M,
-  fogDelta,
+  FOG_STEP,
   LOD_FAR_M,
   LOD_HYSTERESIS_M,
   LOD_STEPS,
-  recolourChunkMesh,
+  refogChunkMesh,
 } from './terrain-mesh'
 export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
 export { flatFrame, framePlacement, roverParts } from './rover-parts'

@@ -22,7 +22,32 @@ export {
 } from './segment-stream'
 export type { MapBounds, MapView } from './map-transform'
 export { clampView, fitView, panBy, screenToWorld, worldToScreen, zoomAbout } from './map-transform'
-export { FOG_DESATURATE, FOG_DIM, hillshade, liftSeen, LUMA, reliefPixels } from './relief'
+export type { ReliefFog } from './relief'
+export {
+  FOG_FILL,
+  FOG_GRAIN,
+  HILLSHADE_EXAGGERATION,
+  hillshade,
+  liftSeen,
+  LUMA,
+  reliefPixels,
+} from './relief'
+export type { ContourLevel } from './contours'
+export { CONTOUR_INTERVAL_M, CONTOUR_MAJOR_EVERY, contourLines } from './contours'
+export type { FogState, FogSurface, GridRect } from './fog'
+export {
+  expandRect,
+  FOG_EDGE_CELLS,
+  FOG_HEIGHT_RADIUS_M,
+  fogCover,
+  fogSurface,
+  gridHeightAt,
+  REVEAL_FADE_MS,
+  revealProgress,
+  revealTimes,
+  unionRect,
+  updateRevealTimes,
+} from './fog'
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'
 export { serverClockOffset } from './server-clock'

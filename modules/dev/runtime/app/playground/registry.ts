@@ -1,4 +1,5 @@
 import type { Component, PropType } from 'vue'
+import { computed } from 'vue'
 import type { DriveEvent, SegmentRecord } from '#shared/utils/drive'
 import type { DiskWire } from '../../shared/disk-wire'
 import type { PlaygroundContext } from './fixtures'
@@ -19,6 +20,21 @@ export const PLAYGROUND_PROPS = {
   /** The stop disk at the record's start; present when the entry needs `disk`. */
   disk: { type: Object as PropType<DiskWire>, default: undefined },
 } as const
+
+/**
+ * The record's reveal groups reached by time `t`, as a playing drive holds them: a new array
+ * only when another group is reached, so scrubbing between reveals redraws no fog.
+ */
+export function useRevealsUntil(record: () => SegmentRecord, t: () => number) {
+  const count = computed(() => {
+    const reveals = record().reveals
+    const now = t()
+    let n = 0
+    while (n < reveals.length && reveals[n]!.t <= now) n++
+    return n
+  })
+  return computed(() => record().reveals.slice(0, count.value))
+}
 
 export interface PlaygroundEntry {
   /** URL segment under `/_dev/playground/`. */

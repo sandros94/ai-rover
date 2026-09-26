@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { usePlanPreview } from '#imports'
+import { liftSeen } from '#shared/utils/client'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
@@ -8,9 +9,16 @@ import { DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
 import PickPreview from '~/components/map/PickPreview.vue'
 import StopMap from '~/components/map/StopMap.vue'
 import type { PlanGround } from '~/workers/plan-protocol'
-import { PLAYGROUND_PROPS } from '../../playground/registry'
+import { PLAYGROUND_PROPS, useRevealsUntil } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
+
+/** The stop's own view with what the drive has revealed by the scrub time lifted from the fog. */
+const reveals = useRevealsUntil(
+  () => props.record,
+  () => props.frame[KEYFRAME_FIELDS.indexOf('t')]!,
+)
+const seen = computed(() => props.disk && liftSeen(props.disk.visible, reveals.value))
 
 const value = (name: (typeof KEYFRAME_FIELDS)[number]) =>
   props.frame[KEYFRAME_FIELDS.indexOf(name)]!
@@ -23,6 +31,9 @@ const rover = computed(() => {
     headingRad: Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)),
   }
 })
+
+/** One object per disk: a new one each frame would redraw all of the ground each frame. */
+const terrain = computed(() => props.disk && { grid: props.disk.grid, origin: props.disk.origin })
 
 const anchor = computed(() => ({ x: props.record.start.x, y: props.record.start.y }))
 
@@ -58,8 +69,8 @@ function onHover(point: MapPoint | null): void {
 <template>
   <div v-if="disk" class="grid gap-4 lg:grid-cols-[minmax(0,48rem)_22rem]">
     <StopMap
-      :terrain="{ grid: disk.grid, origin: disk.origin }"
-      :seen="disk.visible"
+      :terrain="terrain"
+      :seen="seen"
       :center="disk.center"
       :radius="DEFAULT_STOP_RADIUS"
       :anchor="anchor"
