@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
-import type { LodLevel, TerrainChunk } from '#shared/utils/client/scene'
+import type { ChunkMesh, DiskLayout, LodLevel, TerrainChunk } from '#shared/utils/client/scene'
 import {
   chunkDistance,
   chunkLevel,
   chunkMesh,
   DEFAULT_SKIRT_M,
+  fogDelta,
   LOD_STEPS,
+  recolourChunkMesh,
 } from '#shared/utils/client/scene'
 
 const props = defineProps<{
@@ -18,17 +20,27 @@ const props = defineProps<{
   focus: { x: number; y: number }
   /** World height at a point, for shading chunk edges from their neighbours. */
   heightAt?: (x: number, y: number) => number | undefined
+  /**
+   * Vertices a playing drive has seen so far, as indices of the stop disk grid laid out by
+   * `layout`: lifted from the fog on top of each chunk's own `seen`.
+   */
+  reveals?: readonly { vertices: ArrayLike<number> }[]
+  layout?: DiskLayout
 }>()
 
 /** Distance the focus must move before levels are re-evaluated. */
 const REFRESH_M = 8
+/** Fog updates per second, as the 2D map's: reveals arrive every metre, not every frame. */
+const REVEAL_HZ = 10
 
 interface Drawn {
   source: { chunk: TerrainChunk; seen?: Uint8Array }
   level: LodLevel
   mesh: Mesh
-  /** Geometry per level, built on first use. */
-  built: (BufferGeometry | undefined)[]
+  /** Geometry per level with the colours it holds, built on first use. */
+  built: ({ geometry: BufferGeometry; colors: ChunkMesh } | undefined)[]
+  /** The seen flags drawn, when the drive's reveals have changed them from the source's. */
+  shown?: Uint8Array
 }
 
 const root = new Group()
@@ -39,33 +51,62 @@ let lastFocus: { x: number; y: number } | undefined
 
 const keyOf = (chunk: TerrainChunk) => `${chunk.cx},${chunk.cy}`
 
-function build(entry: Drawn['source'], level: LodLevel): BufferGeometry {
-  const { chunk, seen } = entry
+function meshOptions(chunk: TerrainChunk, level: LodLevel, seen: Uint8Array | undefined) {
   const heightAt = props.heightAt
-  const mesh = chunkMesh(chunk, {
+  return {
     heightRange: props.heightRange,
     step: LOD_STEPS[level],
     skirtM: DEFAULT_SKIRT_M,
     seen,
-    heightOutside: heightAt && ((i, j) => heightAt(i * chunk.cellSize, j * chunk.cellSize)),
-  })
+    heightOutside:
+      heightAt && ((i: number, j: number) => heightAt(i * chunk.cellSize, j * chunk.cellSize)),
+  }
+}
+
+function build(entry: Drawn, level: LodLevel): NonNullable<Drawn['built'][number]> {
+  const chunk = entry.source.chunk
+  const mesh = chunkMesh(chunk, meshOptions(chunk, level, entry.shown ?? entry.source.seen))
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3))
   geometry.setAttribute('color', new BufferAttribute(mesh.colors, 3))
   geometry.setIndex(new BufferAttribute(mesh.indices, 1))
   geometry.computeBoundingSphere()
-  return geometry
+  return { geometry, colors: mesh }
 }
 
 function show(entry: Drawn, level: LodLevel): void {
   entry.level = level
-  entry.built[level] ??= build(entry.source, level)
-  entry.mesh.geometry = entry.built[level]!
+  entry.built[level] ??= build(entry, level)
+  entry.mesh.geometry = entry.built[level]!.geometry
 }
 
 function drop(entry: Drawn): void {
-  for (const geometry of entry.built) geometry?.dispose()
+  for (const built of entry.built) built?.geometry.dispose()
   entry.built = []
+}
+
+const reveals = useThrottled(() => props.reveals, REVEAL_HZ)
+
+/** Recolours, on the levels built so far, only the vertices whose fog the reveals change. */
+function applyFog(): void {
+  const layout = props.layout
+  if (!layout) return
+  const entries = [...drawn.values()]
+  const changes = fogDelta(
+    entries.map((e) => ({ chunk: e.source.chunk, base: e.source.seen, shown: e.shown })),
+    reveals.value ?? [],
+    layout,
+  )
+  for (const change of changes) {
+    const entry = drawn.get(change.key)!
+    entry.shown = change.seen
+    entry.built.forEach((built, level) => {
+      if (!built) return
+      const options = meshOptions(entry.source.chunk, level as LodLevel, change.seen)
+      recolourChunkMesh(built.colors, entry.source.chunk, { ...options, vertices: change.vertices })
+      built.geometry.getAttribute('color').needsUpdate = true
+    })
+  }
 }
 
 function sync(): void {
@@ -95,6 +136,7 @@ function sync(): void {
     } else if (entry.source !== source) {
       drop(entry)
       entry.source = source
+      entry.shown = undefined
     } else if (entry.level === level) {
       continue
     }
@@ -117,7 +159,15 @@ function sync(): void {
   lastFocus = { ...focus }
 }
 
-watch(() => props.chunks, sync, { immediate: true })
+watch(
+  () => props.chunks,
+  () => {
+    sync()
+    applyFog()
+  },
+  { immediate: true },
+)
+watch([reveals, () => props.layout], applyFog)
 watch(
   () => props.heightRange,
   () => {

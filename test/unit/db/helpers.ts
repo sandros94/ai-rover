@@ -13,6 +13,11 @@ import { createStop } from '#server/repositories/stops'
 import { openRound } from '#server/repositories/rounds'
 import { createUser } from '#server/repositories/users'
 import type { NewSubmission } from '#server/repositories/submissions'
+import { createSubmission } from '#server/repositories/submissions'
+import { closeRound } from '#server/repositories/rounds'
+import { createSegment, settleSegment } from '#server/repositories/segments'
+import type { Stop } from '#server/database/schema'
+import type { DriveOutcome } from '#shared/utils/drive'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 
 export const MIGRATIONS_DIR = fileURLToPath(
@@ -113,4 +118,67 @@ export function submissionInput(
   goal = { x: 0, y: 80 },
 ): NewSubmission {
   return { roundId, userId, goal, judgment: JUDGMENT, metrics: METRICS, summary: SUMMARY }
+}
+
+/** Start of the first drive of {@link seedJourney}; each drive starts two hours after the last. */
+export const JOURNEY_T0 = new Date('2026-09-25T12:00:00Z')
+const HOUR = 3_600_000
+const plus = (ms: number) => new Date(JOURNEY_T0.getTime() + ms)
+
+function journeyOutcome(kind: DriveOutcome['kind'], distanceM: number, at = { x: 0, y: 80 }) {
+  return {
+    kind,
+    reasons: kind === 'arrived' ? [] : ['stuck'],
+    distanceM,
+    durationS: distanceM * 30,
+    endPose: { ...at, headingRad: 0 },
+  } satisfies DriveOutcome
+}
+
+/**
+ * Three drives: an arrival from the landing stop to stop 1, a failure from stop 1, and a drive
+ * from stop 1 still playing, whose outcome is written but private.
+ */
+export async function seedJourney(db: DB) {
+  const seeded = await seedMission(db)
+  const { mission, user } = seeded
+  async function drive(from: Stop, k: number, result: DriveOutcome, round?: { id: string }) {
+    const r =
+      round ?? (await openRound(db, { missionId: mission.id, fromStopId: from.id, anchor: from }))
+    const submission = await createSubmission(
+      db,
+      submissionInput(r.id, user.id, { x: result.endPose.x, y: result.endPose.y }),
+    )
+    await closeRound(db, r.id, { winnerSubmissionId: submission.id, closesAt: plus(k * 2 * HOUR) })
+    return createSegment(db, {
+      missionId: mission.id,
+      roundId: r.id,
+      submissionId: submission.id,
+      fromStopId: from.id,
+      startedAt: plus(k * 2 * HOUR),
+      endsAt: plus(k * 2 * HOUR + HOUR),
+      manifestKey: `segments/${k}/manifest.json`,
+      outcome: result,
+    })
+  }
+  const arrival = await drive(seeded.stop, 0, journeyOutcome('arrived', 80), seeded.round)
+  const reached = await createStop(db, {
+    missionId: mission.id,
+    index: 1,
+    x: 0,
+    y: 80,
+    headingRad: 0,
+    manifestKey: 'missions/m/stops/1.json',
+    revealedKey: 'missions/m/revealed/1.bin',
+    fromSegmentId: arrival.id,
+  })
+  await settleSegment(db, arrival.id, { now: plus(HOUR), status: 'arrived', toStopId: reached.id })
+  const failure = await drive(reached, 1, journeyOutcome('failed', 42, { x: 30, y: 100 }))
+  await settleSegment(db, failure.id, {
+    now: plus(3 * HOUR),
+    status: 'failed',
+    death: { x: 30, y: 100 },
+  })
+  const driving = await drive(reached, 2, journeyOutcome('failed', 7, { x: 5, y: 85 }))
+  return { ...seeded, reached, arrival, failure, driving }
 }

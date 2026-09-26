@@ -6,12 +6,8 @@ const { state, error, serverOffsetMs, refresh } = useMissionState()
 
 <template>
   <UContainer class="space-y-4 py-4">
-    <header class="flex flex-wrap items-center gap-3">
-      <h1 class="text-lg font-semibold">Jev Rover</h1>
-      <div class="ml-auto">
-        <UserMenu />
-      </div>
-    </header>
+    <SiteHeader />
+    <h1 class="sr-only">Mission dashboard</h1>
     <MissionDashboard
       :state="state"
       :error="error"

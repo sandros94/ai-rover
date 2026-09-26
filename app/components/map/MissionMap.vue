@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
-import { revealedOverDisk, revealedVertexCount } from '#shared/utils/terrain'
+import { revealedVertexCount } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { PlanGround } from '~/workers/plan-protocol'
 import PickPreview from './PickPreview.vue'
-import StopMap from './StopMap.vue'
+import StopStage from './StopStage.vue'
 
 type State = MissionStateJson
 
@@ -27,6 +28,10 @@ const props = withDefaults(
      * lifted from the fog, never given to the planner, which knows only the stop's mask.
      */
     reveals?: readonly { vertices: ArrayLike<number> }[]
+    /** For the 3D view: the playback frame, the keyframes reached and the sim time. */
+    frame?: Float32Array
+    keyframes?: KeyframeBlock
+    t?: number
   }>(),
   {
     signedIn: false,
@@ -35,6 +40,9 @@ const props = withDefaults(
     plan: () => [],
     driven: () => [],
     reveals: () => [],
+    frame: undefined,
+    keyframes: undefined,
+    t: 0,
   },
 )
 
@@ -57,22 +65,16 @@ const stop = props.state.currentStop
 const anchor = computed<MapPoint>(() => props.state.round?.anchor ?? { x: stop.x, y: stop.y })
 const rules = computed(() => props.state.mission.rules)
 
-const { manifest, mask, sampler, loaded, total, error } = useStopTerrain(
+const { manifest, mask, cache, sampler, loaded, total, terrain, revealed, error } = useStopTerrain(
   props.state.mission.id,
   stop.index,
-  { center: anchor.value, ring: rules.value.segmentDistanceBand },
+  {
+    center: anchor.value,
+    ring: rules.value.segmentDistanceBand,
+  },
 )
-
-/** The whole disk, once every chunk it lists has arrived. */
-const terrain = computed(() => {
-  if (!manifest.value || !sampler.value || total.value === 0 || loaded.value < total.value) {
-    return undefined
-  }
-  return sampler.value.assembleDiskGrid(manifest.value)
-})
-const revealed = computed(() =>
-  terrain.value && mask.value ? revealedOverDisk(mask.value, terrain.value) : undefined,
-)
+const view = useMapView()
+const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 watch(
   revealed,
@@ -93,20 +95,6 @@ watch(
   },
   { immediate: true },
 )
-
-/** The fog as shown: the stop's mask with what the playing drive has seen so far lifted. */
-const shownSeen = computed(() => {
-  const base = revealed.value
-  if (!base || props.reveals.length === 0) return base
-  const seen = base.slice()
-  for (const group of props.reveals) {
-    for (let n = 0; n < group.vertices.length; n++) {
-      const k = group.vertices[n]!
-      if (k < seen.length) seen[k] = 1
-    }
-  }
-  return seen
-})
 
 const ground = computed<PlanGround | undefined>(() => {
   const m = manifest.value
@@ -133,58 +121,10 @@ const context = computed(() => ({
 
 const preview = usePlanPreview(ground, context)
 
-const picked = ref<MapPoint | null>(null)
-const submitting = ref(false)
-const refusal = ref<{ reason: string; message: string } | null>(null)
-
-function onHover(point: MapPoint | null): void {
-  if (picked.value || props.highlight) return
-  if (point) preview.request(point)
-}
-
-function onPick(point: MapPoint): void {
-  picked.value = point
-  refusal.value = null
-  preview.requestNow(point)
-}
-
-function cancel(): void {
-  picked.value = null
-  refusal.value = null
-  preview.clear()
-}
-
-watch(
-  () => props.highlight,
-  (highlight) => {
-    picked.value = null
-    refusal.value = null
-    if (highlight) preview.requestNow(highlight.goal)
-    else preview.clear()
-  },
-)
-
-async function confirm(): Promise<void> {
-  if (!picked.value) return
-  submitting.value = true
-  refusal.value = null
-  try {
-    await $fetch('/api/mission/submissions', {
-      method: 'POST',
-      body: { goal: { x: picked.value.x, y: picked.value.y } },
-    })
-    cancel()
-    emit('submitted')
-  } catch (caught) {
-    const data = (caught as { data?: { reason?: string; code?: string; message?: string } }).data
-    refusal.value = {
-      reason: data?.reason ?? data?.code ?? 'error',
-      message: data?.message ?? (caught instanceof Error ? caught.message : String(caught)),
-    }
-  } finally {
-    submitting.value = false
-  }
-}
+const { picked, submitting, refusal, onHover, onPick, cancel, confirm } = usePickSubmit(preview, {
+  highlight: () => props.highlight,
+  onSubmitted: () => emit('submitted'),
+})
 
 const rover = computed(() => props.rover ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad })
 
@@ -196,41 +136,39 @@ const submissions = computed(() =>
 <template>
   <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
     <div class="space-y-2">
-      <StopMap
+      <StopStage
+        v-model:view="view"
         :terrain="terrain"
-        :seen="shownSeen"
+        :seen="revealed"
+        :reveals="reveals"
+        :chunk-vertices="cache?.geometry?.vertexCount"
+        :height-at="heightAt"
+        :loading="{ loaded, total, error }"
         :center="manifest ? { x: manifest.stop.x, y: manifest.stop.y } : { x: stop.x, y: stop.y }"
         :radius="manifest?.radius ?? 500"
-        :anchor="state.round ? anchor : undefined"
-        :ring="rules.segmentDistanceBand"
         :rover="rover"
         :trail="state.trail"
         :plan="plan"
         :driven="driven"
         :deaths="state.deaths"
         :death-radius-m="rules.failureZone.destinationRadiusM"
+        :frame="frame"
+        :keyframes="keyframes"
+        :t="t"
+        :anchor="state.round ? anchor : undefined"
+        :ring="rules.segmentDistanceBand"
         :submissions="submissions"
         :highlight-id="highlight?.id ?? null"
         :preview="preview.result.value"
         :picked="picked"
         @hover="onHover"
         @pick="onPick"
-      >
-        <div
-          v-if="!terrain"
-          class="absolute inset-x-4 bottom-4 space-y-1 rounded-md bg-(--ui-bg)/80 p-2 text-xs"
-        >
-          <p v-if="error" class="text-error">The terrain did not load: {{ String(error) }}</p>
-          <template v-else>
-            <p class="text-muted">Loading terrain {{ loaded }} / {{ total || '…' }}</p>
-            <UProgress :model-value="total ? (100 * loaded) / total : null" size="xs" />
-          </template>
-        </div>
-      </StopMap>
+      />
       <slot name="controls" />
     </div>
     <div class="space-y-4">
       <PickPreview
+        v-if="view === '2d'"
         :result="preview.result.value"
         :pending="preview.pending.value"
         :picked="picked !== null"
@@ -239,6 +177,15 @@ const submissions = computed(() =>
         :signed-in="signedIn"
         @confirm="confirm"
         @cancel="cancel"
+      />
+      <UAlert
+        v-else
+        data-test="plan-hint"
+        color="neutral"
+        variant="subtle"
+        icon="i-lucide-map"
+        title="Switch to 2D to plan"
+        description="Destinations are picked on the flat map, inside the ring around the goal."
       />
       <slot />
     </div>

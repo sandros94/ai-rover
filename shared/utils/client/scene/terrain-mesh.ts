@@ -52,7 +52,7 @@ export interface ChunkMesh {
  */
 export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): ChunkMesh {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
-  const { heightRange, step = 1, skirtM = 0, seen, heightOutside } = options
+  const { step = 1, skirtM = 0, seen } = options
   const cells = n - 1
   if (!Number.isInteger(step) || step < 1 || cells % step !== 0) {
     throw new ClientError(
@@ -69,22 +69,7 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
   const side = cells / step + 1
   const baseI = cx * cells
   const baseJ = cy * cells
-  const span = heightRange.max - heightRange.min || 1
-
-  const heightAt = (a: number, b: number): number | undefined => {
-    if (a >= 0 && a < n && b >= 0 && b < n) return heights[b * n + a]
-    return heightOutside?.(baseI + a, baseJ + b)
-  }
-  /** Central difference over the step, one-sided where the far side has no height. */
-  const gradient = (a: number, b: number, da: number, db: number): number => {
-    const here = heights[b * n + a]!
-    const ahead = heightAt(a + da * step, b + db * step)
-    const behind = heightAt(a - da * step, b - db * step)
-    if (ahead !== undefined && behind !== undefined) return (ahead - behind) / (2 * step * cellSize)
-    if (ahead !== undefined) return (ahead - here) / (step * cellSize)
-    if (behind !== undefined) return (here - behind) / (step * cellSize)
-    return 0
-  }
+  const paint = vertexPainter(chunk, options)
 
   const edge = boundary(side)
   const skirt = skirtM > 0 ? edge.length : 0
@@ -100,13 +85,7 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
       positions[3 * k] = a * cellSize
       positions[3 * k + 1] = b * cellSize
       positions[3 * k + 2] = h
-      const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
-      const ramp = reliefRgb((h - heightRange.min) / span)
-      let rgb: Rgb = [ramp[0] * light, ramp[1] * light, ramp[2] * light]
-      if (seen && !seen[b * n + a]) rgb = fogRgb(rgb)
-      colors[3 * k] = srgbToLinear(rgb[0])
-      colors[3 * k + 1] = srgbToLinear(rgb[1])
-      colors[3 * k + 2] = srgbToLinear(rgb[2])
+      paint(colors, k, a, b)
     }
   }
   for (let e = 0; e < skirt; e++) {
@@ -149,6 +128,161 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
     colors,
     indices,
   }
+}
+
+/**
+ * Writes the linear colour of chunk vertex (a, b) at `colors[3k…3k+2]`: ramp × hillshade from
+ * central differences over the step, fogged where `seen` is 0. The one colour rule both
+ * {@link chunkMesh} and {@link recolourChunkMesh} use, so a recoloured vertex equals a rebuilt one.
+ */
+function vertexPainter(
+  chunk: TerrainChunk,
+  options: ChunkMeshOptions,
+): (colors: Float32Array, k: number, a: number, b: number) => void {
+  const { vertexCount: n, cellSize, heights, cx, cy } = chunk
+  const { heightRange, step = 1, seen, heightOutside } = options
+  const cells = n - 1
+  const baseI = cx * cells
+  const baseJ = cy * cells
+  const span = heightRange.max - heightRange.min || 1
+
+  const heightAt = (a: number, b: number): number | undefined => {
+    if (a >= 0 && a < n && b >= 0 && b < n) return heights[b * n + a]
+    return heightOutside?.(baseI + a, baseJ + b)
+  }
+  /** Central difference over the step, one-sided where the far side has no height. */
+  const gradient = (a: number, b: number, da: number, db: number): number => {
+    const here = heights[b * n + a]!
+    const ahead = heightAt(a + da * step, b + db * step)
+    const behind = heightAt(a - da * step, b - db * step)
+    if (ahead !== undefined && behind !== undefined) return (ahead - behind) / (2 * step * cellSize)
+    if (ahead !== undefined) return (ahead - here) / (step * cellSize)
+    if (behind !== undefined) return (here - behind) / (step * cellSize)
+    return 0
+  }
+
+  return (colors, k, a, b) => {
+    const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
+    const ramp = reliefRgb((heights[b * n + a]! - heightRange.min) / span)
+    let rgb: Rgb = [ramp[0] * light, ramp[1] * light, ramp[2] * light]
+    if (seen && !seen[b * n + a]) rgb = fogRgb(rgb)
+    colors[3 * k] = srgbToLinear(rgb[0])
+    colors[3 * k + 1] = srgbToLinear(rgb[1])
+    colors[3 * k + 2] = srgbToLinear(rgb[2])
+  }
+}
+
+/**
+ * Recolours, in place, the listed chunk vertices (local indices `b · n + a`) of a mesh
+ * {@link chunkMesh} built with the same step and skirt, to `options.seen`; vertices off the
+ * mesh's step lattice are not drawn and are skipped. The skirt copies its edge colours again.
+ * Positions and indices are untouched, so a fog change costs no rebuild.
+ */
+export function recolourChunkMesh(
+  mesh: ChunkMesh,
+  chunk: TerrainChunk,
+  options: ChunkMeshOptions & { vertices: ArrayLike<number> },
+): void {
+  const { vertices, step = 1, skirtM = 0 } = options
+  const n = chunk.vertexCount
+  const side = mesh.side
+  const paint = vertexPainter(chunk, options)
+  for (let v = 0; v < vertices.length; v++) {
+    const local = vertices[v]!
+    const a = local % n
+    const b = (local - a) / n
+    if (a % step !== 0 || b % step !== 0 || b >= n) continue
+    paint(mesh.colors, (b / step) * side + a / step, a, b)
+  }
+  if (skirtM <= 0) return
+  const edge = boundary(side)
+  for (let e = 0; e < edge.length; e++) {
+    const from = edge[e]!
+    mesh.colors.copyWithin(3 * (side * side + e), 3 * from, 3 * from + 3)
+  }
+}
+
+/** Layout of the stop disk grid that reveal vertex indices (`j · width + i`) refer to. */
+export interface DiskLayout {
+  width: number
+  /** World vertex index of disk vertex 0. */
+  origin: GridCell
+}
+
+/** A chunk whose fog is to follow a drive's reveals. */
+export interface FogChunk {
+  chunk: TerrainChunk
+  /** The stop's own seen flags per chunk vertex; absent means all seen, so nothing to lift. */
+  base?: Uint8Array
+  /** The flags drawn now, when they differ from `base`. */
+  shown?: Uint8Array
+}
+
+export interface FogChange {
+  /** `cx,cy` of the chunk. */
+  key: string
+  /** The chunk's flags to draw: `base` lifted wherever a reveal names one of its vertices. */
+  seen: Uint8Array
+  /** Local vertex indices whose flag differs from what is drawn now. */
+  vertices: number[]
+}
+
+/**
+ * What a drive's reveals change in the drawn fog: per chunk touched now or lifted before, the
+ * flags to draw and the vertices that differ from `shown`. A vertex on a chunk edge is stored by
+ * every chunk sharing it and is lifted in each. Fewer reveals than before (a seek back) re-fog
+ * what they no longer name. Chunks with nothing to change are left out.
+ */
+export function fogDelta(
+  chunks: readonly FogChunk[],
+  reveals: readonly { vertices: ArrayLike<number> }[],
+  layout: DiskLayout,
+): FogChange[] {
+  const byKey = new Map<string, FogChunk>()
+  for (const entry of chunks) {
+    if (entry.base) byKey.set(`${entry.chunk.cx},${entry.chunk.cy}`, entry)
+  }
+  const first = chunks[0]?.chunk
+  if (!first || byKey.size === 0) return []
+  const n = first.vertexCount
+  const cells = n - 1
+  const lifted = new Map<string, number[]>()
+  const lift = (cx: number, cy: number, a: number, b: number) => {
+    const key = `${cx},${cy}`
+    if (!byKey.has(key)) return
+    let list = lifted.get(key)
+    if (!list) lifted.set(key, (list = []))
+    list.push(b * n + a)
+  }
+  for (const group of reveals) {
+    for (let v = 0; v < group.vertices.length; v++) {
+      const k = group.vertices[v]!
+      const gi = k % layout.width
+      const i = layout.origin.i + gi
+      const j = layout.origin.j + (k - gi) / layout.width
+      const cx = Math.floor(i / cells)
+      const cy = Math.floor(j / cells)
+      const a = i - cx * cells
+      const b = j - cy * cells
+      lift(cx, cy, a, b)
+      if (a === 0) lift(cx - 1, cy, cells, b)
+      if (b === 0) lift(cx, cy - 1, a, cells)
+      if (a === 0 && b === 0) lift(cx - 1, cy - 1, cells, cells)
+    }
+  }
+  const out: FogChange[] = []
+  for (const [key, entry] of byKey) {
+    const list = lifted.get(key)
+    if (!list && !entry.shown) continue
+    const base = entry.base!
+    const seen = base.slice()
+    for (const local of list ?? []) seen[local] = 1
+    const drawn = entry.shown ?? base
+    const vertices: number[] = []
+    for (let k = 0; k < seen.length; k++) if (seen[k] !== drawn[k]) vertices.push(k)
+    if (vertices.length > 0) out.push({ key, seen, vertices })
+  }
+  return out
 }
 
 /** Surface vertex indices around the grid edge, counter-clockwise from above, from (0, 0). */

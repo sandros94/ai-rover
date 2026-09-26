@@ -18,7 +18,8 @@ type Instant = string | Date | number
 
 /**
  * The instruments over one snapshot of playback. The drive readings need a segment playing and
- * at least one keyframe reached; the mission readings are always shown.
+ * at least one keyframe reached; the round and the journey tally show when given, so a replay
+ * can leave out what is not about its drive.
  */
 withDefaults(
   defineProps<{
@@ -42,14 +43,17 @@ withDefaults(
     solsEpoch: Instant
     /** Wall-clock now on the server's clock, epoch milliseconds. */
     nowMs: number
-    round: { closesAt: string | Date | null; submissions: RoundSubmission[] } | null
-    driving: boolean
-    rules: MissionRules
-    tally: JourneyTally
+    /** The live round, with the mission's rules; absent on a replay. */
+    live?: {
+      round: { closesAt: string | Date | null; submissions: RoundSubmission[] } | null
+      driving: boolean
+      rules: MissionRules
+      tally: JourneyTally
+    }
     cellSize?: number
     slopeLimitDeg?: number
   }>(),
-  { drive: null, cellSize: 1, slopeLimitDeg: undefined },
+  { drive: null, live: undefined, cellSize: 1, slopeLimitDeg: undefined },
 )
 </script>
 
@@ -67,11 +71,12 @@ withDefaults(
       :sim-time="drive?.t"
     />
     <RoundCountdown
+      v-if="live"
       data-test="round-countdown"
-      :round="round"
-      :driving="driving"
+      :round="live.round"
+      :driving="live.driving"
       :now-ms="nowMs"
-      :rules="rules"
+      :rules="live.rules"
     />
     <template v-if="drive">
       <RoverAttitude data-test="rover-attitude" class="sm:col-span-2" :frame="drive.frame" />
@@ -98,6 +103,6 @@ withDefaults(
         :slope-limit-deg="slopeLimitDeg"
       />
     </template>
-    <JourneyStats data-test="journey-stats" :tally="tally" />
+    <JourneyStats v-if="live" data-test="journey-stats" :tally="live.tally" />
   </section>
 </template>

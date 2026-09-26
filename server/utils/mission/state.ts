@@ -1,5 +1,5 @@
 import type { DB } from '../../database/db'
-import type { Mission, SegmentStatus, Stop } from '../../database/schema'
+import type { Mission, SegmentStatus, Stop, StoredJudgment } from '../../database/schema'
 import { getMission } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
 import type { SettledSegment } from '../../repositories/segments'
@@ -33,6 +33,22 @@ export interface PublicSubmission {
 }
 
 export type { SettledSegment }
+
+/** A stored judgment as the public sees it: scores and per-level probabilities, no cache flags. */
+export function publicJudgment(judgment: StoredJudgment): PublicSubmission['judgment'] {
+  return {
+    feasible: judgment.feasible,
+    verdict: judgment.verdict,
+    risk: judgment.risk.score,
+    distanceWeight: judgment.distanceWeight,
+    timeWeight: judgment.timeWeight,
+    probabilities: {
+      risk: judgment.risk.probabilities,
+      distanceConfidence: judgment.distanceConfidence.probabilities,
+      timeConfidence: judgment.timeConfidence.probabilities,
+    },
+  }
+}
 
 /** Journey totals over settled segments: a drive counts once its ending is public. */
 export interface JourneyTally {
@@ -178,18 +194,7 @@ export async function publicMissionState(
         createdAt: s.createdAt,
         likes: s.likes,
         submitter: s.submitter,
-        judgment: {
-          feasible: s.judgment.feasible,
-          verdict: s.judgment.verdict,
-          risk: s.judgment.risk.score,
-          distanceWeight: s.judgment.distanceWeight,
-          timeWeight: s.judgment.timeWeight,
-          probabilities: {
-            risk: s.judgment.risk.probabilities,
-            distanceConfidence: s.judgment.distanceConfidence.probabilities,
-            timeConfidence: s.judgment.timeConfidence.probabilities,
-          },
-        },
+        judgment: publicJudgment(s.judgment),
         summary: s.summary,
       })),
     }

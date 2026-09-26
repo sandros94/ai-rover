@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { TresCanvas } from '@tresjs/core'
 import { GridHelper, NoToneMapping, Vector3 } from 'three'
-import type { TerrainChunk } from '#shared/utils/client/scene'
+import type { DiskLayout, TerrainChunk } from '#shared/utils/client/scene'
 import { framePlacement, HILLSHADE_LIGHT, SCENE_COLORS } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
@@ -28,6 +28,11 @@ const props = withDefaults(
     t?: number
     route?: { x: number; y: number }[]
     deaths?: { x: number; y: number; z: number; headingRad: number }[]
+    /** Radius of the red circle around each death, metres. */
+    deathRadiusM?: number
+    /** What the playing drive has seen so far, as disk-grid indices laid out by `layout`. */
+    reveals?: readonly { vertices: ArrayLike<number> }[]
+    layout?: DiskLayout
   }>(),
   {
     geometry: undefined,
@@ -39,6 +44,9 @@ const props = withDefaults(
     t: 0,
     route: () => [],
     deaths: () => [],
+    deathRadiusM: undefined,
+    reveals: () => [],
+    layout: undefined,
   },
 )
 
@@ -77,6 +85,8 @@ onBeforeUnmount(() => plane.dispose())
       :height-range="heightRange"
       :focus="focus"
       :height-at="heightAt"
+      :reveals="reveals"
+      :layout="layout"
     />
     <primitive v-else :object="plane" />
     <RouteLine v-if="route.length > 1" :route="route" :height-at="heightAt" />
@@ -86,6 +96,7 @@ onBeforeUnmount(() => plane.dispose())
       :deaths="deaths"
       :height-at="heightAt"
       :geometry="geometry"
+      :radius-m="deathRadiusM"
     />
     <RoverModel :frame="frame" :geometry="geometry" />
   </TresCanvas>

@@ -4,8 +4,10 @@ import {
   chunkLevel,
   chunkMesh,
   chunksFromGrid,
+  fogDelta,
   LOD_FAR_M,
   LOD_HYSTERESIS_M,
+  recolourChunkMesh,
 } from '#shared/utils/client/scene/terrain-mesh'
 import { reliefLight, reliefRgb, srgbToLinear } from '#shared/utils/client/scene/palette'
 
@@ -188,5 +190,64 @@ describe('chunksFromGrid', () => {
   it('refuses a grid whose origin is not on a chunk corner', () => {
     const grid = { heights: new Float32Array(9), width: 3, height: 3, cellSize: 1 }
     expect(() => chunksFromGrid(grid, { i: 1, j: 0 }, 3)).toThrow(/origin/)
+  })
+})
+
+describe('fogDelta', () => {
+  // Two 5-vertex chunks side by side, (0, 0) and (1, 0), stitched into a 9 × 5 disk grid at
+  // world vertex (0, 0): disk index j · 9 + i. Vertex i = 4 is the shared edge.
+  const layout = { width: 9, origin: { i: 0, j: 0 } }
+  const flat = (cx: number) => chunk(5, (a, b) => 0.3 * (a + 4 * cx) + 0.1 * b, cx, 0)
+  const unseen = () => new Uint8Array(25)
+  const pair = () => [
+    { chunk: flat(0), base: unseen() },
+    { chunk: flat(1), base: unseen() },
+  ]
+
+  it('lifts revealed vertices in every chunk holding them, the shared edge in both', () => {
+    // (1, 1) lies in the left chunk only; (4, 2) on the edge both chunks store.
+    const changes = fogDelta(pair(), [{ vertices: [1 * 9 + 1] }, { vertices: [2 * 9 + 4] }], layout)
+    expect(changes.map((c) => c.key)).toEqual(['0,0', '1,0'])
+    expect(changes[0]!.vertices.toSorted((a, b) => a - b)).toEqual([6, 14])
+    expect(changes[1]!.vertices).toEqual([10])
+    expect(changes[0]!.seen[6]).toBe(1)
+    expect(changes[1]!.seen[10]).toBe(1)
+    expect(changes[1]!.seen.reduce((n, v) => n + v, 0)).toBe(1)
+  })
+
+  it('reports only what differs from the shown fog, and re-fogs after a seek back', () => {
+    const chunks = pair()
+    const first = fogDelta(chunks, [{ vertices: [1 * 9 + 1] }], layout)
+    const shown = chunks.map((c, k) => ({
+      ...c,
+      shown: first.find((f) => f.key === `${k},0`)?.seen,
+    }))
+    expect(fogDelta(shown, [{ vertices: [1 * 9 + 1] }], layout)).toEqual([])
+    const back = fogDelta(shown, [], layout)
+    expect(back).toHaveLength(1)
+    expect(back[0]).toMatchObject({ key: '0,0', vertices: [6] })
+    expect(back[0]!.seen[6]).toBe(0)
+  })
+
+  it('leaves chunks without fog and indices outside every chunk alone', () => {
+    const chunks = [{ chunk: flat(0) }, { chunk: flat(1), base: unseen() }]
+    expect(fogDelta(chunks, [{ vertices: [1 * 9 + 1, 9 * 5 + 3] }], layout)).toEqual([])
+  })
+})
+
+describe('recolourChunkMesh', () => {
+  it('matches a mesh built with the new fog, at both levels and on the skirt', () => {
+    const c = chunk(9, (a, b) => 0.2 * a + 0.05 * b * b)
+    const before = new Uint8Array(81)
+    const after = before.slice()
+    const lifted = [0, 4, 40, 44, 80, 13]
+    for (const k of lifted) after[k] = 1
+    for (const step of [1, 4]) {
+      const options = { heightRange: RANGE, step, skirtM: 3 }
+      const mesh = chunkMesh(c, { ...options, seen: before })
+      recolourChunkMesh(mesh, c, { ...options, seen: after, vertices: lifted })
+      const fresh = chunkMesh(c, { ...options, seen: after })
+      expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
+    }
   })
 })

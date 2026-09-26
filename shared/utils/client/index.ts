@@ -22,6 +22,6 @@ export {
 } from './segment-stream'
 export type { MapBounds, MapView } from './map-transform'
 export { clampView, fitView, panBy, screenToWorld, worldToScreen, zoomAbout } from './map-transform'
-export { FOG_DESATURATE, FOG_DIM, hillshade, LUMA, reliefPixels } from './relief'
+export { FOG_DESATURATE, FOG_DIM, hillshade, liftSeen, LUMA, reliefPixels } from './relief'
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'

@@ -2,15 +2,13 @@
 import type { PlaybackRate } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile } from '#shared/utils/client/instruments'
-import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
-import { rankSubmissions } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import MissionMap from '~/components/map/MissionMap.vue'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import InstrumentGrid from './InstrumentGrid.vue'
 import PlaybackControls from './PlaybackControls.vue'
-import VoteCard from './VoteCard.vue'
+import RoundPanel from './RoundPanel.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -26,19 +24,7 @@ const props = withDefaults(
 /** Something the visitor did changed the mission state: a like, a submission. */
 const emit = defineEmits<{ changed: [] }>()
 
-/** Instrument updates per second: enough to read, cheap next to the map's per-frame overlay. */
-const INSTRUMENT_HZ = 10
-/** Most points of the driven path drawn; longer drives are thinned evenly. */
-const DRIVEN_POINTS = 400
-
-const X = KEYFRAME_FIELDS.indexOf('x')
-const Y = KEYFRAME_FIELDS.indexOf('y')
-const QX = KEYFRAME_FIELDS.indexOf('qx')
-const QY = KEYFRAME_FIELDS.indexOf('qy')
-const QZ = KEYFRAME_FIELDS.indexOf('qz')
-const QW = KEYFRAME_FIELDS.indexOf('qw')
-
-const { loggedIn, user } = useUserSession()
+const { loggedIn } = useUserSession()
 /** Replaced at build time; the template compiler cannot parse `import.meta` itself. */
 const dev = import.meta.dev
 
@@ -71,60 +57,7 @@ const playback = useSegmentPlayback(() => playing.value?.id, {
   serverOffsetMs: () => props.serverOffsetMs,
 })
 
-/** What the instruments and controls read, sampled at {@link INSTRUMENT_HZ}. */
-const snapshot = useThrottled(
-  () => ({
-    frame: playback.frame.value,
-    keyframes: playback.keyframes.value,
-    events: playback.events.value,
-    reveals: playback.reveals.value,
-    heldReveals: playback.heldReveals.value,
-    t: playback.simTime.value,
-    liveTime: playback.liveTime.value,
-    heldUntil: playback.heldUntil.value,
-    mode: playback.mode.value,
-    rate: playback.rate.value,
-  }),
-  INSTRUMENT_HZ,
-)
-
-/** The rover at the playback frame: the overlay is the one layer that moves every frame. */
-const rover = computed(() => {
-  const f = playback.frame.value
-  if (!f) return undefined
-  const [x, y, z, w] = [f[QX]!, f[QY]!, f[QZ]!, f[QW]!]
-  // Yaw of the world-from-body quaternion Rz(heading) · Ry(pitch) · Rx(roll).
-  return {
-    x: f[X]!,
-    y: f[Y]!,
-    headingRad: Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)),
-  }
-})
-
-/** The route followed at the playback time: the latest replan's, else the opening plan. */
-const plan = computed<MapPoint[]>(() => {
-  const replan = snapshot.value.events.findLast(
-    (e) => e.type === 'replan' && Array.isArray(e.details?.polyline),
-  )
-  if (replan) return replan.details!.polyline as MapPoint[]
-  return playback.manifest.value?.plan.polyline ?? []
-})
-
-const driven = computed<MapPoint[]>(() => {
-  const block = snapshot.value.keyframes
-  if (!block || block.count < 2) return []
-  const step = Math.max(1, Math.ceil(block.count / DRIVEN_POINTS))
-  const points: MapPoint[] = []
-  for (let k = 0; k < block.count; k += step) {
-    points.push({
-      x: block.data[k * KEYFRAME_STRIDE + X]!,
-      y: block.data[k * KEYFRAME_STRIDE + Y]!,
-    })
-  }
-  const last = (block.count - 1) * KEYFRAME_STRIDE
-  points.push({ x: block.data[last + X]!, y: block.data[last + Y]! })
-  return points
-})
+const { snapshot, rover, plan, driven } = usePlaybackTrack(playback)
 
 /**
  * A drive in progress from the current stop lifts its reveals from the fog as it plays. Once
@@ -195,50 +128,13 @@ function onRate(rate: PlaybackRate): void {
   playback.setRate(rate)
 }
 
-/* The round. */
+/* The round: the card whose route the map shows. */
 
 const highlightId = ref<string | null>(null)
 const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
   const s = round.value?.submissions.find((entry) => entry.id === highlightId.value)
   return s ? { id: s.id, goal: s.goal } : null
 })
-function toggleHighlight(id: string): void {
-  highlightId.value = highlightId.value === id ? null : id
-}
-
-/** Standing order: the submission that would win now comes first. */
-const ranked = computed(() => {
-  const s = props.state
-  if (!s?.round) return []
-  return rankSubmissions(
-    s.round.submissions.map((entry) => ({
-      ...entry,
-      createdAt: new Date(entry.createdAt),
-      judgment: { ...entry.judgment, risk: { score: entry.judgment.risk } },
-      source: entry,
-    })),
-    { rules: s.mission.rules },
-  ).map((entry) => entry.source)
-})
-
-const likedIds = ref<string[]>([])
-async function loadLikes(): Promise<void> {
-  if (!loggedIn.value || !round.value) {
-    likedIds.value = []
-    return
-  }
-  const liked = await $fetch('/api/mission/likes').catch(() => null)
-  likedIds.value = liked?.submissionIds ?? []
-}
-watch([loggedIn, () => round.value?.id], loadLikes, { immediate: true })
-
-async function like(id: string, on: boolean): Promise<void> {
-  await $fetch(`/api/mission/submissions/${id}/like`, { method: on ? 'PUT' : 'DELETE' }).catch(
-    () => undefined,
-  )
-  emit('changed')
-  await loadLikes()
-}
 </script>
 
 <template>
@@ -276,6 +172,9 @@ async function like(id: string, on: boolean): Promise<void> {
           :plan="plan"
           :driven="driven"
           :reveals="fogReveals"
+          :frame="playback.frame.value"
+          :keyframes="snapshot.keyframes"
+          :t="snapshot.t"
           @submitted="emit('changed')"
           @ground="ground = $event"
         >
@@ -292,47 +191,11 @@ async function like(id: string, on: boolean): Promise<void> {
               @live="playback.goLive"
             />
           </template>
-          <section data-test="round" class="space-y-2" aria-labelledby="round-heading">
-            <div class="flex items-baseline justify-between gap-2">
-              <h2 id="round-heading" class="text-sm font-semibold">Next destination</h2>
-              <span class="text-xs text-muted">
-                {{
-                  state.segment
-                    ? 'Vote closes when the drive ends'
-                    : `Stop ${state.currentStop.index}`
-                }}
-              </span>
-            </div>
-            <p v-if="!loggedIn" class="text-xs text-muted">
-              <ULink to="/login" class="underline">Sign in</ULink> to like or submit a destination.
-            </p>
-            <p v-if="!round" data-test="round-empty" class="text-sm text-muted">
-              No round is open right now.
-            </p>
-            <p v-else-if="ranked.length === 0" data-test="round-empty" class="text-sm text-muted">
-              <template v-if="state.segment">
-                No destinations yet for the next drive: pick one inside the ring around the planned
-                goal.
-              </template>
-              <template v-else>
-                The rover is idle at stop {{ state.currentStop.index }}: the first destination
-                picked inside the ring starts a
-                {{ Math.round(state.mission.rules.graceWindowMs / 60_000) }}-minute vote.
-              </template>
-            </p>
-            <VoteCard
-              v-for="s in ranked"
-              :key="s.id"
-              :submission="s"
-              :anchor="round!.anchor"
-              :liked="likedIds.includes(s.id)"
-              :mine="s.submitter.id === user?.id"
-              :signed-in="loggedIn"
-              :highlighted="s.id === highlightId"
-              @like="like(s.id, $event)"
-              @highlight="toggleHighlight(s.id)"
-            />
-          </section>
+          <RoundPanel
+            v-model:highlight-id="highlightId"
+            :state="state"
+            @changed="emit('changed')"
+          />
         </MissionMap>
       </ClientOnly>
 
@@ -340,10 +203,12 @@ async function like(id: string, on: boolean): Promise<void> {
         :drive="drive"
         :sols-epoch="state.mission.solsEpoch"
         :now-ms="nowMs"
-        :round="round"
-        :driving="state.segment !== null"
-        :rules="state.mission.rules"
-        :tally="state.tally"
+        :live="{
+          round,
+          driving: state.segment !== null,
+          rules: state.mission.rules,
+          tally: state.tally,
+        }"
         :cell-size="ground?.cellSize"
         :slope-limit-deg="ground?.slopeLimitDeg"
       />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HeightGrid } from '#shared/utils/terrain'
-import { FOG_DIM, LUMA, reliefPixels } from '#shared/utils/client/relief'
+import { FOG_DIM, liftSeen, LUMA, reliefPixels } from '#shared/utils/client/relief'
 
 function grid(size: number, heightAt: (i: number, j: number) => number): HeightGrid {
   const heights = new Float32Array(size * size)
@@ -74,5 +74,19 @@ describe('reliefPixels', () => {
         { seen: new Uint8Array(4) },
       ),
     ).toThrow(/9/)
+  })
+})
+
+describe('liftSeen', () => {
+  it('marks every revealed disk vertex as seen on a copy, ignoring indices past the grid', () => {
+    const base = new Uint8Array([0, 1, 0, 0])
+    const lifted = liftSeen(base, [{ vertices: [0] }, { vertices: new Uint32Array([3, 9]) }])
+    expect(Array.from(lifted)).toEqual([1, 1, 0, 1])
+    expect(Array.from(base)).toEqual([0, 1, 0, 0])
+  })
+
+  it('hands back the base itself when nothing is revealed', () => {
+    const base = new Uint8Array(4)
+    expect(liftSeen(base, [])).toBe(base)
   })
 })

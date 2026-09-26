@@ -86,3 +86,22 @@ function heightSpan(heights: Float32Array): { min: number; max: number } {
   }
   return min <= max ? { min, max } : { min: 0, max: 1 }
 }
+
+/**
+ * `seen` (one byte per disk vertex) with every vertex a drive's reveal groups name marked seen,
+ * on a copy; `seen` itself when there is nothing to lift. Indices past the grid are ignored.
+ */
+export function liftSeen(
+  seen: Uint8Array,
+  reveals: readonly { vertices: ArrayLike<number> }[],
+): Uint8Array {
+  if (reveals.length === 0) return seen
+  const lifted = seen.slice()
+  for (const group of reveals) {
+    for (let n = 0; n < group.vertices.length; n++) {
+      const k = group.vertices[n]!
+      if (k < lifted.length) lifted[k] = 1
+    }
+  }
+  return lifted
+}

@@ -14,8 +14,10 @@ const props = withDefaults(
     rate: PlaybackRate
     /** Seconds playback trails wall-clock; absent when there is nothing to trail. */
     lagS?: number | null
+    /** Offer the return to live; a settled drive's replay has no live edge worth following. */
+    live?: boolean
   }>(),
-  { lagS: null },
+  { lagS: null, live: true },
 )
 
 const emit = defineEmits<{ seek: [simSeconds: number]; rate: [rate: PlaybackRate]; live: [] }>()
@@ -61,6 +63,7 @@ function onScrub(value: number | undefined): void {
           {{ r }}×
         </UButton>
         <UButton
+          v-if="live"
           data-test="live"
           size="xs"
           icon="i-lucide-radio"
