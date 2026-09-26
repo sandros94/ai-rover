@@ -109,7 +109,7 @@ describe('createSegmentStream over the recorded drive', () => {
     expect(stream.revealsUntil(Infinity)).toEqual(record.reveals)
   })
 
-  it('shows the outcome only once the last slice is loaded, then fetches nothing more', async () => {
+  it('loads the outcome only with the last slice, then fetches nothing more', async () => {
     const { stream, calls, poll } = setup()
     await poll(releaseAt(last - 1))
     expect(stream.outcome).toBeUndefined()
@@ -121,6 +121,22 @@ describe('createSegmentStream over the recorded drive', () => {
     const before = calls.length
     await poll(releaseAt(last + 50))
     expect(calls.length).toBe(before)
+  })
+
+  it('gates the outcome on sim time: undefined before the record ends, defined from its end', async () => {
+    const { stream, poll } = setup()
+    const end = record.outcome.durationS
+    await poll(releaseAt(last - 1))
+    expect(stream.outcomeAt(end)).toBeUndefined()
+    expect(stream.outcomeAt(Infinity)).toBeUndefined()
+    await poll(releaseAt(last))
+    expect(stream.outcome).toEqual(record.outcome)
+    for (const t of [0, end / 2, end - 0.5, end - 1e-9]) {
+      expect(stream.outcomeAt(t), `t = ${t}`).toBeUndefined()
+    }
+    for (const t of [end, end + 1e-9, end + 30, Infinity]) {
+      expect(stream.outcomeAt(t), `t = ${t}`).toEqual(record.outcome)
+    }
   })
 
   it('retries a not-yet at the release time the server names, not before, never caching it', async () => {

@@ -144,19 +144,21 @@ export function createChunkCache(options: {
  * by (cy, cx).
  */
 export function loadOrder(
-  manifest: Pick<StopManifest, 'chunks'>,
+  manifest: Pick<StopManifest, 'chunks'> & { world: Pick<StopManifest['world'], 'chunkSize'> },
   options: {
-    /** World chunk edge, metres. */
-    chunkSize: number
     center: { x: number; y: number }
     ring: { minM: number; maxM: number }
     viewport?: { x: number; y: number; halfSizeM: number }
   },
 ): ChunkCoords[] {
-  const { chunkSize: size, center, ring, viewport } = options
+  const { chunkSize: size } = manifest.world
+  const { center, ring, viewport } = options
   const finite = (...values: number[]) => values.every(Number.isFinite)
   if (!finite(size) || size <= 0) {
-    throw new ClientError('INVALID_INPUT', `loadOrder: chunkSize is ${size}; pass positive metres.`)
+    throw new ClientError(
+      'INVALID_INPUT',
+      `loadOrder: manifest world.chunkSize is ${size}; pass positive metres.`,
+    )
   }
   if (!finite(center.x, center.y, ring.minM, ring.maxM) || ring.minM < 0 || ring.maxM < ring.minM) {
     throw new ClientError(

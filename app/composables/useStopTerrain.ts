@@ -37,28 +37,16 @@ export function useStopTerrain(
     const masked = client.getRevealedMask(missionId, stopIndex).then((m) => {
       mask.value = m
     })
-    // Any chunk tells the world's chunk size, which the manifest does not carry; the middle of
-    // its (cy, cx)-sorted list lies near the stop, where ground is wanted first anyway.
-    const first = stop.chunks[stop.chunks.length >> 1]
-    if (first) {
-      await chunks.get(first.cx, first.cy)
-      loaded.value = 1
-      const { vertexCount, cellSize } = chunks.geometry!
-      const order = loadOrder(stop, {
-        chunkSize: (vertexCount - 1) * cellSize,
-        center: options.center ?? { x: stop.stop.x, y: stop.stop.y },
-        ring: options.ring ?? DEFAULT_MISSION_RULES.segmentDistanceBand,
-        viewport: options.viewport,
-      })
-      await chunks.prefetch(
-        order.filter((c) => c.cx !== first.cx || c.cy !== first.cy),
-        {
-          onChunk: () => {
-            loaded.value++
-          },
-        },
-      )
-    }
+    const order = loadOrder(stop, {
+      center: options.center ?? { x: stop.stop.x, y: stop.stop.y },
+      ring: options.ring ?? DEFAULT_MISSION_RULES.segmentDistanceBand,
+      viewport: options.viewport,
+    })
+    await chunks.prefetch(order, {
+      onChunk: () => {
+        loaded.value++
+      },
+    })
     await masked
   }
 

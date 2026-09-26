@@ -11,7 +11,8 @@ import { useJourneyClient } from './useJourneyClient'
 
 /**
  * Plays a published segment in the browser: an animation-frame loop ticks the clock, polls for
- * released slices and exposes the interpolated keyframe with the events and reveals so far.
+ * released slices and exposes the interpolated keyframe with the events and reveals so far, and
+ * the outcome only once playback reaches it.
  * `serverOffsetMs` (server minus browser clock, see `useMissionState`) keeps release times on
  * the server's clock.
  */
@@ -48,7 +49,7 @@ export function useSegmentPlayback(
     if (nextEvents.length !== events.value.length) events.value = nextEvents
     const nextReveals = stream.revealsUntil(sim)
     if (nextReveals.length !== reveals.value.length) reveals.value = nextReveals
-    outcome.value = stream.outcome
+    outcome.value = stream.outcomeAt(sim)
     simTime.value = sim
     mode.value = clock.mode
   }

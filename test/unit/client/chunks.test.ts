@@ -9,6 +9,7 @@ const SIZE = 64
 describe('loadOrder', () => {
   const world = defineWorld({ seed: 'mars' })
   const manifest = {
+    world: { chunkSize: SIZE },
     chunks: chunksCoveringDisk(world, { center: { x: 0, y: 0 }, radius: 500 }).map((c) => ({
       ...c,
       key: `k${c.cx}_${c.cy}`,
@@ -42,7 +43,7 @@ describe('loadOrder', () => {
   const key = (c: ChunkCoords) => `${c.cx},${c.cy}`
 
   it('puts the viewport first, then the pick ring, then the rest by distance', () => {
-    const order = loadOrder(manifest, { chunkSize: SIZE, center, ring, viewport })
+    const order = loadOrder(manifest, { center, ring, viewport })
     expect(order.map(key).toSorted()).toEqual(manifest.chunks.map(key).toSorted())
     const views = manifest.chunks.filter(inViewport)
     const rings = manifest.chunks.filter((c) => !inViewport(c) && inRing(c))
@@ -62,22 +63,35 @@ describe('loadOrder', () => {
 
   it('puts the ring first without a viewport, and leaves the manifest untouched', () => {
     const before = JSON.stringify(manifest)
-    const order = loadOrder(manifest, { chunkSize: SIZE, center, ring })
+    const order = loadOrder(manifest, { center, ring })
     const rings = manifest.chunks.filter(inRing)
     expect(order.slice(0, rings.length).map(key).toSorted()).toEqual(rings.map(key).toSorted())
     expect(JSON.stringify(manifest)).toBe(before)
     expect(order.every((c) => Object.keys(c).toSorted().join() === 'cx,cy')).toBe(true)
-    expect(loadOrder(manifest, { chunkSize: SIZE, center, ring })).toEqual(order)
+    expect(loadOrder(manifest, { center, ring })).toEqual(order)
+  })
+
+  it('takes the chunk size from the manifest', () => {
+    const doubled = { ...manifest, world: { chunkSize: 2 * SIZE } }
+    const near = { x: 4 * SIZE + 1, y: 1 }
+    const order = loadOrder(doubled, { center: near, ring: { minM: 0, maxM: 1 } })
+    expect(order[0]).toEqual({ cx: 2, cy: 0 })
+    expect(loadOrder(manifest, { center: near, ring: { minM: 0, maxM: 1 } })[0]).toEqual({
+      cx: 4,
+      cy: 0,
+    })
   })
 
   it('refuses a non-positive chunk size or an inverted ring', () => {
-    for (const options of [
-      { chunkSize: 0, center, ring },
-      { chunkSize: SIZE, center, ring: { minM: 300, maxM: 250 } },
-      { chunkSize: SIZE, center: { x: Number.NaN, y: 0 }, ring },
-    ]) {
-      expect(() => loadOrder(manifest, options)).toThrow(ClientError)
-    }
+    const cases: [typeof manifest, Parameters<typeof loadOrder>[1]][] = [
+      [
+        { ...manifest, world: { chunkSize: 0 } },
+        { center, ring },
+      ],
+      [manifest, { center, ring: { minM: 300, maxM: 250 } }],
+      [manifest, { center: { x: Number.NaN, y: 0 }, ring }],
+    ]
+    for (const [m, options] of cases) expect(() => loadOrder(m, options)).toThrow(ClientError)
   })
 })
 

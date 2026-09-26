@@ -88,11 +88,12 @@ describe('stop manifest', () => {
   const hash = worldHash(world)
 
   it('describes the disk with its blob keys', () => {
-    expect(STOP_MANIFEST_VERSION).toBe(1)
+    expect(STOP_MANIFEST_VERSION).toBe(2)
     expect(manifest).toEqual({
-      version: 1,
+      version: 2,
       missionId: MISSION,
       worldHash: hash,
+      world: { chunkSize: 64, cellSize: 1, mastHeight: 2, slopeLimitDeg: 16 },
       stop: { index: 3, x: 12.5, y: -3 },
       radius: 70,
       chunks: disk.chunks.map((c) => ({ cx: c.cx, cy: c.cy, key: chunkKey(hash, c) })),
@@ -100,16 +101,52 @@ describe('stop manifest', () => {
     })
   })
 
+  it('carries the geometry of a non-default world', () => {
+    const custom = defineWorld({ seed: 'mars', chunkSize: 32, cellSize: 2, mastHeight: 1.5 })
+    const built = buildStopManifest(
+      custom,
+      computeStopDisk(custom, { center: { x: 0, y: 0 }, radius: 40 }),
+      {
+        missionId: MISSION,
+        stopIndex: 0,
+      },
+    )
+    expect(built.world).toEqual({ chunkSize: 32, cellSize: 2, mastHeight: 1.5, slopeLimitDeg: 16 })
+  })
+
   it('round-trips through JSON and parse', () => {
     expect(parseStopManifest(JSON.parse(JSON.stringify(manifest)))).toEqual(manifest)
   })
 
   it('refuses another version, naming the field', () => {
-    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 2 }))
+    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 3 }))
     expect(error?.code).toBe('INVALID_MANIFEST')
     expect(error?.message).toContain('version')
     expect(error?.cause).toBeInstanceOf(Error)
-    expect(terrainErrorOf(() => parseStopManifest({ version: 2 }))?.message).toContain('version')
+    expect(terrainErrorOf(() => parseStopManifest({ version: 3 }))?.message).toContain('version')
+  })
+
+  it('refuses a version 1 manifest, which carries no world geometry', () => {
+    const { world: _world, ...v1 } = manifest
+    const error = terrainErrorOf(() => parseStopManifest({ ...v1, version: 1 }))
+    expect(error?.code).toBe('INVALID_MANIFEST')
+    expect(error?.message).toContain('version')
+  })
+
+  it('refuses a manifest without world geometry or with a broken one, naming the field', () => {
+    const { world: _world, ...rest } = manifest
+    expect(terrainErrorOf(() => parseStopManifest(rest))?.message).toContain('world')
+    for (const [field, value] of [
+      ['chunkSize', 0],
+      ['cellSize', -1],
+      ['mastHeight', Number.NaN],
+      ['slopeLimitDeg', 90],
+    ] as const) {
+      const broken = { ...manifest, world: { ...manifest.world, [field]: value } }
+      const error = terrainErrorOf(() => parseStopManifest(broken))
+      expect(error?.code).toBe('INVALID_MANIFEST')
+      expect(error?.message).toContain(`world.${field}`)
+    }
   })
 
   it('refuses a manifest without chunks, naming the field', () => {

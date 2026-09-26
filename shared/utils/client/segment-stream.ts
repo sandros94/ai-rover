@@ -25,7 +25,10 @@ export interface SegmentStream {
   readonly loadedSlices: number
   /** Sim seconds the held slices cover. */
   readonly loadedUntil: number
-  /** Present once the last slice is held, never before. */
+  /**
+   * Loaded, not yet reached: present once the last slice is held, before playback may have got
+   * there. Show {@link outcomeAt} instead.
+   */
   readonly outcome: DriveOutcome | undefined
   /** The last slice is held; nothing more will be fetched. */
   readonly done: boolean
@@ -36,6 +39,11 @@ export interface SegmentStream {
    * `interpolatePose`, clamped to the held frames; undefined before the first slice.
    */
   frameAt(simSeconds: number): Float32Array | undefined
+  /**
+   * The outcome once playback has reached it: the last slice is held and `simSeconds` is at or
+   * past the record's end (`outcome.durationS`); undefined before either.
+   */
+  outcomeAt(simSeconds: number): DriveOutcome | undefined
   /** Held events up to and including `simSeconds`. */
   eventsUntil(simSeconds: number): DriveEvent[]
   /** Held reveal groups up to and including `simSeconds`. */
@@ -167,6 +175,7 @@ export function createSegmentStream(options: {
     frameAt(simSeconds) {
       return frameCount === 0 ? undefined : interpolatePose(block(), simSeconds)
     },
+    outcomeAt: (simSeconds) => (outcome && simSeconds >= outcome.durationS ? outcome : undefined),
     eventsUntil: (simSeconds) => until(events, simSeconds),
     revealsUntil: (simSeconds) => until(reveals, simSeconds),
     poll(wallMs) {

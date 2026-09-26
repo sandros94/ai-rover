@@ -6,12 +6,17 @@ import { TerrainError } from './errors'
 import { hashString } from './seed'
 import type { World } from './world'
 
-/** Manifest version written by {@link buildStopManifest}. */
-export const STOP_MANIFEST_VERSION = 1
+/**
+ * Manifest version written by {@link buildStopManifest}, and the only one parsed: no version 1
+ * manifest (without `world`) remains in any store that is served.
+ */
+export const STOP_MANIFEST_VERSION = 2
 
 const WORLD_HASH = /^[0-9a-f]{16}$/
 /** A mission id as the database makes them: a lowercase UUID. */
 export const MISSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+const positive = v.pipe(v.number(), v.finite(), v.gtValue(0))
 
 const int32 = v.pipe(v.number(), v.integer(), v.minValue(-0x80000000), v.maxValue(0x7fffffff))
 
@@ -20,12 +25,19 @@ export const StopManifestSchema = v.object({
   version: v.literal(STOP_MANIFEST_VERSION),
   missionId: v.pipe(v.string(), v.regex(MISSION_ID)),
   worldHash: v.pipe(v.string(), v.regex(WORLD_HASH)),
+  /** The world's geometry, so a client can place chunks and judge slopes before fetching any. */
+  world: v.object({
+    chunkSize: positive,
+    cellSize: positive,
+    mastHeight: v.pipe(v.number(), v.finite(), v.minValue(0)),
+    slopeLimitDeg: v.pipe(v.number(), v.gtValue(0), v.ltValue(90)),
+  }),
   stop: v.object({
     index: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     x: v.pipe(v.number(), v.finite()),
     y: v.pipe(v.number(), v.finite()),
   }),
-  radius: v.pipe(v.number(), v.finite(), v.gtValue(0)),
+  radius: positive,
   chunks: v.array(v.object({ cx: int32, cy: int32, key: v.string() })),
   revealedKey: v.string(),
 })
@@ -73,10 +85,12 @@ export function buildStopManifest(
 ): StopManifest {
   const { missionId, stopIndex } = options
   const hash = worldHash(world)
+  const { chunkSize, cellSize, mastHeight, slopeLimitDeg } = world.config
   return {
     version: STOP_MANIFEST_VERSION,
     missionId,
     worldHash: hash,
+    world: { chunkSize, cellSize, mastHeight, slopeLimitDeg },
     stop: { index: stopIndex, x: disk.center.x, y: disk.center.y },
     radius: disk.radius,
     chunks: disk.chunks.map(({ cx, cy }) => ({ cx, cy, key: chunkKey(hash, { cx, cy }) })),
