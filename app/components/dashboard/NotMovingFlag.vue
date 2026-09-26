@@ -48,12 +48,12 @@ async function flag(): Promise<void> {
       size="xs"
       color="warning"
       :variant="mine ? 'soft' : 'outline'"
-      icon="i-lucide-octagon-pause"
+      icon="i-lucide-triangle-alert"
       :loading="sending"
       :aria-pressed="mine"
       @click="flag"
     >
-      Rover not moving
+      Report rover not moving
     </UButton>
     <UButton
       v-else
@@ -62,9 +62,9 @@ async function flag(): Promise<void> {
       size="xs"
       color="warning"
       variant="outline"
-      icon="i-lucide-octagon-pause"
+      icon="i-lucide-triangle-alert"
     >
-      Rover not moving
+      Report rover not moving
     </UButton>
     <span class="text-muted">
       <span data-test="flag-count" class="tabular-nums"
