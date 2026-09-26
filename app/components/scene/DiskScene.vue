@@ -154,7 +154,7 @@ const ghosts = computed(() =>
 <template>
   <div
     data-test="scene"
-    class="relative aspect-square w-full touch-none overflow-hidden rounded-lg bg-(--ui-bg-muted)"
+    class="relative h-full w-full touch-none overflow-hidden bg-(--ui-bg-muted)"
   >
     <StopScene
       :frame="frame"

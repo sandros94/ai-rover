@@ -69,6 +69,7 @@ const deaths = computed(() => {
     <div class="mx-auto max-w-[min(100%,70vh)] overflow-hidden rounded-md border border-default">
       <ClientOnly>
         <DiskScene
+          class="aspect-square"
           :terrain="terrain"
           :seen="disk.visible"
           :chunk-vertices="CHUNK_VERTICES"

@@ -14,16 +14,29 @@ const props = withDefaults(
     rate: PlaybackRate
     /** Seconds playback trails wall-clock; absent when there is nothing to trail. */
     lagS?: number | null
+    /** Replay holds its sim time. */
+    paused?: boolean
     /** Offer the return to live; a settled drive's replay has no live edge worth following. */
     live?: boolean
   }>(),
-  { lagS: null, live: true },
+  { lagS: null, paused: false, live: true },
 )
 
-const emit = defineEmits<{ seek: [simSeconds: number]; rate: [rate: PlaybackRate]; live: [] }>()
+const emit = defineEmits<{
+  seek: [simSeconds: number]
+  rate: [rate: PlaybackRate]
+  /** Pause, or play on from the pause. */
+  toggle: []
+  live: []
+}>()
 
 const max = computed(() => Math.max(1, Math.round(props.releasedUntil)))
 const position = computed(() => Math.min(max.value, Math.max(0, props.simTime)))
+
+/** Phones get one button stepping through the rates in place of the row of them. */
+const nextRate = computed(
+  () => PLAYBACK_RATES[(PLAYBACK_RATES.indexOf(props.rate) + 1) % PLAYBACK_RATES.length]!,
+)
 
 function onScrub(value: number | undefined): void {
   if (typeof value === 'number' && Number.isFinite(value)) emit('seek', value)
@@ -31,8 +44,22 @@ function onScrub(value: number | undefined): void {
 </script>
 
 <template>
-  <div class="space-y-2 rounded-lg border border-default p-2" data-test="playback">
+  <div
+    class="flex w-full max-w-2xl items-center gap-2 rounded-lg bg-(--ui-bg)/90 p-1.5 text-xs shadow-lg ring ring-(--ui-border) backdrop-blur-sm"
+    data-test="playback"
+  >
+    <UButton
+      data-test="play-toggle"
+      :icon="paused ? 'i-lucide-play' : 'i-lucide-pause'"
+      :aria-label="paused ? 'Play' : 'Pause'"
+      size="xs"
+      color="neutral"
+      variant="ghost"
+      @click="emit('toggle')"
+    />
+    <span class="font-mono tabular-nums" data-test="sim-time">{{ formatDuration(position) }}</span>
     <USlider
+      class="min-w-16 flex-1"
       :model-value="position"
       :min="0"
       :max="max"
@@ -41,40 +68,47 @@ function onScrub(value: number | undefined): void {
       aria-label="Playback position"
       @update:model-value="onScrub"
     />
-    <div class="flex flex-wrap items-center gap-2 text-xs">
-      <span class="font-mono tabular-nums" data-test="sim-time">{{
-        formatDuration(position)
-      }}</span>
-      <span class="text-muted">/ {{ formatDuration(max) }}</span>
-      <span v-if="lagS !== null" class="text-muted" data-test="lag">
-        {{ Math.max(0, Math.round(lagS)) }} s behind
-      </span>
-      <div class="ml-auto flex items-center gap-1">
-        <UButton
-          v-for="r in PLAYBACK_RATES"
-          :key="r"
-          :data-test="`rate-${r}`"
-          size="xs"
-          color="neutral"
-          :variant="rate === r ? 'soft' : 'ghost'"
-          :aria-pressed="rate === r"
-          @click="emit('rate', r)"
-        >
-          {{ r }}×
-        </UButton>
-        <UButton
-          v-if="live"
-          data-test="live"
-          size="xs"
-          icon="i-lucide-radio"
-          :color="mode === 'live' ? 'error' : 'neutral'"
-          :variant="mode === 'live' ? 'soft' : 'outline'"
-          :aria-pressed="mode === 'live'"
-          @click="emit('live')"
-        >
-          Live
-        </UButton>
-      </div>
+    <span class="hidden text-muted sm:inline">{{ formatDuration(max) }}</span>
+    <span v-if="lagS !== null" class="hidden text-muted md:inline" data-test="lag">
+      {{ Math.max(0, Math.round(lagS)) }} s behind
+    </span>
+    <div class="hidden items-center gap-0.5 sm:flex">
+      <UButton
+        v-for="r in PLAYBACK_RATES"
+        :key="r"
+        :data-test="`rate-${r}`"
+        size="xs"
+        color="neutral"
+        :variant="rate === r ? 'soft' : 'ghost'"
+        :aria-pressed="rate === r"
+        @click="emit('rate', r)"
+      >
+        {{ r }}×
+      </UButton>
     </div>
+    <UButton
+      class="sm:hidden"
+      data-test="rate-cycle"
+      size="xs"
+      color="neutral"
+      variant="soft"
+      :aria-label="`Speed ${rate}×, change to ${nextRate}×`"
+      @click="emit('rate', nextRate)"
+    >
+      {{ rate }}×
+    </UButton>
+    <UButton
+      v-if="live"
+      data-test="live"
+      size="xs"
+      icon="i-lucide-radio"
+      aria-label="Live"
+      :color="mode === 'live' ? 'error' : 'neutral'"
+      :variant="mode === 'live' ? 'soft' : 'outline'"
+      :aria-pressed="mode === 'live'"
+      @click="emit('live')"
+    >
+      <span class="hidden sm:inline">Live</span>
+    </UButton>
   </div>
 </template>

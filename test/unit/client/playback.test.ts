@@ -90,6 +90,38 @@ describe('createPlaybackClock', () => {
     expect(clock.mode).toBe('live')
   })
 
+  it('pauses on the shown sim time and plays on from it', () => {
+    const { clock, at } = setup()
+    // Live at 100 s of wall-clock: 65 s of sim time with the 35 s lag.
+    at(startedAt + 100_000)
+    expect(clock.tick(startedAt + 100_000)).toBe(65)
+    clock.pause()
+    expect(clock.paused).toBe(true)
+    expect(clock.mode).toBe('replay')
+    // Paused, wall-clock passes and the sim time holds, even with the live edge far ahead.
+    expect(clock.tick(startedAt + 400_000)).toBe(65)
+    expect(clock.mode).toBe('replay')
+    clock.setRate(10)
+    clock.seek(20)
+    expect(clock.paused).toBe(true)
+    expect(clock.tick(at(startedAt + 500_000))).toBe(20)
+    clock.play()
+    expect(clock.paused).toBe(false)
+    expect(clock.tick(startedAt + 502_000)).toBe(40)
+  })
+
+  it('pauses at the start of a drive without rejoining live, and live ends the pause', () => {
+    const { clock, at } = setup()
+    at(startedAt)
+    clock.pause()
+    expect(clock.tick(startedAt)).toBe(0)
+    expect(clock.mode).toBe('replay')
+    clock.goLive()
+    expect(clock.paused).toBe(false)
+    expect(clock.mode).toBe('live')
+    expect(clock.tick(startedAt + 100_000)).toBe(65)
+  })
+
   it('clamps a seek to the start and to the live edge', () => {
     const { clock, at } = setup()
     const w = at(startedAt + 100_000)

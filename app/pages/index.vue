@@ -5,8 +5,7 @@ const { state, error, serverOffsetMs, refresh } = useMissionState()
 </script>
 
 <template>
-  <UContainer class="space-y-4 py-4">
-    <SiteHeader />
+  <div class="h-dvh">
     <h1 class="sr-only">Mission dashboard</h1>
     <MissionDashboard
       :state="state"
@@ -14,5 +13,5 @@ const { state, error, serverOffsetMs, refresh } = useMissionState()
       :server-offset-ms="serverOffsetMs"
       @changed="refresh"
     />
-  </UContainer>
+  </div>
 </template>

@@ -2,10 +2,14 @@
 import type { PlaybackRate } from '#shared/utils/client'
 import { slopeProfile } from '#shared/utils/client/instruments'
 import { revealedVertexCount } from '#shared/utils/terrain'
-import InstrumentGrid from '~/components/dashboard/InstrumentGrid.vue'
+import type { PanelId } from '#shared/utils/client/hud'
+import { DRIVE_GROUPS } from '~/components/dashboard/Instrument.vue'
+import Instrument from '~/components/dashboard/Instrument.vue'
 import PlaybackControls from '~/components/dashboard/PlaybackControls.vue'
+import SceneHud from '~/components/hud/SceneHud.vue'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
-import StopStage from '~/components/map/StopStage.vue'
+import type { StageProps } from '~/components/map/LiveStage.vue'
+import LiveStage from '~/components/map/LiveStage.vue'
 import type { DriveReplayJson } from '~/composables/useJourney'
 import DriveRow from './DriveRow.vue'
 
@@ -69,58 +73,97 @@ onMounted(() => {
   ticker = setInterval(() => (nowMs.value = Date.now()), 1000)
 })
 onBeforeUnmount(() => clearInterval(ticker))
+
+/** The stage's props: changes every animation frame, so it is read where the stage draws. */
+const stage = computed((): StageProps => ({
+  terrain: terrain.value,
+  seen: revealed.value,
+  reveals: snapshot.value.reveals,
+  chunkVertices: cache.value?.geometry?.vertexCount,
+  heightAt,
+  loading: { loaded: loaded.value, total: total.value, error: error.value ?? playback.error.value },
+  center: manifest.value ? manifest.value.stop : drive.value.from,
+  radius: manifest.value?.radius ?? 500,
+  rover: rover.value ?? { ...drive.value.from, headingRad: 0 },
+  trail: props.replay.trail,
+  plan: plan.value,
+  driven: driven.value,
+  deaths: deaths.value,
+  deathRadiusM: rules.value.failureZone.destinationRadiusM,
+  frame: playback.frame.value,
+  keyframes: snapshot.value.keyframes,
+  t: snapshot.value.t,
+}))
+const readStage = () => stage.value
+
+const hudPlayback = computed(() => {
+  if (!playback.manifest.value) return null
+  const { mode, t, rate, paused } = snapshot.value
+  return { mode, t, rate, paused, live: false }
+})
+
+/** A replay has no vote and no live tally. */
+const PANELS: PanelId[] = ['map2d', 'segment', 'clock', ...DRIVE_GROUPS]
+const instrumentGroups = ['clock', ...DRIVE_GROUPS] as const
+
+const instrumentProps = computed(() => ({
+  drive: instruments.value,
+  solsEpoch: props.replay.mission.solsEpoch,
+  nowMs: nowMs.value,
+  cellSize: cellSize.value,
+  slopeLimitDeg: manifest.value?.world.slopeLimitDeg,
+}))
 </script>
 
 <template>
-  <div class="space-y-4">
-    <DriveRow :drive="drive" />
-    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <div class="space-y-2">
-        <StopStage
-          v-model:view="view"
-          :terrain="terrain"
-          :seen="revealed"
-          :reveals="snapshot.reveals"
-          :chunk-vertices="cache?.geometry?.vertexCount"
-          :height-at="heightAt"
-          :loading="{ loaded, total, error: error ?? playback.error.value }"
-          :center="manifest ? manifest.stop : drive.from"
-          :radius="manifest?.radius ?? 500"
-          :rover="rover ?? { ...drive.from, headingRad: 0 }"
-          :trail="replay.trail"
-          :plan="plan"
-          :driven="driven"
-          :deaths="deaths"
-          :death-radius-m="rules.failureZone.destinationRadiusM"
-          :frame="playback.frame.value"
-          :keyframes="snapshot.keyframes"
-          :t="snapshot.t"
-        />
-        <PlaybackControls
-          v-if="playback.manifest.value"
-          :sim-time="snapshot.t"
-          :released-until="snapshot.heldUntil"
-          :mode="snapshot.mode"
-          :rate="snapshot.rate"
-          :live="false"
-          @seek="playback.seek"
-          @rate="(rate: PlaybackRate) => playback.setRate(rate)"
-        />
-      </div>
-      <section class="space-y-2" aria-labelledby="judgment-heading">
-        <h2 id="judgment-heading" class="text-sm font-semibold">Jev's judgment of this route</h2>
+  <SceneHud
+    v-model:view="view"
+    :panels="PANELS"
+    :playback="hudPlayback"
+    @toggle="playback.togglePlay"
+  >
+    <template #title>
+      <UButton
+        to="/drives"
+        icon="i-lucide-arrow-left"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        aria-label="Back to the journey"
+      />
+      <h1 class="truncate text-base font-semibold">Segment {{ drive.number }}</h1>
+    </template>
+    <template #scene>
+      <LiveStage :stage="readStage" :view="view" />
+    </template>
+    <template #bottom>
+      <PlaybackControls
+        v-if="hudPlayback"
+        :sim-time="snapshot.t"
+        :released-until="snapshot.heldUntil"
+        :mode="snapshot.mode"
+        :rate="snapshot.rate"
+        :paused="snapshot.paused"
+        :live="false"
+        @seek="playback.seek"
+        @rate="(rate: PlaybackRate) => playback.setRate(rate)"
+        @toggle="playback.togglePlay"
+      />
+    </template>
+    <template #panel-map2d>
+      <LiveStage :stage="readStage" view="2d" />
+    </template>
+    <template #panel-segment>
+      <section class="space-y-2 p-3" data-test="segment" aria-label="This segment">
+        <DriveRow :drive="drive" />
         <p v-if="drive.reasons.length" class="text-xs text-muted" data-test="drive-reasons">
           Ended: {{ drive.reasons.join(', ') }}
         </p>
         <JudgmentCard :judgment="drive.judgment" />
       </section>
-    </div>
-    <InstrumentGrid
-      :drive="instruments"
-      :sols-epoch="replay.mission.solsEpoch"
-      :now-ms="nowMs"
-      :cell-size="cellSize"
-      :slope-limit-deg="manifest?.world.slopeLimitDeg"
-    />
-  </div>
+    </template>
+    <template v-for="group in instrumentGroups" #[`panel-${group}`]>
+      <Instrument :group="group" v-bind="instrumentProps" />
+    </template>
+  </SceneHud>
 </template>

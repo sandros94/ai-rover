@@ -32,6 +32,7 @@ export function usePlaybackTrack(playback: ReturnType<typeof useSegmentPlayback>
       heldUntil: playback.heldUntil.value,
       mode: playback.mode.value,
       rate: playback.rate.value,
+      paused: playback.paused.value,
     }),
     INSTRUMENT_HZ,
   )

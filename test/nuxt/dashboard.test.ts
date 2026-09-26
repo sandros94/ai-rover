@@ -1,17 +1,22 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import type { Component } from 'vue'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
+import { flushPromises } from '@vue/test-utils'
 import { useState } from '#imports'
 import { UApp, USlider } from '#components'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
+import { MAP_VIEW_KEY } from '~/composables/useMapView'
+import { PANEL_LAYOUT_KEY } from '#shared/utils/client/hud'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import PlaybackControls from '~/components/dashboard/PlaybackControls.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import VoteCard from '~/components/dashboard/VoteCard.vue'
+// @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+import SceneHud from '~/components/hud/SceneHud.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import NotMovingFlag from '~/components/dashboard/NotMovingFlag.vue'
 
@@ -104,30 +109,106 @@ function state(overrides: Partial<MissionStateJson> = {}): MissionStateJson {
   } as MissionStateJson
 }
 
-/** The map needs a browser's canvas, workers and served terrain; its slots are what matter here. */
+/**
+ * The stop's ground needs served terrain and a planner worker; the stub hands the layout what
+ * `MissionMap` gives its slot: the stage's props and the pick flow.
+ */
+const planning = {
+  result: undefined,
+  pending: false,
+  picked: false,
+  submitting: false,
+  refusal: null,
+  onHover: () => {},
+  onPick: () => {},
+  confirm: () => {},
+  cancel: () => {},
+}
 const MapStub = defineComponent({
   name: 'MissionMap',
+  props: ['state', 'signedIn', 'highlight', 'track'],
+  emits: ['submitted', 'stale', 'ground'],
   setup:
     (_, { slots }) =>
     () =>
-      h('div', { 'data-test': 'map' }, [slots.controls?.(), slots.default?.()]),
+      slots.default?.({ stage: () => ({ center: { x: 0, y: 0 }, radius: 500 }), planning }),
 })
 
-function mountDashboard(props: {
+/** The stage needs WebGL or a canvas; which view it shows, and where, is what matters here. */
+const StageStub = defineComponent({
+  name: 'StopStage',
+  props: { view: { type: String, required: true } },
+  setup: (props) => () => h('div', { 'data-test': 'stage', 'data-view': props.view }),
+})
+
+/** The HUD area, as laid out in a desktop browser. */
+const AREA = { left: 0, top: 48, width: 1280, height: 720 }
+
+/** `matchMedia` answering the layout's width query as a wide or a phone viewport would. */
+function viewport(wide: boolean): void {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (media: string) =>
+      ({
+        matches: wide,
+        media,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList,
+  )
+}
+
+/** Mounted with key listeners on the window: unmounted after each test. */
+const attached: { unmount: () => void }[] = []
+
+async function mountDashboard(props: {
   state: MissionStateJson | null
   error: unknown
   serverOffsetMs: number
 }) {
-  return mountSuspended(
+  const wrapper = await mountSuspended(
     defineComponent({
       render: () => h(UApp, null, { default: () => h(MissionDashboard, props) }),
     }),
-    { global: { stubs: { MissionMap: MapStub } } },
+    { global: { stubs: { MissionMap: MapStub, StopStage: StageStub } }, attachTo: document.body },
   )
+  attached.push(wrapper)
+  return wrapper
 }
 
+const press = async (key: string) => {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key }))
+  await flushPromises()
+}
+
+const baseView = (wrapper: { find: (s: string) => { attributes: (a: string) => unknown } }) =>
+  wrapper.find('[data-test=scene-layer] [data-test=stage]').attributes('data-view')
+
+const inBody = (selector: string) => document.body.querySelector(selector)
+
+beforeEach(() => {
+  viewport(true)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    ...AREA,
+    x: AREA.left,
+    y: AREA.top,
+    right: AREA.left + AREA.width,
+    bottom: AREA.top + AREA.height,
+    toJSON: () => ({}),
+  })
+})
+
 afterEach(() => {
+  for (const wrapper of attached.splice(0)) wrapper.unmount()
   useState('jev-user-session').value = {}
+  useState('jev-rover:panels').value = null
+  useState('jev-rover:hud').value = { visible: true, instruments: false, vote: false }
+  localStorage.clear()
+  vi.restoreAllMocks()
+  document.body.innerHTML = ''
 })
 
 describe('VoteCard', () => {
@@ -220,6 +301,16 @@ describe('PlaybackControls', () => {
     expect(controls.emitted('live')).toHaveLength(1)
   })
 
+  it('plays and pauses from one button that says which it will do', async () => {
+    const wrapper = await mount(PlaybackControls, props)
+    const toggle = wrapper.find('[data-test=play-toggle]')
+    expect(toggle.attributes('aria-label')).toBe('Pause')
+    await toggle.trigger('click')
+    expect(wrapper.findComponent(PlaybackControls).emitted('toggle')).toHaveLength(1)
+    const paused = await mount(PlaybackControls, { ...props, paused: true })
+    expect(paused.find('[data-test=play-toggle]').attributes('aria-label')).toBe('Play')
+  })
+
   it('seeks from the scrubber, within the released range', async () => {
     const wrapper = await mount(PlaybackControls, props)
     const slider = wrapper.findComponent(USlider)
@@ -246,11 +337,15 @@ describe('MissionDashboard', () => {
     expect(wrapper.text()).toMatch(/no mission has landed/i)
   })
 
-  it('mounts on a fixture state with the round and the instruments', async () => {
+  it('mounts on a fixture state with the scene, the round and the instruments', async () => {
     const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
-    expect(wrapper.find('[data-test=map]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=scene-layer] [data-test=stage]').exists()).toBe(true)
     expect(wrapper.find('[data-test=round]').exists()).toBe(true)
-    expect(wrapper.find('[data-test=instruments]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=mission-clock]').exists()).toBe(false)
+    await wrapper.find('[data-test=panels-menu]').trigger('click')
+    await flushPromises()
+    ;(inBody('[data-test=panel-toggle-journey]') as HTMLElement).click()
+    await flushPromises()
     expect(wrapper.find('[data-test=journey-stats]').exists()).toBe(true)
   })
 
@@ -315,5 +410,146 @@ describe('NotMovingFlag', () => {
   it('asks a signed-out visitor to sign in to flag', async () => {
     const wrapper = await mount(NotMovingFlag, { ...props, signedIn: false })
     expect(wrapper.find('[data-test=flag]').attributes('href')).toBe('/login')
+  })
+})
+
+describe('the full-viewport layout', () => {
+  it('opens on the 3D scene and switches to the 2D map from the top bar', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    expect(baseView(wrapper)).toBe('3d')
+    await wrapper.find('[data-test=view-2d]').trigger('click')
+    await flushPromises()
+    expect(baseView(wrapper)).toBe('2d')
+    expect(localStorage.getItem(MAP_VIEW_KEY)).toBe('2d')
+  })
+
+  it('plans on the 2D map from 3D, and returns to 3D after the submission', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    expect(wrapper.find('[data-test=pick-preview]').exists()).toBe(false)
+    await wrapper.find('[data-test=plan-on-map]').trigger('click')
+    await flushPromises()
+    expect(baseView(wrapper)).toBe('2d')
+    expect(wrapper.find('[data-test=pick-preview]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=plan-on-map]').exists()).toBe(false)
+    wrapper.findComponent(MapStub).vm.$emit('submitted')
+    await flushPromises()
+    expect(baseView(wrapper)).toBe('3d')
+  })
+
+  it('floats the default panels on a wide viewport, and closes and reopens one', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    const open = () => wrapper.findAll('[data-test=panel]').map((p) => p.attributes('data-panel'))
+    // Attitude and speed open by default too, once a drive plays; none does here.
+    expect(open()).toEqual(['map2d', 'vote'])
+    expect(wrapper.find('[data-panel=map2d] [data-test=stage]').attributes('data-view')).toBe('2d')
+
+    await wrapper.find('[data-panel=vote] [data-test=panel-close]').trigger('click')
+    await flushPromises()
+    expect(open()).not.toContain('vote')
+    await vi.waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(PANEL_LAYOUT_KEY) ?? '{}')
+      expect(saved.panels?.vote?.open).toBe(false)
+    })
+
+    await wrapper.find('[data-test=panels-menu]').trigger('click')
+    await flushPromises()
+    ;(inBody('[data-test=panel-toggle-vote]') as HTMLElement).click()
+    await flushPromises()
+    expect(open()).toContain('vote')
+    expect(wrapper.find('[data-panel=vote] [data-test=round]').exists()).toBe(true)
+  })
+
+  it('offers no floating 2D map while the base view is the map', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    await wrapper.find('[data-test=view-2d]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-panel=map2d]').exists()).toBe(false)
+  })
+
+  it('hides the instruments on a phone until the toggle opens them in a drawer', async () => {
+    viewport(false)
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    expect(wrapper.find('[data-test=panel]').exists()).toBe(false)
+    expect(inBody('[data-sheet=instruments]')).toBeNull()
+
+    await wrapper.find('[data-test=hud-toggle]').trigger('click')
+    await flushPromises()
+    const sheet = inBody('[data-sheet=instruments]')
+    expect(sheet?.querySelector('[data-test=mission-clock]')).not.toBeNull()
+    expect(sheet?.querySelector('[data-test=journey-stats]')).not.toBeNull()
+    expect(sheet?.querySelector('[data-test=round]')).toBeNull()
+
+    await wrapper.find('[data-test=vote-toggle]').trigger('click')
+    await flushPromises()
+    expect(inBody('[data-sheet=vote] [data-test=round]')).not.toBeNull()
+  })
+
+  it('switches views with 1 and 2 and toggles the HUD with h', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    await press('1')
+    expect(baseView(wrapper)).toBe('2d')
+    await press('2')
+    expect(baseView(wrapper)).toBe('3d')
+    expect(wrapper.find('[data-test=panel]').exists()).toBe(true)
+    await press('h')
+    expect(wrapper.find('[data-test=panel]').exists()).toBe(false)
+    await press('h')
+    expect(wrapper.find('[data-test=panel]').exists()).toBe(true)
+  })
+})
+
+describe('SceneHud', () => {
+  async function mountHud(props: Record<string, unknown>) {
+    const wrapper = await mountSuspended(
+      defineComponent({
+        setup() {
+          const view = ref<'2d' | '3d'>('3d')
+          return () =>
+            h(UApp, null, {
+              default: () =>
+                h(SceneHud, {
+                  'panels': [],
+                  'view': view.value,
+                  'onUpdate:view': (next: '2d' | '3d') => (view.value = next),
+                  ...props,
+                }),
+            })
+        },
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    return wrapper
+  }
+
+  it('plays and pauses with space and goes live with l', async () => {
+    const wrapper = await mountHud({
+      playback: { mode: 'replay', t: 12, rate: 1, paused: false, live: true },
+    })
+    const hud = wrapper.findComponent(SceneHud)
+    await press(' ')
+    expect(hud.emitted('toggle')).toHaveLength(1)
+    await press('l')
+    expect(hud.emitted('live')).toHaveLength(1)
+  })
+
+  it('ignores space and l without playback, and l on a replay with no live edge', async () => {
+    const idle = await mountHud({ playback: null })
+    await press(' ')
+    await press('l')
+    expect(idle.findComponent(SceneHud).emitted('toggle')).toBeUndefined()
+    const replay = await mountHud({
+      playback: { mode: 'replay', t: 12, rate: 60, paused: false, live: false },
+    })
+    await press('l')
+    expect(replay.findComponent(SceneHud).emitted('live')).toBeUndefined()
+  })
+
+  it('lists the shortcuts in a help popover', async () => {
+    const wrapper = await mountHud({ playback: null })
+    await wrapper.find('[data-test=shortcuts]').trigger('click')
+    await flushPromises()
+    const help = inBody('[data-test=shortcuts-help]')
+    expect(help?.querySelectorAll('kbd').length).toBeGreaterThanOrEqual(5)
   })
 })

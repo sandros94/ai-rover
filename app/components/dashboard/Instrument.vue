@@ -1,3 +1,37 @@
+<script lang="ts">
+/** Closed set: the instrument panels, as `PANEL_IDS` names them. */
+export type InstrumentGroup =
+  | 'clock'
+  | 'attitude'
+  | 'speed'
+  | 'slip'
+  | 'events'
+  | 'reveals'
+  | 'planner'
+  | 'journey'
+
+export const INSTRUMENT_GROUPS: readonly InstrumentGroup[] = [
+  'clock',
+  'attitude',
+  'speed',
+  'slip',
+  'events',
+  'reveals',
+  'planner',
+  'journey',
+]
+
+/** The groups that read a playing drive. */
+export const DRIVE_GROUPS: readonly InstrumentGroup[] = [
+  'attitude',
+  'speed',
+  'slip',
+  'events',
+  'reveals',
+  'planner',
+]
+</script>
+
 <script setup lang="ts">
 import type { RevealGroup, RoundSubmission, SlopeProfile } from '#shared/utils/client/instruments'
 import type { DriveEvent, KeyframeBlock } from '#shared/utils/drive'
@@ -17,12 +51,14 @@ import SpeedOdometer from '~/components/instruments/SpeedOdometer.vue'
 type Instant = string | Date | number
 
 /**
- * The instruments over one snapshot of playback. The drive readings need a segment playing and
- * at least one keyframe reached; the round and the journey tally show when given, so a replay
- * can leave out what is not about its drive.
+ * One instrument group over a snapshot of playback, as a panel or a sheet shows it: `clock` is
+ * the mission clock with the round countdown when live, the others one instrument each. The
+ * drive readings need a segment playing and at least one keyframe reached; `journey` needs the
+ * live tally. Without what it needs, a group says so.
  */
 withDefaults(
   defineProps<{
+    group: InstrumentGroup
     drive?: {
       frame: Float32Array
       keyframes: KeyframeBlock
@@ -58,11 +94,7 @@ withDefaults(
 </script>
 
 <template>
-  <section
-    data-test="instruments"
-    class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
-    aria-label="Instruments"
-  >
+  <div v-if="group === 'clock'" class="space-y-3">
     <MissionClock
       data-test="mission-clock"
       :sols-epoch="solsEpoch"
@@ -78,31 +110,51 @@ withDefaults(
       :now-ms="nowMs"
       :rules="live.rules"
     />
-    <template v-if="drive">
-      <RoverAttitude data-test="rover-attitude" class="sm:col-span-2" :frame="drive.frame" />
-      <SpeedOdometer
-        data-test="speed-odometer"
-        :frame="drive.frame"
-        :events="drive.events"
-        :keyframes="drive.keyframes"
-        :mission-before-m="drive.missionBeforeM"
-      />
-      <SlipGauge data-test="slip-gauge" :keyframes="drive.keyframes" :t="drive.t" />
-      <EventFeed data-test="event-feed" :events="drive.events" :t="drive.t" />
-      <RevealMeter
-        data-test="reveal-meter"
-        :reveals="drive.reveals"
-        :t="drive.t"
-        :cell-size="cellSize"
-        :journey-before-m2="drive.journeyBeforeM2"
-      />
-      <PlannerTelemetry
-        data-test="planner-telemetry"
-        :metrics="drive.metrics"
-        :profile="drive.profile"
-        :slope-limit-deg="slopeLimitDeg"
-      />
-    </template>
-    <JourneyStats v-if="live" data-test="journey-stats" :tally="live.tally" />
-  </section>
+  </div>
+  <RoverAttitude
+    v-else-if="group === 'attitude' && drive"
+    data-test="rover-attitude"
+    :frame="drive.frame"
+  />
+  <SpeedOdometer
+    v-else-if="group === 'speed' && drive"
+    data-test="speed-odometer"
+    :frame="drive.frame"
+    :events="drive.events"
+    :keyframes="drive.keyframes"
+    :mission-before-m="drive.missionBeforeM"
+  />
+  <SlipGauge
+    v-else-if="group === 'slip' && drive"
+    data-test="slip-gauge"
+    :keyframes="drive.keyframes"
+    :t="drive.t"
+  />
+  <EventFeed
+    v-else-if="group === 'events' && drive"
+    data-test="event-feed"
+    :events="drive.events"
+    :t="drive.t"
+  />
+  <RevealMeter
+    v-else-if="group === 'reveals' && drive"
+    data-test="reveal-meter"
+    :reveals="drive.reveals"
+    :t="drive.t"
+    :cell-size="cellSize"
+    :journey-before-m2="drive.journeyBeforeM2"
+  />
+  <PlannerTelemetry
+    v-else-if="group === 'planner' && drive"
+    data-test="planner-telemetry"
+    :metrics="drive.metrics"
+    :profile="drive.profile"
+    :slope-limit-deg="slopeLimitDeg"
+  />
+  <JourneyStats
+    v-else-if="group === 'journey' && live"
+    data-test="journey-stats"
+    :tally="live.tally"
+  />
+  <p v-else data-test="instrument-idle" class="p-3 text-sm text-muted">No segment is playing.</p>
 </template>

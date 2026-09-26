@@ -39,6 +39,7 @@ export function useSegmentPlayback(
   const heldUntil = ref(0)
   const mode = ref<PlaybackMode>('live')
   const rate = ref<PlaybackRate>(1)
+  const paused = ref(false)
   const error = shallowRef<unknown>(null)
 
   const now = () => Date.now() + toValue(options.serverOffsetMs ?? 0)
@@ -70,6 +71,7 @@ export function useSegmentPlayback(
     liveTime.value = clock.liveTimeAt(wall)
     simTime.value = sim
     mode.value = clock.mode
+    paused.value = clock.paused
   }
 
   function stop(): void {
@@ -88,6 +90,7 @@ export function useSegmentPlayback(
     liveTime.value = 0
     heldUntil.value = 0
     mode.value = 'live'
+    paused.value = false
     error.value = null
   }
 
@@ -139,6 +142,7 @@ export function useSegmentPlayback(
     heldUntil,
     mode,
     rate,
+    paused,
     error,
     seek(simSeconds: number): void {
       clock?.seek(simSeconds)
@@ -151,6 +155,15 @@ export function useSegmentPlayback(
     goLive(): void {
       clock?.goLive()
       mode.value = 'live'
+      paused.value = false
+    },
+    /** Pauses playing playback, or plays paused playback on from where it holds. */
+    togglePlay(): void {
+      if (!clock) return
+      if (clock.paused) clock.play()
+      else clock.pause()
+      mode.value = clock.mode
+      paused.value = clock.paused
     },
   }
 }

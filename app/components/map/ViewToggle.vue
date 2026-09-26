@@ -10,7 +10,7 @@ const OPTIONS = [
 </script>
 
 <template>
-  <UFieldGroup size="xs" aria-label="Map view">
+  <UFieldGroup size="sm" aria-label="Map view">
     <UButton
       v-for="option in OPTIONS"
       :key="option.value"

@@ -16,7 +16,7 @@ useSeoMeta({
 </script>
 
 <template>
-  <UContainer class="space-y-4 py-4">
+  <UContainer v-if="error || !data" class="space-y-4 py-4">
     <SiteHeader />
     <div class="flex items-center gap-2">
       <UButton
@@ -27,9 +27,7 @@ useSeoMeta({
         size="sm"
         aria-label="Back to the journey"
       />
-      <h1 class="text-base font-semibold">
-        {{ data ? `Segment ${data.drive.number}` : 'Segment' }}
-      </h1>
+      <h1 class="text-base font-semibold">Segment</h1>
     </div>
     <UAlert
       v-if="error"
@@ -38,8 +36,13 @@ useSeoMeta({
       title="This segment cannot be replayed."
       description="It is still driving, or it does not exist."
     />
-    <ClientOnly v-else-if="data">
-      <DriveReplay :replay="data" />
-    </ClientOnly>
   </UContainer>
+  <div v-else class="h-dvh">
+    <ClientOnly>
+      <DriveReplay :replay="data" />
+      <template #fallback>
+        <HudSceneHud view="3d" :panels="[]" />
+      </template>
+    </ClientOnly>
+  </div>
 </template>

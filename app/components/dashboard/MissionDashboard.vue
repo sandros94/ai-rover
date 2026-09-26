@@ -3,10 +3,17 @@ import type { PlaybackRate } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
+import type { PanelId } from '#shared/utils/client/hud'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
+import SceneHud from '~/components/hud/SceneHud.vue'
+import LiveStage from '~/components/map/LiveStage.vue'
+import type { MapTrack } from '~/components/map/MissionMap.vue'
 import MissionMap from '~/components/map/MissionMap.vue'
+import PickPreview from '~/components/map/PickPreview.vue'
+import type { MapViewMode } from '~/composables/useMapView'
 import type { MissionStateJson } from '~/composables/useMissionState'
-import InstrumentGrid from './InstrumentGrid.vue'
+import { DRIVE_GROUPS, INSTRUMENT_GROUPS } from './Instrument.vue'
+import Instrument from './Instrument.vue'
 import NotMovingFlag from './NotMovingFlag.vue'
 import PlaybackControls from './PlaybackControls.vue'
 import RoundPanel from './RoundPanel.vue'
@@ -129,6 +136,58 @@ function onRate(rate: PlaybackRate): void {
   playback.setRate(rate)
 }
 
+const hudPlayback = computed(() => {
+  if (!playing.value || !playback.manifest.value) return null
+  const { mode, t, rate, paused } = snapshot.value
+  return { mode, t, rate, paused, live: true }
+})
+
+/** Read where the map draws them: see `MapTrack`. */
+const track: MapTrack = {
+  rover,
+  plan,
+  driven,
+  reveals: fogReveals,
+  frame: playback.frame,
+  keyframes: computed(() => snapshot.value.keyframes),
+  t: computed(() => snapshot.value.t),
+}
+
+const instruments = computed(() => {
+  const s = props.state
+  return {
+    drive: drive.value,
+    solsEpoch: s?.mission.solsEpoch ?? 0,
+    nowMs: nowMs.value,
+    live: s
+      ? { round: round.value, driving: s.segment !== null, rules: s.mission.rules, tally: s.tally }
+      : undefined,
+    cellSize: ground.value?.cellSize,
+    slopeLimitDeg: ground.value?.slopeLimitDeg,
+  }
+})
+
+/** The drive's instruments are offered only while a drive plays. */
+const panels = computed<PanelId[]>(() => [
+  'map2d',
+  'vote',
+  ...INSTRUMENT_GROUPS.filter((group) => drive.value || !DRIVE_GROUPS.includes(group)),
+])
+
+/* Planning: destinations are picked on the 2D map; a pick from the scene returns to it. */
+
+const view = useMapView()
+const planFrom = ref<MapViewMode | null>(null)
+function planOnMap(): void {
+  planFrom.value = view.value
+  view.value = '2d'
+}
+function onSubmitted(): void {
+  if (planFrom.value) view.value = planFrom.value
+  planFrom.value = null
+  emit('changed')
+}
+
 /* The round: the card whose route the map shows. */
 
 const highlightId = ref<string | null>(null)
@@ -139,109 +198,149 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <UAlert
-      v-if="noMission"
-      color="neutral"
-      variant="subtle"
-      icon="i-lucide-rocket"
-      title="No mission has landed yet."
-      description="The dashboard fills in once a rover is on the ground."
+  <ClientOnly>
+    <MissionMap
+      v-if="state && stopKey"
+      :key="stopKey"
+      v-slot="{ stage, planning }"
+      :state="state"
+      :signed-in="loggedIn"
+      :highlight="highlight"
+      :track="track"
+      @submitted="onSubmitted"
+      @stale="emit('changed')"
+      @ground="ground = $event"
     >
-      <template v-if="dev" #actions>
-        <UButton to="/_dev" size="sm" variant="soft" icon="i-lucide-wrench">
-          Seed one in the dev panel
-        </UButton>
-      </template>
-    </UAlert>
-    <UAlert
-      v-else-if="error && !state"
-      color="error"
-      variant="subtle"
-      title="The mission state did not load."
-    />
-    <p v-else-if="!state" class="text-sm text-muted">Loading the mission…</p>
-
-    <UAlert
-      v-if="state?.pause"
-      data-test="pause"
-      color="warning"
-      variant="subtle"
-      icon="i-lucide-circle-pause"
-      title="The mission is paused: submissions and LGTMs wait until it resumes."
-      :description="state.pause.message"
-    >
-      <template #actions>
-        <span class="flex items-center gap-1 text-xs text-muted">
-          <UAvatar
-            :src="state.pause.by.avatarUrl ?? undefined"
-            :alt="state.pause.by.displayName"
-            size="3xs"
+      <SceneHud
+        v-model:view="view"
+        :panels="panels"
+        :playback="hudPlayback"
+        @toggle="playback.togglePlay"
+        @live="playback.goLive"
+      >
+        <template #scene>
+          <LiveStage
+            :stage="stage"
+            :view="view"
+            @hover="planning.onHover"
+            @pick="planning.onPick"
           />
-          {{ state.pause.by.displayName }}
-        </span>
-      </template>
-    </UAlert>
-
-    <template v-if="state && stopKey">
-      <ClientOnly>
-        <MissionMap
-          :key="stopKey"
-          :state="state"
-          :signed-in="loggedIn"
-          :highlight="highlight"
-          :rover="rover"
-          :plan="plan"
-          :driven="driven"
-          :reveals="fogReveals"
-          :frame="playback.frame.value"
-          :keyframes="snapshot.keyframes"
-          :t="snapshot.t"
-          @submitted="emit('changed')"
-          @stale="emit('changed')"
-          @ground="ground = $event"
-        >
-          <template #controls>
-            <PlaybackControls
-              v-if="playing && playback.manifest.value"
-              :sim-time="snapshot.t"
-              :released-until="Math.min(snapshot.liveTime, snapshot.heldUntil)"
-              :mode="snapshot.mode"
-              :rate="snapshot.rate"
-              :lag-s="lagS"
-              @seek="playback.seek"
-              @rate="onRate"
-              @live="playback.goLive"
-            />
-          </template>
-          <NotMovingFlag
-            v-if="state.segment && state.flags"
-            :segment-id="state.segment.id"
-            :flags="state.flags"
+        </template>
+        <template #top>
+          <UAlert
+            v-if="state.pause"
+            data-test="pause"
+            class="max-w-xl"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-circle-pause"
+            title="The mission is paused: submissions and LGTMs wait until it resumes."
+            :description="state.pause.message"
+          >
+            <template #actions>
+              <span class="flex items-center gap-1 text-xs text-muted">
+                <UAvatar
+                  :src="state.pause.by.avatarUrl ?? undefined"
+                  :alt="state.pause.by.displayName"
+                  size="3xs"
+                />
+                {{ state.pause.by.displayName }}
+              </span>
+            </template>
+          </UAlert>
+          <PickPreview
+            v-if="view === '2d'"
+            data-test="pick-preview"
+            class="w-full max-w-sm"
+            :result="planning.result"
+            :pending="planning.pending"
+            :picked="planning.picked"
+            :submitting="planning.submitting"
+            :refusal="planning.refusal"
             :signed-in="loggedIn"
-            @changed="emit('changed')"
+            @confirm="planning.confirm"
+            @cancel="planning.cancel"
           />
-          <RoundPanel
-            v-model:highlight-id="highlightId"
-            :state="state"
-            @changed="emit('changed')"
+          <UButton
+            v-else-if="state.round"
+            data-test="plan-on-map"
+            icon="i-lucide-map-pin"
+            color="neutral"
+            variant="solid"
+            class="shadow-lg"
+            @click="planOnMap"
+          >
+            Plan on the 2D map
+          </UButton>
+        </template>
+        <template #bottom>
+          <PlaybackControls
+            v-if="hudPlayback"
+            :sim-time="snapshot.t"
+            :released-until="Math.min(snapshot.liveTime, snapshot.heldUntil)"
+            :mode="snapshot.mode"
+            :rate="snapshot.rate"
+            :paused="snapshot.paused"
+            :lag-s="lagS"
+            @seek="playback.seek"
+            @rate="onRate"
+            @toggle="playback.togglePlay"
+            @live="playback.goLive"
           />
-        </MissionMap>
-      </ClientOnly>
-
-      <InstrumentGrid
-        :drive="drive"
-        :sols-epoch="state.mission.solsEpoch"
-        :now-ms="nowMs"
-        :live="{
-          round,
-          driving: state.segment !== null,
-          rules: state.mission.rules,
-          tally: state.tally,
-        }"
-        :cell-size="ground?.cellSize"
-        :slope-limit-deg="ground?.slopeLimitDeg"
-      />
+        </template>
+        <template #panel-map2d>
+          <LiveStage :stage="stage" view="2d" />
+        </template>
+        <template #panel-vote>
+          <div class="space-y-3 p-3">
+            <NotMovingFlag
+              v-if="state.segment && state.flags"
+              :segment-id="state.segment.id"
+              :flags="state.flags"
+              :signed-in="loggedIn"
+              @changed="emit('changed')"
+            />
+            <RoundPanel
+              v-model:highlight-id="highlightId"
+              :state="state"
+              @changed="emit('changed')"
+            />
+          </div>
+        </template>
+        <template v-for="group in INSTRUMENT_GROUPS" #[`panel-${group}`]>
+          <Instrument :group="group" v-bind="instruments" />
+        </template>
+      </SceneHud>
+    </MissionMap>
+    <SceneHud v-else v-model:view="view" :panels="[]">
+      <template #top>
+        <div class="w-full max-w-xl">
+          <UAlert
+            v-if="noMission"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-rocket"
+            title="No mission has landed yet."
+            description="The dashboard fills in once a rover is on the ground."
+          >
+            <template v-if="dev" #actions>
+              <UButton to="/_dev" size="sm" variant="soft" icon="i-lucide-wrench">
+                Seed one in the dev panel
+              </UButton>
+            </template>
+          </UAlert>
+          <UAlert
+            v-else-if="error && !state"
+            color="error"
+            variant="subtle"
+            title="The mission state did not load."
+          />
+          <p v-else class="text-sm text-muted">Loading the mission…</p>
+        </div>
+      </template>
+    </SceneHud>
+    <template #fallback>
+      <SceneHud :view="view" :panels="[]" />
     </template>
-  </div>
+  </ClientOnly>
 </template>

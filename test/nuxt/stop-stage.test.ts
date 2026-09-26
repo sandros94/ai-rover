@@ -24,26 +24,31 @@ function grid(size: number) {
   return { heights, width: size, height: size, cellSize: 1 }
 }
 
-/** A stage whose `view` model lives in the host, as the map and the replay hold it. */
-async function mountStage(initial: '2d' | '3d' = '2d') {
+async function mountStage(view: '2d' | '3d') {
+  const wrapper = await mountSuspended(StopStage, {
+    props: {
+      view,
+      terrain: { grid: grid(129), origin: { i: -64, j: -64 } },
+      seen: new Uint8Array(129 * 129),
+      reveals: [{ vertices: [0, 1] }],
+      chunkVertices: 65,
+      heightAt: () => 0,
+      loading: { loaded: 4, total: 4, error: null },
+      center: { x: 0, y: 0 },
+      radius: 64,
+      rover: { x: 0, y: 0, headingRad: 0 },
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+/** A host holding the visitor's view choice, as the dashboard and the replay do. */
+async function mountChoice() {
   const Host = defineComponent({
     setup() {
       const view = useMapView()
-      if (initial === '3d') view.value = '3d'
-      return () =>
-        h(StopStage, {
-          'view': view.value,
-          'onUpdate:view': (next: '2d' | '3d') => (view.value = next),
-          'terrain': { grid: grid(129), origin: { i: -64, j: -64 } },
-          'seen': new Uint8Array(129 * 129),
-          'reveals': [{ vertices: [0, 1] }],
-          'chunkVertices': 65,
-          'heightAt': () => 0,
-          'loading': { loaded: 4, total: 4, error: null },
-          'center': { x: 0, y: 0 },
-          'radius': 64,
-          'rover': { x: 0, y: 0, headingRad: 0 },
-        })
+      return () => h('p', { 'data-test': 'choice' }, view.value)
     },
   })
   const wrapper = await mountSuspended(Host)
@@ -54,29 +59,31 @@ async function mountStage(initial: '2d' | '3d' = '2d') {
 afterEach(() => localStorage.removeItem(MAP_VIEW_KEY))
 
 describe('StopStage', () => {
-  it('opens on the 2D map and switches to the scene with the same reveals', async () => {
-    const wrapper = await mountStage()
-    expect(wrapper.find('[data-test=map]').exists()).toBe(true)
-    expect(wrapper.find('[data-test=scene]').exists()).toBe(false)
+  it('draws the 2D map or the scene, with the same reveals, as its view says', async () => {
+    const flat = await mountStage('2d')
+    expect(flat.find('[data-test=map]').exists()).toBe(true)
+    expect(flat.find('[data-test=scene]').exists()).toBe(false)
 
-    await wrapper.find('[data-test=view-3d]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-test=map]').exists()).toBe(false)
-    expect(wrapper.find('[data-test=scene]').attributes('data-reveals')).toBe('1')
-
-    await wrapper.find('[data-test=view-2d]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-test=map]').exists()).toBe(true)
+    const scene = await mountStage('3d')
+    expect(scene.find('[data-test=map]').exists()).toBe(false)
+    expect(scene.find('[data-test=scene]').attributes('data-reveals')).toBe('1')
   })
 
-  it('remembers the choice in browser storage and opens on it next time', async () => {
-    const first = await mountStage()
-    await first.find('[data-test=view-3d]').trigger('click')
-    await flushPromises()
-    expect(localStorage.getItem(MAP_VIEW_KEY)).toBe('3d')
-    first.unmount()
+  it('leaves the view switch to the page', async () => {
+    const stage = await mountStage('3d')
+    expect(stage.find('[data-test=view-2d]').exists()).toBe(false)
+  })
+})
 
-    const again = await mountStage()
-    expect(again.find('[data-test=scene]').exists()).toBe(true)
+describe('useMapView', () => {
+  it('opens on the scene by default', async () => {
+    expect((await mountChoice()).text()).toBe('3d')
+  })
+
+  it('opens on the view last chosen in this browser', async () => {
+    localStorage.setItem(MAP_VIEW_KEY, '2d')
+    expect((await mountChoice()).text()).toBe('2d')
+    localStorage.setItem(MAP_VIEW_KEY, 'garbage')
+    expect((await mountChoice()).text()).toBe('3d')
   })
 })

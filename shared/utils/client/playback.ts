@@ -20,6 +20,8 @@ export interface PlaybackClock {
   readonly mode: PlaybackMode
   /** Applies to replay; live always runs at 1. */
   readonly rate: PlaybackRate
+  /** Replay holds its sim time while wall-clock passes; live is never paused. */
+  readonly paused: boolean
   /** Sim time as of the last {@link PlaybackClock.tick}. */
   readonly simTime: number
   /** Sim seconds shown at `wallMs` in the current mode, never past the live edge. */
@@ -34,6 +36,11 @@ export interface PlaybackClock {
   seek(simSeconds: number): void
   /** Keeps the sim time shown at `now()` and continues at `rate`. */
   setRate(rate: PlaybackRate): void
+  /** Holds the sim time shown at `now()`, entering replay there; seeks and rates keep the pause. */
+  pause(): void
+  /** Continues a paused replay from where it holds, at `rate`. */
+  play(): void
+  /** Follows the live edge again, ending any pause. */
   goLive(): void
   /** Advances to `wallMs`: records the sim time and rejoins live once replay reaches the edge. */
   tick(wallMs: number): number
@@ -73,6 +80,7 @@ export function createPlaybackClock(options: {
 
   let mode: PlaybackMode = 'live'
   let rate: PlaybackRate = 1
+  let paused = false
   let simTime = 0
   // Replay: sim time `anchorSim` at wall `anchorWall`, advancing at `rate`.
   let anchorSim = 0
@@ -94,7 +102,8 @@ export function createPlaybackClock(options: {
   function simTimeAt(wallMs: number): number {
     const live = liveTimeAt(wallMs)
     if (mode === 'live') return live
-    return Math.min(live, Math.max(0, anchorSim + ((wallMs - anchorWall) / 1000) * rate))
+    const elapsed = paused ? 0 : ((wallMs - anchorWall) / 1000) * rate
+    return Math.min(live, Math.max(0, anchorSim + elapsed))
   }
 
   function anchor(sim: number): void {
@@ -108,6 +117,9 @@ export function createPlaybackClock(options: {
     },
     get rate() {
       return rate
+    },
+    get paused() {
+      return paused
     },
     get simTime() {
       return simTime
@@ -133,12 +145,23 @@ export function createPlaybackClock(options: {
       if (mode === 'replay') anchor(simTimeAt(now()))
       rate = next
     },
+    pause() {
+      anchor(simTimeAt(now()))
+      mode = 'replay'
+      paused = true
+    },
+    play() {
+      if (!paused) return
+      anchor(anchorSim)
+      paused = false
+    },
     goLive() {
       mode = 'live'
+      paused = false
     },
     tick(wallMs) {
       simTime = simTimeAt(wallMs)
-      if (mode === 'replay' && simTime >= liveTimeAt(wallMs)) mode = 'live'
+      if (mode === 'replay' && !paused && simTime >= liveTimeAt(wallMs)) mode = 'live'
       return simTime
     },
   }

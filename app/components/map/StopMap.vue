@@ -515,7 +515,7 @@ function recenter(): void {
   <div
     ref="container"
     data-test="map"
-    class="relative aspect-square w-full touch-none select-none overflow-hidden rounded-lg bg-(--ui-bg-muted)"
+    class="relative h-full w-full touch-none select-none overflow-hidden bg-(--ui-bg-muted)"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"

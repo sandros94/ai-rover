@@ -69,6 +69,7 @@ function onHover(point: MapPoint | null): void {
 <template>
   <div v-if="disk" class="grid gap-4 lg:grid-cols-[minmax(0,48rem)_22rem]">
     <StopMap
+      class="aspect-square rounded-lg"
       :terrain="terrain"
       :seen="seen"
       :center="disk.center"

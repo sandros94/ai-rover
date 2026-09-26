@@ -1,14 +1,44 @@
-<script setup lang="ts">
+<script lang="ts">
+import type { Ref } from 'vue'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
+
+/**
+ * What playback shows on the map, as refs read where they are drawn: the rover and the frame
+ * change every animation frame, and reading them here would redraw every slot with them.
+ */
+export interface MapTrack {
+  /** The rover as playback shows it; at the current stop without one. */
+  rover: Ref<{ x: number; y: number; headingRad: number } | undefined>
+  /** The route the playing segment follows at the playback time. */
+  plan: Ref<MapPoint[]>
+  /** Where the playing segment has driven so far. */
+  driven: Ref<MapPoint[]>
+  /**
+   * Vertices the playing drive has seen so far, as disk-grid indices of this stop's disk: shown
+   * lifted from the fog, never given to the planner, which knows only the stop's mask.
+   */
+  reveals: Ref<readonly { vertices: ArrayLike<number> }[]>
+  /** For the 3D view: the playback frame, the keyframes reached and the sim time. */
+  frame: Ref<Float32Array | undefined>
+  keyframes: Ref<KeyframeBlock | undefined>
+  t: Ref<number>
+}
+</script>
+
+<script setup lang="ts">
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { PlanGround } from '~/workers/plan-protocol'
-import PickPreview from './PickPreview.vue'
-import StopStage from './StopStage.vue'
+import type { StageProps } from './LiveStage.vue'
 
 type State = MissionStateJson
+
+/*
+ * The current stop's ground and pick flow, drawn by the slot: `stage` reads the stage's props
+ * (hand it to `LiveStage`), `planning` is the pick flow as `PickPreview` shows it.
+ */
 
 const props = withDefaults(
   defineProps<{
@@ -17,33 +47,9 @@ const props = withDefaults(
     signedIn?: boolean
     /** A submission whose route to show, in place of hover previews. */
     highlight?: { id: string; goal: MapPoint } | null
-    /** The rover as playback shows it; at the current stop without one. */
-    rover?: { x: number; y: number; headingRad: number }
-    /** The route the playing segment follows at the playback time. */
-    plan?: MapPoint[]
-    /** Where the playing segment has driven so far. */
-    driven?: MapPoint[]
-    /**
-     * Vertices the playing drive has seen so far, as disk-grid indices of this stop's disk: shown
-     * lifted from the fog, never given to the planner, which knows only the stop's mask.
-     */
-    reveals?: readonly { vertices: ArrayLike<number> }[]
-    /** For the 3D view: the playback frame, the keyframes reached and the sim time. */
-    frame?: Float32Array
-    keyframes?: KeyframeBlock
-    t?: number
+    track: MapTrack
   }>(),
-  {
-    signedIn: false,
-    highlight: null,
-    rover: undefined,
-    plan: () => [],
-    driven: () => [],
-    reveals: () => [],
-    frame: undefined,
-    keyframes: undefined,
-    t: 0,
-  },
+  { signedIn: false, highlight: null },
 )
 
 const emit = defineEmits<{
@@ -75,7 +81,6 @@ const { manifest, mask, cache, sampler, loaded, total, terrain, revealed, error 
     ring: rules.value.segmentDistanceBand,
   },
 )
-const view = useMapView()
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 watch(
@@ -129,68 +134,57 @@ const { picked, submitting, refusal, onHover, onPick, cancel, confirm } = usePic
   onStale: () => emit('stale'),
 })
 
-const rover = computed(() => props.rover ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad })
-
 const submissions = computed(() =>
   (props.state.round?.submissions ?? []).map((s) => ({ id: s.id, goal: s.goal })),
 )
+
+/** The stage's props: changes every animation frame while a drive plays. */
+const stage = computed((): StageProps => {
+  const { track } = props
+  return {
+    terrain: terrain.value,
+    seen: revealed.value,
+    reveals: track.reveals.value,
+    chunkVertices: cache.value?.geometry?.vertexCount,
+    heightAt,
+    loading: { loaded: loaded.value, total: total.value, error: error.value },
+    center: manifest.value
+      ? { x: manifest.value.stop.x, y: manifest.value.stop.y }
+      : { x: stop.x, y: stop.y },
+    radius: manifest.value?.radius ?? 500,
+    rover: track.rover.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad },
+    trail: props.state.trail,
+    plan: track.plan.value,
+    driven: track.driven.value,
+    deaths: props.state.deaths,
+    deathRadiusM: rules.value.failureZone.destinationRadiusM,
+    frame: track.frame.value,
+    keyframes: track.keyframes.value,
+    t: track.t.value,
+    anchor: props.state.round ? anchor.value : undefined,
+    ring: rules.value.segmentDistanceBand,
+    submissions: submissions.value,
+    highlightId: props.highlight?.id ?? null,
+    preview: preview.result.value,
+    picked: picked.value,
+  }
+})
+/** Read by `LiveStage` where it draws, so only the stage redraws every frame. */
+const readStage = () => stage.value
+
+const planning = reactive({
+  result: preview.result,
+  pending: preview.pending,
+  picked: computed(() => picked.value !== null),
+  submitting,
+  refusal,
+  onHover,
+  onPick,
+  confirm,
+  cancel,
+})
 </script>
 
 <template>
-  <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-    <div class="space-y-2">
-      <StopStage
-        v-model:view="view"
-        :terrain="terrain"
-        :seen="revealed"
-        :reveals="reveals"
-        :chunk-vertices="cache?.geometry?.vertexCount"
-        :height-at="heightAt"
-        :loading="{ loaded, total, error }"
-        :center="manifest ? { x: manifest.stop.x, y: manifest.stop.y } : { x: stop.x, y: stop.y }"
-        :radius="manifest?.radius ?? 500"
-        :rover="rover"
-        :trail="state.trail"
-        :plan="plan"
-        :driven="driven"
-        :deaths="state.deaths"
-        :death-radius-m="rules.failureZone.destinationRadiusM"
-        :frame="frame"
-        :keyframes="keyframes"
-        :t="t"
-        :anchor="state.round ? anchor : undefined"
-        :ring="rules.segmentDistanceBand"
-        :submissions="submissions"
-        :highlight-id="highlight?.id ?? null"
-        :preview="preview.result.value"
-        :picked="picked"
-        @hover="onHover"
-        @pick="onPick"
-      />
-      <slot name="controls" />
-    </div>
-    <div class="space-y-4">
-      <PickPreview
-        v-if="view === '2d'"
-        :result="preview.result.value"
-        :pending="preview.pending.value"
-        :picked="picked !== null"
-        :submitting="submitting"
-        :refusal="refusal"
-        :signed-in="signedIn"
-        @confirm="confirm"
-        @cancel="cancel"
-      />
-      <UAlert
-        v-else
-        data-test="plan-hint"
-        color="neutral"
-        variant="subtle"
-        icon="i-lucide-map"
-        title="Switch to 2D to plan"
-        description="Destinations are picked on the flat map, inside the ring around the goal."
-      />
-      <slot />
-    </div>
-  </div>
+  <slot :stage="readStage" :planning="planning" />
 </template>
