@@ -25,7 +25,7 @@ useSeoMeta({ title: 'Community · Jev Rover' })
           <tr>
             <th class="py-2 pr-3 font-medium">Member</th>
             <th class="py-2 pr-3 text-right font-medium">Distance driven</th>
-            <th class="py-2 pr-3 text-right font-medium">Legs won</th>
+            <th class="py-2 pr-3 text-right font-medium">Segments won</th>
             <th class="py-2 pr-3 text-right font-medium">LGTMs received</th>
             <th class="py-2 text-right font-medium">Failures</th>
           </tr>

@@ -2,7 +2,7 @@
 import { formatDuration } from '#shared/utils/client/instruments'
 import type { DriveJson } from '~/composables/useJourney'
 
-/** One settled drive, a leg of the mission, in a line: where from and to, how it ended, how far and long, and whose. */
+/** One settled drive, a segment of the mission, in a line: where from and to, how it ended, how far and long, and whose. */
 const props = defineProps<{ drive: DriveJson }>()
 
 const STATUS = {
@@ -27,7 +27,7 @@ const started = computed(() =>
 <template>
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
     <span class="w-14 tabular-nums text-muted" data-test="drive-number"
-      >Leg {{ drive.number }}</span
+      >Segment {{ drive.number }}</span
     >
     <span class="font-medium" data-test="drive-route">{{ route }}</span>
     <UBadge :color="status.color" variant="subtle" size="sm" data-test="drive-status">
