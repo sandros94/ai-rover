@@ -3,7 +3,7 @@
 Numbered list of what is known to be unverified. Reviewed at every milestone start. An item is removed once verified (the evidence goes in the relevant research note or decision); git history keeps the trail.
 
 1. Nuxt UI 4.11 on `nuxt-nightly@5x`: boots and renders the starter page; per-component behaviour unverified.
-2. Nitro `netlify` preset build of a Nuxt 5 nightly app deploys and serves SSR on Netlify.
+2. Nitro `netlify` preset build of a Nuxt 5 nightly app deploys and serves SSR on Netlify (the `node-server` preset builds locally and the output contains no development-only code).
 3. Netlify sync Function timeout: docs say 60 s hard; forum threads say 10 s default / 26 s configurable. Which applies to Functions v2 today?
 4. Rapier `-deterministic-compat` 0.20 cold-start cost and steps/s in Node on Netlify (only matters if Q3 picks rigid-body).
 5. Blobs served through a Function with `Netlify-CDN-Cache-Control … durable`: observed cache hit behaviour and purge latency.

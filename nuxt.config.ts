@@ -32,7 +32,17 @@ export default defineNuxtConfig({
   },
 
   imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION] },
-  nitro: { imports: { dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION] } },
+  /**
+   * The shared modules import one another explicitly, so they are import sources only: injecting
+   * into them makes Nitro's bundled scanner, which misses `class X extends Y` declarations, import
+   * an error class into the file that declares it.
+   */
+  nitro: {
+    imports: {
+      dirs: [TERRAIN, NAV, ROVER, DRIVE, MISSION],
+      exclude: [/[\\/]node_modules[\\/]/, /[\\/]shared[\\/]utils[\\/]/],
+    },
+  },
 
   /**
    * Local Netlify emulation under `dev` and `test`. Edge Functions are off: the project deploys
