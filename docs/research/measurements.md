@@ -123,7 +123,7 @@ Targets from `rover-geometry-mars-terrain.md`: mean 1 m slope 4–7° (Jezero fl
 | 48 / 2048 / 0.62 / 7 | 8.4° | 32.9 % | 7.6 % | 1.2 % | 7.5 m |
 | 48 / 2048 / 0.62 / 7; craters depth 0.10, rim 0.03 | 8.3° | 32.5 % | 7.2 % | 0.8 % | 7.5 m |
 
-The last row meets every target band while keeping bowls shallow as degraded Martian craters are; it is the proposed replacement for the defaults. Changing the defaults changes the world hash, so every recorded fixture and local blob is regenerated with it.
+The last row meets every target band while keeping bowls shallow as degraded Martian craters are. The defaults stay as they are for now, since they play well; this set is the evidence-backed alternative if drives become too uneventful. Changing the defaults changes the world hash, so every recorded fixture and local blob would be regenerated with it.
 
 ## Local platform emulation
 

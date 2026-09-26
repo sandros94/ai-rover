@@ -5,7 +5,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 1. Nuxt UI 4.11 on `nuxt-nightly@5x`: boots and renders the starter page; per-component behaviour unverified.
 2. Nitro `netlify` preset build of a Nuxt 5 nightly app deploys and serves SSR on Netlify (the `node-server` preset builds locally and the output contains no development-only code).
 3. Netlify sync Function timeout: docs say 60 s hard; forum threads say 10 s default / 26 s configurable. Which applies to Functions v2 today?
-4. Rapier `-deterministic-compat` 0.20 cold-start cost and steps/s in Node on Netlify (only matters if Q3 picks rigid-body).
+4. Rapier `-deterministic-compat` 0.20 cold-start cost and steps/s in Node on Netlify (only matters if a rigid-body producer ever replaces the kinematic one).
 5. Blobs served through a Function with `Netlify-CDN-Cache-Control … durable`: observed cache hit behaviour and purge latency.
 6. Blob storage/bandwidth pricing on the credit plans (not itemised in the credits table).
 7. Netlify DB storage billing status after 2026-07-01.
@@ -28,7 +28,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 24. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
 25. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
 26. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
-27. Chunk blobs carry the true heights and traversable bits of unrevealed ground; a client reading them with the public plan can anticipate a stopped-short point before the slices release (audit 2026-09-27). Decision pending: accept, or serve per-stop chunk views with unrevealed vertices flattened.
+27. Chunk blobs carry the true heights and traversable bits of unrevealed ground, so a script combining them with the public plan can anticipate where a drive stops short. Accepted as a known limitation: the views hide fogged ground, and only the served chunks expose it.
 28. The attempt cap is checked before an insert without being atomic with it; concurrent submits can exceed it by a few.
 29. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
 30. The reachability flood fill crosses unseen ground, so whether a seen vertex is pathable can depend on hidden terrain.
