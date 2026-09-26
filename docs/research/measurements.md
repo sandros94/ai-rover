@@ -109,6 +109,22 @@ Publishing a stop takes ~660 ms cold and ~170 ms when every chunk already exists
 
 About 1,150 input tokens per judgment (~$0.00005); nine live requests recorded everything (12.7k tokens). The route-choice experiment (three seeds, six cost settings each) showed Jev's top pick never matching the planner's cheapest route and probability piling onto the first of identically labelled candidates; see the withdrawn decision.
 
+## Terrain parameter candidates (1 km² around the origin, seed `mars`, 1 m cells, 2026-09-26)
+
+Targets from `rover-geometry-mars-terrain.md`: mean 1 m slope 4–7° (Jezero floor), >15° about 3–8 %, >20° about 1–3 %, ~10 m RMS relief at 1 km.
+
+| Set (relief amplitude / wavelength / gain / octaves; craters) | Mean slope | >10° | >15° | >20° | Height RMS |
+| --- | --- | --- | --- | --- | --- |
+| current defaults (16 / 1024 / 0.5 / 6) | 3.0° | 1.2 % | 0.8 % | 0.5 % | 2.9 m |
+| 24 / 1024 / 0.62 / 6 | 6.7° | 16.6 % | 2.2 % | 0.6 % | 3.9 m |
+| 28 / 1024 / 0.62 / 6 | 7.8° | 26.5 % | 5.0 % | 0.9 % | 4.6 m |
+| 40 / 2048 / 0.62 / 6 | 5.9° | 9.4 % | 1.0 % | 0.6 % | 6.4 m |
+| 48 / 2048 / 0.62 / 6 | 7.0° | 18.8 % | 2.4 % | 0.6 % | 7.7 m |
+| 48 / 2048 / 0.62 / 7 | 8.4° | 32.9 % | 7.6 % | 1.2 % | 7.5 m |
+| 48 / 2048 / 0.62 / 7; craters depth 0.10, rim 0.03 | 8.3° | 32.5 % | 7.2 % | 0.8 % | 7.5 m |
+
+The last row meets every target band while keeping bowls shallow as degraded Martian craters are; it is the proposed replacement for the defaults. Changing the defaults changes the world hash, so every recorded fixture and local blob is regenerated with it.
+
 ## Local platform emulation
 
 `@netlify/nuxt` 1.0.1 under `nuxt-nightly@5.0.0-29796419` (Nitro 3 beta, h3 v2), 2026-09-25:
