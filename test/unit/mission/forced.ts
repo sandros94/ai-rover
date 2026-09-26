@@ -1,4 +1,4 @@
-import type { DriveOutcome } from '#shared/utils/drive'
+import type { DriveOutcome, SegmentRecord } from '#shared/utils/drive'
 
 /**
  * Outcomes forced onto the next drives, in order: the rover still drives the real terrain, but
@@ -11,6 +11,8 @@ export const forced = {
   outcomes: [] as ((real: DriveOutcome) => DriveOutcome)[],
   /** Thrown by the next drives instead of driving, in order, before `outcomes` apply. */
   errors: [] as Error[],
+  /** Records replacing the next drives' whole records, in order, after `outcomes` apply. */
+  records: [] as ((real: SegmentRecord) => SegmentRecord)[],
 }
 
 export async function forcedDriveSegment(
@@ -24,9 +26,11 @@ export async function forcedDriveSegment(
       if (error) throw error
       const driven = actual.driveSegment(...args)
       const force = forced.outcomes.shift()
-      return force
+      const forcedOutcome = force
         ? { ...driven, record: { ...driven.record, outcome: force(driven.record.outcome) } }
         : driven
+      const replace = forced.records.shift()
+      return replace ? { ...forcedOutcome, record: replace(forcedOutcome.record) } : forcedOutcome
     },
   }
 }

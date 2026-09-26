@@ -11,3 +11,11 @@ export {
 } from './rules'
 export type { SubmissionRefusal } from './plan-goal'
 export { planGoal } from './plan-goal'
+export type { NotMovingReason } from './not-moving'
+export {
+  backstopSlice,
+  notMovingQuorum,
+  progressOverWindow,
+  stallEnding,
+  truncateRecord,
+} from './not-moving'

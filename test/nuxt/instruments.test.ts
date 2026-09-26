@@ -74,9 +74,9 @@ const ev = (t: number, type: DriveEvent['type'], details?: DriveEvent['details']
 })
 const EVENTS = [
   ev(0, 'start'),
-  ev(30, 'pause', { durationS: 6.5 }),
-  ev(60, 'pause', { durationS: 6.5 }),
-  ev(70, 'slip', { slip: 0.4 }),
+  ev(0, 'turning', { angleDeg: 35, durationS: 35 / 3 }),
+  ev(48, 'imaging', { durationS: 30 }),
+  ev(90, 'slip', { slip: 0.4 }),
 ]
 
 const METRICS: NavMetrics = {
@@ -146,11 +146,38 @@ describe('SpeedOdometer', () => {
     expect(wrapper.find('[data-test=efficiency]').text()).toContain('%')
   })
 
-  it('shows the think pause while stopped inside a pause', async () => {
+  it('labels efficiency against the commanded cap', async () => {
     const wrapper = await mount(SpeedOdometer, {
-      props: { frame: frameAt({ t: 62, speed: 0 }), events: EVENTS, keyframes: keyframes() },
+      props: { frame: frameAt({ t: 50, speed: 0 }), events: EVENTS, keyframes: keyframes() },
     })
-    expect(wrapper.find('[data-test=think-pause]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=efficiency]').text()).toContain('vs commanded cap')
+  })
+
+  it.each([
+    [5, 'turning', 'turning 35°'],
+    [30, 'driving', 'driving'],
+    [66, 'imaging', 'imaging stop 12 s'],
+  ])('says what the rover is doing at t = %s', async (t, status, text) => {
+    const wrapper = await mount(SpeedOdometer, {
+      props: { frame: frameAt({ t, speed: 0 }), events: EVENTS, keyframes: keyframes() },
+    })
+    const badge = wrapper.find('[data-test=drive-status]')
+    expect(badge.attributes('data-status')).toBe(status)
+    expect(badge.text()).toBe(text)
+  })
+
+  it('says assessing during an assessment stop and stopped after the drive', async () => {
+    const events = [ev(0, 'start'), ev(40, 'assessing', { durationS: 20, cause: 'revealed' })]
+    const at = async (t: number, list: DriveEvent[]) =>
+      (
+        await mount(SpeedOdometer, {
+          props: { frame: frameAt({ t, speed: 0 }), events: list, keyframes: keyframes() },
+        })
+      )
+        .find('[data-test=drive-status]')
+        .text()
+    expect(await at(45, events)).toBe('assessing')
+    expect(await at(80, [...events, ev(70, 'arrived')])).toBe('stopped')
   })
 })
 
@@ -174,12 +201,16 @@ describe('MissionClock', () => {
 })
 
 describe('EventFeed', () => {
-  it('lists events newest first with pauses collapsed', async () => {
-    const wrapper = await mount(EventFeed, { props: { events: EVENTS, t: 80 } })
+  it('lists every event newest first, stops with their details', async () => {
+    const wrapper = await mount(EventFeed, { props: { events: EVENTS, t: 100 } })
     const items = wrapper.findAll('[data-test=event]')
-    expect(items).toHaveLength(3)
+    expect(items).toHaveLength(4)
     expect(items[0]!.text()).toMatch(/slip/i)
-    expect(items[1]!.text()).toContain('2 pauses')
+    expect(items[1]!.text()).toContain('Imaging stop')
+    expect(items[1]!.text()).toContain('30 s')
+    expect(items[2]!.text()).toContain('Turning')
+    expect(items[2]!.text()).toContain('35° left')
+    expect(items[1]!.find('[data-test=event-icon]').attributes('data-icon')).toBe('i-lucide-camera')
   })
 })
 
@@ -248,7 +279,7 @@ describe('JudgmentCard', () => {
 })
 
 describe('RoundCountdown', () => {
-  it('rings the grace window with the leader likes', async () => {
+  it('rings the planning phase with the leader LGTMs', async () => {
     const now = Date.UTC(2026, 8, 26)
     const wrapper = await mount(RootCountdown, {
       props: {
@@ -258,6 +289,8 @@ describe('RoundCountdown', () => {
             {
               id: 'a',
               likes: 4,
+              submitter: { id: 'u1' },
+              deferred: false,
               createdAt: new Date(now).toISOString(),
               judgment: { risk: 1, distanceWeight: 0.5, timeWeight: 0.5 },
             },
@@ -271,6 +304,9 @@ describe('RoundCountdown', () => {
     expect(wrapper.find('[data-test=ring]').exists()).toBe(true)
     expect(wrapper.find('[data-test=remaining]').text()).toContain('1:30')
     expect(wrapper.find('[data-test=leader-likes]').text()).toContain('4')
+    expect(wrapper.text()).toContain('Planning phase')
+    expect(wrapper.text()).toContain('LGTM on the leading pick')
+    expect(wrapper.text()).not.toMatch(/grace|like/i)
   })
 
   it('names the idle state', async () => {

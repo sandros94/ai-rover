@@ -42,7 +42,7 @@ export interface ListedSubmission extends Submission {
  * Refuses a closed round, a round that has left the stop or anchor the goal was planned from
  * (`ROUND_CHANGED`: plan again), and a second open submission by the same user in it. The round
  * row stays share-locked until the insert commits, so a settlement moving it waits for the insert
- * or is waited on.
+ * or is waited on. An open submission starts with its author's like, in the same transaction.
  */
 export async function createSubmission(db: DB, input: NewSubmission): Promise<Submission> {
   const { goal, plannedFrom, ...rest } = input
@@ -81,6 +81,10 @@ export async function createSubmission(db: DB, input: NewSubmission): Promise<Su
           .values({ ...rest, goalX: goal.x, goalY: goal.y })
           .returning(),
       )
+      // Submitting is an LGTM on your own entry; a rejected one holds no place to approve.
+      if (row!.status === 'open') {
+        await tx.insert(submissionLike).values({ submissionId: row!.id, userId: row!.userId })
+      }
       return row!
     } catch (error) {
       if (!isUniqueViolation(error, 'submission_open_per_user_idx')) throw error
@@ -204,23 +208,39 @@ async function updateOpen(
   )
 }
 
-/** Only the submitter may withdraw, and only while the submission is open. */
+/**
+ * Only the submitter may withdraw, and only while the submission is open. Their own like goes
+ * with it; the likes others gave stay on record.
+ */
 export async function withdrawSubmission(
   db: DB,
   submissionId: string,
   options: { userId: string },
 ): Promise<Submission> {
-  const [row] = await db
-    .update(submission)
-    .set({ status: 'withdrawn' })
-    .where(
-      and(
-        eq(submission.id, submissionId),
-        eq(submission.userId, options.userId),
-        eq(submission.status, 'open'),
-      ),
-    )
-    .returning()
+  const row = await db.transaction(async (tx) => {
+    const [withdrawn] = await tx
+      .update(submission)
+      .set({ status: 'withdrawn' })
+      .where(
+        and(
+          eq(submission.id, submissionId),
+          eq(submission.userId, options.userId),
+          eq(submission.status, 'open'),
+        ),
+      )
+      .returning()
+    if (withdrawn) {
+      await tx
+        .delete(submissionLike)
+        .where(
+          and(
+            eq(submissionLike.submissionId, submissionId),
+            eq(submissionLike.userId, options.userId),
+          ),
+        )
+    }
+    return withdrawn
+  })
   if (row) return row
   await assertSubmissionExists(db, submissionId)
   throw new DbError(

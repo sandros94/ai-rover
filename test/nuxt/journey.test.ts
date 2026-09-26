@@ -65,7 +65,7 @@ describe('DriveList', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.find('a').attributes('href')).toBe(`/drives/${DRIVES[0]!.id}`)
     const text = (k: number, field: string) => rows[k]!.find(`[data-test=drive-${field}]`).text()
-    expect(text(0, 'number')).toBe('#2')
+    expect(text(0, 'number')).toBe('Leg 2')
     expect(text(0, 'route')).toBe('Stop 1 → lost')
     expect(text(0, 'status')).toMatch(/failed/i)
     expect(text(0, 'distance')).toBe('42 m')
@@ -82,8 +82,9 @@ describe('DriveList', () => {
 })
 
 describe('SiteHeader', () => {
-  it('links to the journey', async () => {
+  it('links to the journey and the community', async () => {
     const wrapper = await mountSuspended(SiteHeader)
     expect(wrapper.find('[data-test=nav-journey]').attributes('href')).toBe('/drives')
+    expect(wrapper.find('[data-test=nav-community]').attributes('href')).toBe('/community')
   })
 })

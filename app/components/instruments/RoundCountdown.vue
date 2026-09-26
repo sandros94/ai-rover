@@ -17,18 +17,21 @@ const phase = computed(() => roundPhase(props))
 const STATE = {
   idle: {
     title: 'Rover idle',
-    note: 'The vote closes once the first destination waits out its grace window.',
+    note: 'The vote closes once the first destination waits out its planning phase.',
   },
   open: { title: 'Voting open', note: 'The vote closes when the current drive ends.' },
-  grace: { title: 'Grace window', note: 'The most liked destination drives next.' },
+  planning: {
+    title: 'Planning phase',
+    note: 'The destination with the most LGTMs drives next.',
+  },
 } as const
 
 const R = 42
 const C = 2 * Math.PI * R
-/** Ring share still to run: the grace window's remainder; full while open, empty while idle. */
+/** Ring share still to run: the planning phase's remainder; full while open, empty while idle. */
 const fill = computed(() => {
   const p = phase.value
-  return p.kind === 'grace' ? p.fraction : p.kind === 'open' ? 1 : 0
+  return p.kind === 'planning' ? p.fraction : p.kind === 'open' ? 1 : 0
 })
 </script>
 
@@ -55,7 +58,7 @@ const fill = computed(() => {
           class="transition-[stroke-dasharray] duration-500"
         />
         <text
-          v-if="phase.kind === 'grace'"
+          v-if="phase.kind === 'planning'"
           data-test="remaining"
           y="6"
           text-anchor="middle"
@@ -74,11 +77,11 @@ const fill = computed(() => {
         <p class="font-semibold">{{ STATE[phase.kind].title }}</p>
         <p class="text-xs text-muted">{{ STATE[phase.kind].note }}</p>
         <p v-if="phase.leader" class="flex items-center gap-1 text-sm">
-          <UIcon name="i-lucide-heart" class="size-4 text-muted" />
+          <UIcon name="i-lucide-thumbs-up" class="size-4 text-muted" />
           <span data-test="leader-likes" class="font-semibold tabular-nums">{{
             phase.leader.likes
           }}</span>
-          <span class="text-muted">on the leading pick</span>
+          <span class="text-muted">LGTM on the leading pick</span>
         </p>
         <p v-else class="text-sm text-dimmed">No submissions yet.</p>
       </div>

@@ -3,12 +3,20 @@ import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import { roundPhase } from '#shared/utils/client/instruments/round-phase'
 
 const NOW = Date.UTC(2026, 8, 26, 12)
-const GRACE = DEFAULT_MISSION_RULES.graceWindowMs
+const PLANNING = DEFAULT_MISSION_RULES.graceWindowMs
 
-function submission(id: string, likes: number, risk = 1, createdAt = NOW - 60_000) {
+function submission(
+  id: string,
+  likes: number,
+  risk = 1,
+  createdAt = NOW - 60_000,
+  deferred = false,
+) {
   return {
     id,
     likes,
+    submitter: { id: `user-${id}` },
+    deferred,
     createdAt: new Date(createdAt).toISOString(),
     judgment: { risk, distanceWeight: 0.5, timeWeight: 0.5 },
   }
@@ -34,18 +42,18 @@ describe('roundPhase', () => {
     expect(phase.leader).toEqual({ id: 'a', likes: 2 })
   })
 
-  it('counts the grace window down to the close', () => {
+  it('counts the planning phase down to the close', () => {
     const phase = roundPhase({
       ...base,
       round: {
-        closesAt: new Date(NOW + GRACE / 4).toISOString(),
+        closesAt: new Date(NOW + PLANNING / 4).toISOString(),
         submissions: [submission('a', 0)],
       },
       driving: false,
     })
-    expect(phase.kind).toBe('grace')
-    if (phase.kind !== 'grace') return
-    expect(phase.remainingMs).toBe(GRACE / 4)
+    expect(phase.kind).toBe('planning')
+    if (phase.kind !== 'planning') return
+    expect(phase.remainingMs).toBe(PLANNING / 4)
     expect(phase.fraction).toBeCloseTo(0.25, 12)
   })
 
@@ -55,7 +63,7 @@ describe('roundPhase', () => {
       round: { closesAt: new Date(NOW - 1000), submissions: [submission('a', 0)] },
       driving: false,
     })
-    expect(phase).toMatchObject({ kind: 'grace', remainingMs: 0, fraction: 0 })
+    expect(phase).toMatchObject({ kind: 'planning', remainingMs: 0, fraction: 0 })
   })
 
   it('names the leader by likes, then the mission tie-break', () => {
@@ -68,5 +76,18 @@ describe('roundPhase', () => {
       driving: true,
     })
     expect(phase.leader).toEqual({ id: 'b', likes: 3 })
+  })
+
+  it("puts the driving author's deferred submission behind everyone else's", () => {
+    const round = {
+      closesAt: null,
+      submissions: [submission('author', 5, 0, NOW - 60_000, true), submission('b', 1)],
+    }
+    expect(roundPhase({ ...base, round, driving: true }).leader).toEqual({ id: 'b', likes: 1 })
+    const alone = { closesAt: null, submissions: [round.submissions[0]!] }
+    expect(roundPhase({ ...base, round: alone, driving: true }).leader).toEqual({
+      id: 'author',
+      likes: 5,
+    })
   })
 })

@@ -187,14 +187,42 @@ describe('submissions', () => {
 describe('likes', () => {
   it('likes idempotently, self-like allowed, and unlikes', async () => {
     const { round, user } = await seedMission(db)
+    const grace = await createUser(db, { displayName: 'Grace' })
     const submission = await createSubmission(db, submissionInput(round, user.id))
-    expect(await countLikes(db, submission.id)).toBe(0)
-    await like(db, submission.id, { userId: user.id })
-    await like(db, submission.id, { userId: user.id })
     expect(await countLikes(db, submission.id)).toBe(1)
+    await like(db, submission.id, { userId: user.id })
+    await like(db, submission.id, { userId: grace.id })
+    await like(db, submission.id, { userId: grace.id })
+    expect(await countLikes(db, submission.id)).toBe(2)
     await unlike(db, submission.id, { userId: user.id })
     await unlike(db, submission.id, { userId: user.id })
-    expect(await countLikes(db, submission.id)).toBe(0)
+    expect(await countLikes(db, submission.id)).toBe(1)
+  })
+
+  it("starts an open submission with its author's LGTM, a rejected one with none", async () => {
+    const { round, user } = await seedMission(db)
+    const grace = await createUser(db, { displayName: 'Grace' })
+    const open = await createSubmission(db, submissionInput(round, user.id))
+    expect(await countLikes(db, open.id)).toBe(1)
+    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: user.id })).toEqual([
+      open.id,
+    ])
+    const rejected = await createSubmission(db, {
+      ...submissionInput(round, grace.id),
+      status: 'rejected',
+      rejectionReason: 'judged-infeasible',
+    })
+    expect(await countLikes(db, rejected.id)).toBe(0)
+  })
+
+  it("drops the author's LGTM on withdrawal and keeps the others'", async () => {
+    const { round, user } = await seedMission(db)
+    const grace = await createUser(db, { displayName: 'Grace' })
+    const submission = await createSubmission(db, submissionInput(round, user.id))
+    await like(db, submission.id, { userId: grace.id })
+    await withdrawSubmission(db, submission.id, { userId: user.id })
+    expect(await countLikes(db, submission.id)).toBe(1)
+    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: user.id })).toEqual([])
   })
 
   it('refuses likes on a submission that is no longer open', async () => {
@@ -219,14 +247,19 @@ describe('likes', () => {
     const grace = await createUser(db, { displayName: 'Grace', avatarUrl: null })
     const a = await createSubmission(db, submissionInput(round, user.id))
     const b = await createSubmission(db, submissionInput(round, grace.id, { x: 60, y: 0 }))
-    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: grace.id })).toEqual([])
+    // Each author starts with an LGTM on their own entry.
+    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: grace.id })).toEqual([
+      b.id,
+    ])
     await like(db, a.id, { userId: grace.id })
     await like(db, b.id, { userId: grace.id })
     await like(db, b.id, { userId: user.id })
     expect(
       (await listLikedSubmissionIds(db, { roundId: round.id, userId: grace.id })).toSorted(),
     ).toEqual([a.id, b.id].toSorted())
-    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: user.id })).toEqual([b.id])
+    expect(
+      (await listLikedSubmissionIds(db, { roundId: round.id, userId: user.id })).toSorted(),
+    ).toEqual([a.id, b.id].toSorted())
     const other = await seedMission(db)
     expect(await listLikedSubmissionIds(db, { roundId: other.round.id, userId: grace.id })).toEqual(
       [],

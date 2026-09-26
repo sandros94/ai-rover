@@ -21,9 +21,17 @@ describe('DEFAULT_MISSION_RULES', () => {
       graceWindowMs: 300_000,
       maxJudgedPerRound: 5,
       tieBreak: 'risk',
+      notMoving: {
+        quorumMax: 5,
+        quorumMin: 2,
+        windowMs: 600_000,
+        progressM: 0.5,
+        backstopMs: 900_000,
+      },
     })
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
+    expect(Object.isFrozen(rules.notMoving)).toBe(true)
   })
 })
 
@@ -205,9 +213,11 @@ describe('rankSubmissions', () => {
     likes: number,
     createdAt: Date,
     weights: { distance: number; time: number; risk: number },
+    userId = `user-${id}`,
   ): RankEntry {
     return {
       id,
+      userId,
       likes,
       createdAt,
       judgment: {
@@ -269,6 +279,26 @@ describe('rankSubmissions', () => {
     const expected = ['d', 'a', 'b', 'c']
     expect(ids(rankSubmissions(entries, { rules }))).toEqual(expected)
     expect(ids(rankSubmissions(entries.toReversed(), { rules }))).toEqual(expected)
+  })
+
+  it('ranks the driving author last whatever their LGTMs, others by the usual order', () => {
+    const entries = [
+      entry('author', 9, at(0), { distance: 1, time: 1, risk: 0 }, 'ada'),
+      entry('few', 1, at(5), { distance: 0, time: 0, risk: 4 }, 'bob'),
+      entry('more', 2, at(9), { distance: 0, time: 0, risk: 4 }, 'cy'),
+    ]
+    expect(ids(rankSubmissions(entries, { rules, drivingAuthorId: 'ada' }))).toEqual([
+      'more',
+      'few',
+      'author',
+    ])
+    // Without a driving author, LGTMs decide as usual.
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual(['author', 'more', 'few'])
+  })
+
+  it("lets the driving author's submission win when it is the only one", () => {
+    const entries = [entry('author', 1, at(0), { distance: 1, time: 1, risk: 0 }, 'ada')]
+    expect(ids(rankSubmissions(entries, { rules, drivingAuthorId: 'ada' }))).toEqual(['author'])
   })
 
   it('returns a new array and leaves the input alone', () => {

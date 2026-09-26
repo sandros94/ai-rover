@@ -30,8 +30,13 @@ import type { JevClient } from '../jev/client'
 import { publishSegment, publishStop } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { SegmentRecord } from '#shared/utils/drive'
-import { driveSegment, DriveError } from '#shared/utils/drive'
-import { rankSubmissions, shouldResetToPreviousStop } from '#shared/utils/mission'
+import { DEFAULT_SLICE_SECONDS, driveSegment, DriveError } from '#shared/utils/drive'
+import {
+  backstopSlice,
+  rankSubmissions,
+  shouldResetToPreviousStop,
+  truncateRecord,
+} from '#shared/utils/mission'
 import { NavError } from '#shared/utils/nav'
 import type { RevealedMask, StopDisk } from '#shared/utils/terrain'
 import {
@@ -43,6 +48,7 @@ import {
   stopManifestKey,
   TerrainError,
 } from '#shared/utils/terrain'
+import { failIfNotMoving } from './not-moving'
 import { recordNextDue, roundStanding } from './round'
 import { assessGoal } from './submit'
 import { loadRecordReveals, loadRevealedMask, missionWorld, stopDisk } from './terrain'
@@ -85,8 +91,9 @@ interface PreparedSettlement {
 }
 
 /**
- * Brings a mission up to `now`, idempotently: under a per-mission lock it (1) settles the drive
- * whose end has passed, which creates and publishes the stop it reached or voids the round beside
+ * Brings a mission up to `now`, idempotently: under a per-mission lock it (0) fails the playing
+ * drive as not moving once the flags and its released playback say so (see `failIfNotMoving`),
+ * which only moves its private end closer, (1) settles the drive whose end has passed, which creates and publishes the stop it reached or voids the round beside
  * a failure, (2) closes the open round once its close time has passed on the best ranked
  * submission whose drive can be computed, drives it over the true terrain, publishes the drive
  * and opens the next round from the same stop, anchored on the winner's goal, and (3) records
@@ -107,7 +114,19 @@ export async function tickMission(
     if (mission.status !== 'active') return result
     const context: TickContext = { store, mission, now }
 
-    const driving = await getDrivingSegment(tx, missionId)
+    let driving = await getDrivingSegment(tx, missionId)
+    // A drive failed as not moving ends at its next slice; that stays private until then.
+    if (driving) {
+      const beside = await getOpenRound(tx, missionId)
+      const ended = await failIfNotMoving(tx, {
+        store,
+        driving,
+        roundId: beside?.id ?? null,
+        rules: mission.config.rules,
+        now,
+      })
+      if (ended) driving = await getSegment(tx, driving.id)
+    }
     // A null outcome means a producer outside the request still runs; it settles once written.
     if (driving?.outcome && driving.endsAt.getTime() <= now.getTime()) {
       Object.assign(result, await settle(tx, context, driving, prepared))
@@ -273,7 +292,7 @@ async function closeIfDue(
   const { store, mission, now } = context
   const { rules } = mission.config
   const round = await lockOpenRound(tx, open.id)
-  const { submissions, closesAt } = await roundStanding(tx, round, { rules, now })
+  const { submissions, closesAt, drivingAuthorId } = await roundStanding(tx, round, { rules, now })
   if (!closesAt || closesAt.getTime() > now.getTime()) return null
 
   const world = missionWorld(mission)
@@ -281,7 +300,7 @@ async function closeIfDue(
   const from = await getStop(tx, round.fromStopId)
   const disk = stopDisk(world, from)
   const revealed = await loadRevealedMask(store, from)
-  for (const candidate of rankSubmissions(submissions, { rules })) {
+  for (const candidate of rankSubmissions(submissions, { rules, drivingAuthorId })) {
     let record: SegmentRecord
     try {
       ;({ record } = driveSegment(world, {
@@ -317,14 +336,31 @@ function isDriveRefusal(error: unknown): boolean {
   return error instanceof DriveError || error instanceof NavError || error instanceof TerrainError
 }
 
-/** Publishes the winner's drive, starts its segment and opens the next round beside it. */
+/**
+ * Publishes the winner's drive, cut where the record shows no progress over the not-moving
+ * backstop, starts its segment and opens the next round beside it.
+ */
 async function start(
   tx: DB,
   context: TickContext,
   options: { round: Round; from: Stop; winner: ListedSubmission; record: SegmentRecord },
 ): Promise<Pick<TickResult, 'started' | 'opened'>> {
   const { store, mission, now } = context
-  const { round, from, winner, record } = options
+  const { round, from, winner } = options
+  // The backstop is a pure function of the record, so a drive that would stall is cut here, as
+  // it would be failed at the release that shows no progress over the backstop.
+  const stall = backstopSlice(options.record, {
+    sliceSeconds: DEFAULT_SLICE_SECONDS,
+    rules: mission.config.rules,
+  })
+  const record =
+    stall === null
+      ? options.record
+      : truncateRecord(options.record, {
+          sliceIndex: stall,
+          sliceSeconds: DEFAULT_SLICE_SECONDS,
+          reason: 'no-progress',
+        })
   const segmentId = uuidv7()
   const published = await publishSegment(store, {
     record,

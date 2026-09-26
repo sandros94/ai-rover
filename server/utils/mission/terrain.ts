@@ -1,5 +1,6 @@
 import type { Mission, Segment, Stop } from '../../database/schema'
 import type { JourneyStore } from '../journey/store'
+import type { SegmentSlice } from '#shared/utils/drive'
 import { decodeSlice, parseStoredSegmentManifest, segmentSliceKey } from '#shared/utils/drive'
 import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import { computeStopDisk, decodeRevealedMask, defineWorld, worldHash } from '#shared/utils/terrain'
@@ -73,15 +74,25 @@ export async function loadRecordReveals(
   const count = Math.round(
     (segment.endsAt.getTime() - segment.startedAt.getTime()) / (sliceSeconds * 1000),
   )
-  const slices = await Promise.all(
-    Array.from({ length: count }, async (_, index) => {
-      const key = segmentSliceKey(segment.id, index)
+  const slices = await loadSlices(store, segment, { from: 0, to: count })
+  return slices.flatMap((slice) => slice.reveals.flatMap((reveal) => Array.from(reveal.vertices)))
+}
+
+/** Slices `from … to − 1` of a published segment, in order. */
+export async function loadSlices(
+  store: JourneyStore,
+  segment: Pick<Segment, 'id'>,
+  options: { from: number; to: number },
+): Promise<SegmentSlice[]> {
+  const { from, to } = options
+  return Promise.all(
+    Array.from({ length: Math.max(0, to - from) }, async (_, k) => {
+      const key = segmentSliceKey(segment.id, from + k)
       const bytes = await store.getInflated(key)
       if (!bytes) throw notPublished(segment.id, key)
       return decodeSlice(bytes)
     }),
   )
-  return slices.flatMap((slice) => slice.reveals.flatMap((reveal) => Array.from(reveal.vertices)))
 }
 
 function notPublished(segmentId: string, key: string): LifecycleError {

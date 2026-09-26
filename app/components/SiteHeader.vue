@@ -12,6 +12,16 @@
       >
         Journey
       </UButton>
+      <UButton
+        to="/community"
+        data-test="nav-community"
+        icon="i-lucide-users"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+      >
+        Community
+      </UButton>
     </nav>
     <div class="ml-auto">
       <UserMenu />

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import { like } from '#server/repositories/likes'
 import { getMission } from '#server/repositories/missions'
+import { pauseMission } from '#server/repositories/pauses'
 import { getOpenRound, getRound } from '#server/repositories/rounds'
 import { getSegment } from '#server/repositories/segments'
 import { getStop, listStops } from '#server/repositories/stops'
@@ -367,8 +368,10 @@ describe('the public state', () => {
         id: a.submission!.id,
         goal: { x: 0, y: 80 },
         createdAt: at(T0, MINUTE),
-        likes: 0,
+        // Submitting is an LGTM on your own entry.
+        likes: 1,
         submitter: { id: m.ada.id, displayName: 'Ada', avatarUrl: null },
+        deferred: false,
         judgment: {
           feasible: 0.9,
           verdict: 'accept',
@@ -395,6 +398,19 @@ describe('the public state', () => {
       longestM: 0,
     })
     expect(state.lastSegment).toBeNull()
+    expect(state.flags).toBeNull()
+    expect(state.pause).toBeNull()
     expect(await listStops(db, m.missionId)).toHaveLength(1)
+  })
+
+  it("shows an operator's pause with its message and who paused", async () => {
+    const m = await landed()
+    await pauseMission(db, m.missionId, { message: 'Dust storm.', pausedBy: m.bob.id, at: T0 })
+    const state = await publicMissionState(db, { missionId: m.missionId, now: at(T0, MINUTE) })
+    expect(state.pause).toEqual({
+      message: 'Dust storm.',
+      by: { displayName: 'Bob', avatarUrl: null },
+      at: T0,
+    })
   })
 })

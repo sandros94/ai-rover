@@ -34,7 +34,7 @@ export interface PlaygroundContext {
   segmentStartedAt: number
   solsEpoch: number
   judgment: typeof JUDGMENT
-  /** The vote across the scrub: open while the first third plays, idle, then a grace window. */
+  /** The vote across the scrub: open while the first third plays, idle, then a planning phase. */
   round: {
     round: RoundFixture | null
     driving: boolean

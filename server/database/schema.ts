@@ -273,6 +273,53 @@ export const segment = snakeCase.table(
 )
 
 /**
+ * A signed-in viewer's "rover not moving" flag on a playing drive, one per user and segment;
+ * flagging again moves `created_at` to now, so only flags within the rules' window count.
+ */
+export const segmentFlag = snakeCase.table(
+  'segment_flag',
+  {
+    segmentId: uuid()
+      .notNull()
+      .references(() => segment.id),
+    userId: uuid()
+      .notNull()
+      .references(() => userAccount.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.segmentId, t.userId] })],
+)
+
+/**
+ * An operator's pause of a mission, with the message shown while it lasts; at most one active
+ * (not resumed) per mission. Set through the database.
+ */
+export const missionPause = snakeCase.table(
+  'mission_pause',
+  {
+    id: id(),
+    missionId: uuid()
+      .notNull()
+      .references(() => mission.id),
+    message: text().notNull(),
+    pausedBy: uuid()
+      .notNull()
+      .references(() => userAccount.id),
+    pausedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('mission_pause_active_idx')
+      .on(t.missionId)
+      .where(sql`${t.resumedAt} is null`),
+    check(
+      'mission_pause_window_check',
+      sql`${t.resumedAt} is null or ${t.resumedAt} >= ${t.pausedAt}`,
+    ),
+  ],
+)
+
+/**
  * Jev's answers by request hash (SHA-256 of model, state and questions), so an identical
  * submission is never paid for twice. Rows never change once written.
  */
@@ -292,6 +339,8 @@ export const schema = {
   submission,
   submissionLike,
   segment,
+  segmentFlag,
+  missionPause,
   jevJudgment,
 }
 
@@ -393,3 +442,5 @@ export type Segment = typeof segment.$inferSelect
 export type NewSegment = typeof segment.$inferInsert
 export type SegmentStatus = (typeof SEGMENT_STATUSES)[number]
 export type JevJudgment = typeof jevJudgment.$inferSelect
+export type SegmentFlag = typeof segmentFlag.$inferSelect
+export type MissionPause = typeof missionPause.$inferSelect

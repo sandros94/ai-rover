@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { rankSubmissions } from '#shared/utils/mission'
+import { rankRound } from '#shared/utils/client/instruments'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import VoteCard from './VoteCard.vue'
 
-/** The open round: its cards in standing order, likes, and which card's route the map shows. */
+/** The open round: its cards in standing order, LGTMs, and which card's route the map shows. */
 const props = defineProps<{ state: MissionStateJson }>()
-/** A like changed the mission state. */
+/** An LGTM changed the mission state. */
 const emit = defineEmits<{ changed: [] }>()
 const highlightId = defineModel<string | null>('highlightId', { default: null })
 
@@ -15,16 +15,7 @@ const round = computed(() => props.state.round)
 /** Standing order: the submission that would win now comes first. */
 const ranked = computed(() => {
   const s = props.state
-  if (!s.round) return []
-  return rankSubmissions(
-    s.round.submissions.map((entry) => ({
-      ...entry,
-      createdAt: new Date(entry.createdAt),
-      judgment: { ...entry.judgment, risk: { score: entry.judgment.risk } },
-      source: entry,
-    })),
-    { rules: s.mission.rules },
-  ).map((entry) => entry.source)
+  return s.round ? rankRound(s.round.submissions, { rules: s.mission.rules }) : []
 })
 
 function toggleHighlight(id: string): void {
@@ -60,7 +51,7 @@ async function like(id: string, on: boolean): Promise<void> {
       </span>
     </div>
     <p v-if="!loggedIn" class="text-xs text-muted">
-      <ULink to="/login" class="underline">Sign in</ULink> to like or submit a destination.
+      <ULink to="/login" class="underline">Sign in</ULink> to LGTM or submit a destination.
     </p>
     <p v-if="!round" data-test="round-empty" class="text-sm text-muted">
       No round is open right now.
@@ -71,7 +62,8 @@ async function like(id: string, on: boolean): Promise<void> {
       </template>
       <template v-else>
         The rover is idle at stop {{ state.currentStop.index }}: the first destination picked inside
-        the ring starts a {{ Math.round(state.mission.rules.graceWindowMs / 60_000) }}-minute vote.
+        the ring starts a {{ Math.round(state.mission.rules.graceWindowMs / 60_000) }}-minute
+        planning phase.
       </template>
     </p>
     <VoteCard

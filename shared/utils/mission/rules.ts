@@ -17,7 +17,7 @@ export interface MissionRules {
     /** Deaths in one cluster that reset the rover to the previous stop. */
     strikes: number
   }
-  /** Time the first submission after an idle drive end waits for competitors. */
+  /** The planning phase: how long the first submission after an idle drive end waits for competitors. */
   graceWindowMs: number
   /**
    * Submissions one user may make in one round, whatever became of them (withdrawn and rejected
@@ -30,6 +30,19 @@ export interface MissionRules {
    * Closed set.
    */
   tieBreak: 'risk' | 'confidence'
+  /**
+   * When a playing drive is failed as not moving. Flags of distinct users within `windowMs` reach
+   * the quorum, `min(quorumMax, max(quorumMin, ceil(active / 2)))` over the users active in the
+   * round, and the released playback shows under `progressM` of displacement over that window;
+   * or, whatever the flags, the record shows under `progressM` over `backstopMs`.
+   */
+  notMoving: {
+    quorumMax: number
+    quorumMin: number
+    windowMs: number
+    progressM: number
+    backstopMs: number
+  }
 }
 
 export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
@@ -43,6 +56,13 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   graceWindowMs: 5 * 60_000,
   maxJudgedPerRound: 5,
   tieBreak: 'risk',
+  notMoving: Object.freeze({
+    quorumMax: 5,
+    quorumMin: 2,
+    windowMs: 10 * 60_000,
+    progressM: 0.5,
+    backstopMs: 15 * 60_000,
+  }),
 })
 
 export interface MapPoint {
@@ -137,6 +157,8 @@ export function shouldResetToPreviousStop(
 
 export interface RankEntry {
   id: string
+  /** The submitter. */
+  userId: string
   likes: number
   createdAt: Date
   judgment: { distanceWeight: number; timeWeight: number; risk: { score: number } }
@@ -144,16 +166,21 @@ export interface RankEntry {
 
 /**
  * Most liked first, ties by `rules.tieBreak`; the id breaks what remains, so the order never
- * depends on the input order.
+ * depends on the input order. Submissions by `drivingAuthorId`, who wrote the drive the round
+ * runs beside, rank after everyone else's whatever their likes: others take precedence, and the
+ * author's pick wins only when nobody else's is left.
  */
 export function rankSubmissions<T extends RankEntry>(
   entries: readonly T[],
-  options: { rules: MissionRules },
+  options: { rules: MissionRules; drivingAuthorId?: string | null },
 ): T[] {
   const confidence = (e: RankEntry) => e.judgment.distanceWeight + e.judgment.timeWeight
   const byRisk = options.rules.tieBreak === 'risk'
+  const deferred = (e: RankEntry) =>
+    options.drivingAuthorId != null && e.userId === options.drivingAuthorId ? 1 : 0
   return entries.toSorted(
     (a, b) =>
+      deferred(a) - deferred(b) ||
       b.likes - a.likes ||
       (byRisk ? a.judgment.risk.score - b.judgment.risk.score : 0) ||
       confidence(b) - confidence(a) ||

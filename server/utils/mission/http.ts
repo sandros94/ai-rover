@@ -21,7 +21,7 @@ import { tickMission } from './tick'
 /** Status per typed error code; codes absent here are server faults and answer 500. */
 const STATUS: Record<string, Record<string, number>> = {
   DbError: { NOT_FOUND: 404, ALREADY_SUBMITTED: 409, INVALID_STATE: 409, ROUND_CHANGED: 409 },
-  LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, AUTHOR_DRIVING: 403 },
+  LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, MISSION_PAUSED: 423 },
   MissionError: { INVALID_INPUT: 400 },
   NavError: { INVALID_INPUT: 422, OUT_OF_DISK: 422 },
   TerrainError: { OUT_OF_BOUNDS: 422 },
@@ -76,19 +76,22 @@ export type MissionAccess = 'read' | 'write'
 /** `public`: the same answer for everyone, cached briefly by browsers and the CDN. */
 export type MissionCache = 'public' | 'none'
 
-const PUBLIC_CACHE = 'public, max-age=5, stale-while-revalidate=30'
-
-/** Response headers for a mission route's answer. */
+/**
+ * Response headers for a mission route's answer. A `public` one is kept `maxAgeS` (default 5)
+ * and served stale while it revalidates.
+ */
 export function missionCacheHeaders(
   missionId: string,
   cache: MissionCache,
+  options: { maxAgeS?: number } = {},
 ): Record<string, string> {
   if (cache === 'none') {
     return { 'cache-control': 'no-store', 'netlify-cdn-cache-control': 'no-store' }
   }
+  const control = `public, max-age=${options.maxAgeS ?? 5}, stale-while-revalidate=30`
   return {
-    'cache-control': PUBLIC_CACHE,
-    'netlify-cdn-cache-control': `${PUBLIC_CACHE}, durable`,
+    'cache-control': control,
+    'netlify-cdn-cache-control': `${control}, durable`,
     'netlify-cache-tag': `mission-${missionId}`,
   }
 }
@@ -137,12 +140,14 @@ function changed(tick: TickResult | null): boolean {
  * state once done. Only a successful answer of a `public` route is cacheable.
  */
 export function defineMissionHandler<T, A extends MissionAccess>(
-  options: { access: A; cache: MissionCache },
+  options: { access: A; cache: MissionCache; maxAgeS?: number },
   handler: (
     event: H3Event,
     context: {
       missionId: string
       store: JourneyStore
+      /** Created only when a judgment is needed, so routes work without a key until then. */
+      jev: JevClient
       now: Date
       tick: A extends 'write' ? TickResult : TickResult | null
     },
@@ -170,12 +175,12 @@ export function defineMissionHandler<T, A extends MissionAccess>(
       const result = await handler(event, {
         missionId: mission.id,
         store,
+        jev: LAZY_JEV,
         now,
         tick: tick as A extends 'write' ? TickResult : TickResult | null,
       })
-      for (const [name, value] of Object.entries(missionCacheHeaders(mission.id, options.cache))) {
-        event.res.headers.set(name, value)
-      }
+      const headers = missionCacheHeaders(mission.id, options.cache, options)
+      for (const [name, value] of Object.entries(headers)) event.res.headers.set(name, value)
       return result
     } catch (error) {
       throw httpErrorOf(error)

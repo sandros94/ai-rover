@@ -1,6 +1,7 @@
 import type { DB } from '../../database/db'
 import type { Mission, SegmentStatus, Stop, StoredJudgment } from '../../database/schema'
 import { getMission } from '../../repositories/missions'
+import { getActivePause } from '../../repositories/pauses'
 import { getOpenRound } from '../../repositories/rounds'
 import type { SettledSegment } from '../../repositories/segments'
 import { getDrivingSegment, listSettledSegments } from '../../repositories/segments'
@@ -11,6 +12,7 @@ import type { MissionRules } from '#shared/utils/mission'
 import { shouldResetToPreviousStop } from '#shared/utils/mission'
 import type { SubmissionSummary } from '#shared/utils/nav'
 import { LifecycleError } from './errors'
+import { notMovingStanding } from './not-moving'
 import { roundStanding } from './round'
 
 export interface PublicSubmission {
@@ -19,6 +21,11 @@ export interface PublicSubmission {
   createdAt: Date
   likes: number
   submitter: { id: string; displayName: string; avatarUrl: string | null }
+  /**
+   * Written by the author of the drive the round runs beside: everyone else's submission takes
+   * precedence, whatever the likes.
+   */
+  deferred: boolean
   judgment: {
     feasible: number
     verdict: Verdict
@@ -145,6 +152,17 @@ export interface PublicMissionState {
   } | null
   /** How the driving segment's slices are released; null while none drives. */
   release: { startedAt: Date; sliceSeconds: number } | null
+  /**
+   * "Rover not moving" flags on the drive in progress: how many count now and how many fail it
+   * (with no progress over the window); null while none plays.
+   */
+  flags: { count: number; quorum: number } | null
+  /** An operator's pause: submissions and likes are refused while it lasts. */
+  pause: {
+    message: string
+    by: { displayName: string; avatarUrl: string | null }
+    at: Date
+  } | null
   /** Every stop reached so far, by index; a stop exists only once its drive has settled. */
   trail: { index: number; x: number; y: number }[]
   /** Death positions of settled failures, oldest first: goals and routes must keep clear. */
@@ -172,16 +190,16 @@ export async function publicMissionState(
   const stop = await getStop(db, mission.currentStopId)
   const open = await getOpenRound(db, missionId)
   const driving = await getDrivingSegment(db, missionId)
+  const playing = driving !== undefined && driving.endsAt.getTime() > now.getTime()
   // Segments are created with their slices published at the default length.
   const sliceSeconds = DEFAULT_SLICE_SECONDS
 
   let round: PublicMissionState['round'] = null
   if (open) {
-    const { submissions, closesAt } = await roundStanding(db, open, {
+    const { submissions, closesAt, drivingAuthorId } = await roundStanding(db, open, {
       rules: mission.config.rules,
       now,
     })
-    const playing = driving !== undefined && driving.endsAt.getTime() > now.getTime()
     round = {
       id: open.id,
       opensAt: open.opensAt,
@@ -194,6 +212,7 @@ export async function publicMissionState(
         createdAt: s.createdAt,
         likes: s.likes,
         submitter: s.submitter,
+        deferred: s.userId === drivingAuthorId,
         judgment: publicJudgment(s.judgment),
         summary: s.summary,
       })),
@@ -203,6 +222,15 @@ export async function publicMissionState(
   const stops = await listStops(db, missionId)
   const settled = await listSettledSegments(db, missionId)
   const last = settled.at(-1)
+  const flags = playing
+    ? await notMovingStanding(db, {
+        segmentId: driving.id,
+        roundId: open?.id ?? null,
+        rules: mission.config.rules,
+        now,
+      })
+    : null
+  const pause = await getActivePause(db, missionId)
 
   return {
     now,
@@ -236,6 +264,14 @@ export async function publicMissionState(
           manifestKey: driving.manifestKey,
         },
     release: driving ? { startedAt: driving.startedAt, sliceSeconds } : null,
+    flags,
+    pause: pause
+      ? {
+          message: pause.message,
+          by: { displayName: pause.by.displayName, avatarUrl: pause.by.avatarUrl },
+          at: pause.at,
+        }
+      : null,
     trail: stops.map(({ index, x, y }) => ({ index, x, y })),
     // Segments of a mission never overlap, so start order is also the order their deaths became public.
     deaths: settled.flatMap((segment) => (segment.death ? [{ ...segment.death }] : [])),

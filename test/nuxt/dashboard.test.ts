@@ -12,6 +12,8 @@ import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
 import PlaybackControls from '~/components/dashboard/PlaybackControls.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import VoteCard from '~/components/dashboard/VoteCard.vue'
+// @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+import NotMovingFlag from '~/components/dashboard/NotMovingFlag.vue'
 
 type Submission = NonNullable<MissionStateJson['round']>['submissions'][number]
 
@@ -32,6 +34,7 @@ const SUBMISSION: Submission = {
   createdAt: '2026-09-26T09:00:00.000Z',
   likes: 3,
   submitter: ADA,
+  deferred: false,
   judgment: {
     feasible: 0.72,
     verdict: 'review',
@@ -83,6 +86,8 @@ function state(overrides: Partial<MissionStateJson> = {}): MissionStateJson {
     },
     segment: null,
     release: null,
+    flags: null,
+    pause: null,
     lastSegment: null,
     trail: [{ index: 0, x: 0, y: 0 }],
     deaths: [],
@@ -170,11 +175,29 @@ describe('VoteCard', () => {
     expect(liked.text()).toMatch(/yours/i)
   })
 
-  it('asks a signed-out visitor to sign in to like', async () => {
+  it('asks a signed-out visitor to sign in to LGTM', async () => {
     const wrapper = await mount(VoteCard, { ...props, signedIn: false })
     const like = wrapper.find('[data-test=like]')
     expect(like.attributes('href')).toBe('/login')
+    expect(like.attributes('aria-label')).toBe('Sign in to LGTM')
     expect(like.text()).toContain('3')
+  })
+
+  it('names approvals LGTM, never likes', async () => {
+    const wrapper = await mount(VoteCard, props)
+    expect(wrapper.find('[data-test=like]').attributes('aria-label')).toBe('LGTM')
+    expect(wrapper.text()).toContain('LGTM')
+    expect(wrapper.text()).not.toMatch(/\blikes?\b/i)
+  })
+
+  it("says others take precedence over the driving author's pick", async () => {
+    const plain = await mount(VoteCard, props)
+    expect(plain.find('[data-test=deferred]').exists()).toBe(false)
+    const deferred = await mount(VoteCard, {
+      ...props,
+      submission: { ...SUBMISSION, deferred: true },
+    })
+    expect(deferred.find('[data-test=deferred]').text()).toMatch(/others take precedence/i)
   })
 
   it('falls back to the expected levels without probabilities', async () => {
@@ -234,6 +257,8 @@ describe('MissionDashboard', () => {
   it('shows the idle rover with nothing to vote on', async () => {
     const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
     expect(wrapper.find('[data-test=round-empty]').text()).toMatch(/idle/i)
+    expect(wrapper.find('[data-test=round-empty]').text()).toMatch(/5-minute planning phase/)
+    expect(wrapper.find('[data-test=pause]').exists()).toBe(false)
     expect(wrapper.findAllComponents(VoteCard)).toHaveLength(0)
   })
 
@@ -256,5 +281,39 @@ describe('MissionDashboard', () => {
     const wrapper = await mountDashboard({ state: withSubmission, error: null, serverOffsetMs: 0 })
     expect(wrapper.find('[data-test=like]').element.tagName).toBe('BUTTON')
     expect(wrapper.findComponent(VoteCard).text()).toMatch(/yours/i)
+  })
+
+  it("shows an operator's pause with its message and who paused", async () => {
+    const paused = state({
+      pause: {
+        message: 'Dust storm over the landing site.',
+        by: { displayName: 'Op', avatarUrl: null },
+        at: '2026-09-26T09:05:00.000Z',
+      },
+    })
+    const wrapper = await mountDashboard({ state: paused, error: null, serverOffsetMs: 0 })
+    const banner = wrapper.find('[data-test=pause]')
+    expect(banner.text()).toContain('Dust storm over the landing site.')
+    expect(banner.text()).toContain('Op')
+  })
+})
+
+describe('NotMovingFlag', () => {
+  const props = {
+    segmentId: '0192f000-0000-7000-8000-0000000000g1',
+    flags: { count: 1, quorum: 2 },
+    signedIn: true,
+  }
+
+  it('shows the flags against the quorum and offers the flag', async () => {
+    const wrapper = await mount(NotMovingFlag, props)
+    expect(wrapper.find('[data-test=flag-count]').text()).toBe('1 / 2')
+    expect(wrapper.find('[data-test=flag]').element.tagName).toBe('BUTTON')
+    expect(wrapper.find('[data-test=flag]').text()).toMatch(/not moving/i)
+  })
+
+  it('asks a signed-out visitor to sign in to flag', async () => {
+    const wrapper = await mount(NotMovingFlag, { ...props, signedIn: false })
+    expect(wrapper.find('[data-test=flag]').attributes('href')).toBe('/login')
   })
 })

@@ -3,13 +3,12 @@ import { DbError } from '../../database/errors'
 import type { Submission } from '../../database/schema'
 import { getMission } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
-import { getDrivingSegment, listDeaths } from '../../repositories/segments'
+import { listDeaths } from '../../repositories/segments'
 import { getStop } from '../../repositories/stops'
 import type { SubmissionAssessment } from '../../repositories/submissions'
 import {
   countUserRoundSubmissions,
   createSubmission,
-  getSubmission,
   listRoundSubmissions,
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
@@ -20,6 +19,7 @@ import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
+import { assertNotPaused } from './pause'
 import { recordNextDue } from './round'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
@@ -70,9 +70,9 @@ export async function assessGoal(
  * checked against the rules and the settled deaths, planned from the round's anchor over the
  * disk of its stop and what the rover had seen there, then judged by Jev. During a drive that is
  * the stop the rover left and its mask from before the drive, so nothing the drive discovers is
- * used. Throws `ALREADY_SUBMITTED` (before any planning or Jev request) while the user has an
- * open submission in the round, and `AUTHOR_DRIVING` while the rover drives the user's own
- * segment; refuses `too-many-attempts`, also before planning, once the user has made
+ * used. An accepted goal starts with its author's like. Throws `MISSION_PAUSED` while an operator
+ * pauses the mission and `ALREADY_SUBMITTED` (both before any planning or Jev request) while the
+ * user has an open submission in the round; refuses `too-many-attempts`, also before planning, once the user has made
  * `rules.maxJudgedPerRound` submissions in the round, and `round-changed`, storing nothing, when
  * the round moved to another stop or anchor while the goal was planned and judged.
  */
@@ -89,22 +89,13 @@ export async function submitGoal(
 ): Promise<SubmitResult> {
   const { store, jev, missionId, userId, now } = options
   const mission = await getMission(db, missionId)
+  await assertNotPaused(db, missionId)
   const round = await getOpenRound(db, missionId)
   if (!round) {
     throw new LifecycleError(
       'NO_OPEN_ROUND',
       `Mission ${missionId} has no open round; it takes submissions only while active.`,
     )
-  }
-  const driving = await getDrivingSegment(db, missionId)
-  if (driving && driving.endsAt.getTime() > now.getTime()) {
-    const author = await getSubmission(db, driving.submissionId)
-    if (author.userId === userId) {
-      throw new LifecycleError(
-        'AUTHOR_DRIVING',
-        `User ${userId} wrote the segment the rover is driving; submit again once it ends.`,
-      )
-    }
   }
   const submitted = await listRoundSubmissions(db, round.id)
   if (submitted.some((s) => s.userId === userId && s.status === 'open')) {
@@ -161,7 +152,7 @@ export async function submitGoal(
     }
     throw error
   }
-  // The first open submission of an idle round starts its grace window.
+  // The first open submission of an idle round starts its planning phase.
   if (!rejected) await recordNextDue(db, mission, now)
   return rejected
     ? { accepted: false, reason: 'judged-infeasible', submission }

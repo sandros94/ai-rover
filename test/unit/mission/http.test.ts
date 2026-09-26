@@ -3,6 +3,7 @@ import type { DB } from '#server/database/db'
 import { getMission } from '#server/repositories/missions'
 import { JUDGE_UNAVAILABLE, JudgeError } from '#server/utils/jev/errors'
 import { createMissionAtStop } from '#server/utils/mission/create'
+import { LifecycleError } from '#server/utils/mission/errors'
 import {
   httpErrorOf,
   missionCacheHeaders,
@@ -109,6 +110,14 @@ describe('missionCacheHeaders', () => {
     })
   })
 
+  it('keeps a slower public answer for as long as it is told, still tagged by mission', () => {
+    expect(missionCacheHeaders('m1', 'public', { maxAgeS: 60 })).toEqual({
+      'cache-control': 'public, max-age=60, stale-while-revalidate=30',
+      'netlify-cdn-cache-control': 'public, max-age=60, stale-while-revalidate=30, durable',
+      'netlify-cache-tag': 'mission-m1',
+    })
+  })
+
   it('stores nothing anywhere for everything else', () => {
     expect(missionCacheHeaders('m1', 'none')).toEqual({
       'cache-control': 'no-store',
@@ -148,5 +157,12 @@ describe('httpErrorOf', () => {
     expect(error.message).toBe(JUDGE_UNAVAILABLE)
     expect(JSON.stringify(error.toJSON())).not.toContain('secret-ish')
     expect(logged).toHaveBeenCalledWith(expect.anything(), cause)
+  })
+
+  it('answers a paused mission with 423 and the operator message', () => {
+    const error = httpErrorOf(new LifecycleError('MISSION_PAUSED', 'Dust storm.'))
+    expect(error.status).toBe(423)
+    expect(error.message).toBe('Dust storm.')
+    expect(error.body).toEqual({ code: 'MISSION_PAUSED' })
   })
 })

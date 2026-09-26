@@ -380,3 +380,38 @@ export async function getJourneySegment(
   }
   return journeySegment(row)
 }
+
+/**
+ * Ends a playing drive early, as the rules fail it for not moving: its last slice is now released
+ * at `endsAt` and carries `outcome`. Refused once settled, once its end has passed at `now`, and
+ * for an end later than the one it had.
+ */
+export async function endSegmentEarly(
+  db: DB,
+  segmentId: string,
+  options: { endsAt: Date; outcome: DriveOutcome; now: Date },
+): Promise<Segment> {
+  const { endsAt, outcome, now } = options
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(segment).where(eq(segment.id, segmentId)).for('update')
+    if (!current) throw new DbError('NOT_FOUND', `Segment ${segmentId} does not exist.`)
+    if (current.status !== 'driving' || current.endsAt.getTime() <= now.getTime()) {
+      throw new DbError(
+        'INVALID_STATE',
+        `Segment ${segmentId} is no longer playing; only a drive in progress can end early.`,
+      )
+    }
+    if (endsAt.getTime() > current.endsAt.getTime() || endsAt.getTime() <= now.getTime()) {
+      throw new DbError(
+        'INVALID_STATE',
+        `Segment ${segmentId} cannot end early at ${endsAt.toISOString()}: pass an instant after now and no later than ${current.endsAt.toISOString()}.`,
+      )
+    }
+    const [row] = await tx
+      .update(segment)
+      .set({ endsAt, outcome })
+      .where(eq(segment.id, segmentId))
+      .returning()
+    return row!
+  })
+}

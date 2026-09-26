@@ -3,8 +3,8 @@
  *
  * - `NO_ACTIVE_MISSION`: no mission is active, so there is nothing to act on.
  * - `NO_OPEN_ROUND`: the mission has no open round to submit to (it has ended).
- * - `AUTHOR_DRIVING`: the user wrote the segment the rover is driving and may not submit until
- *   it ends.
+ * - `MISSION_PAUSED`: an operator paused the mission; the message is theirs. Submissions and
+ *   likes wait until it resumes.
  * - `NOT_PUBLISHED`: a stop's journey blobs are missing from the store the lifecycle was given.
  * - `WORLD_MISMATCH`: the world rebuilt from a mission's stored seed and config hashes differently
  *   from the one it was created with.
@@ -14,7 +14,7 @@
 export type LifecycleErrorCode =
   | 'NO_ACTIVE_MISSION'
   | 'NO_OPEN_ROUND'
-  | 'AUTHOR_DRIVING'
+  | 'MISSION_PAUSED'
   | 'NOT_PUBLISHED'
   | 'WORLD_MISMATCH'
 

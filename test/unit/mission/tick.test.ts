@@ -4,14 +4,26 @@ import { like } from '#server/repositories/likes'
 import { getMission } from '#server/repositories/missions'
 import { getOpenRound, getRound } from '#server/repositories/rounds'
 import { getSegment } from '#server/repositories/segments'
+import { flagSegment } from '#server/repositories/flags'
+import { countLikes } from '#server/repositories/likes'
 import { getSubmission, withdrawSubmission } from '#server/repositories/submissions'
 import { createMissionAtStop } from '#server/utils/mission/create'
+import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
-import { DriveError } from '#shared/utils/drive'
+import { decodeSlice, DriveError, segmentSliceKey } from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
 import { forced, stopShortAt } from './forced'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
+import {
+  at,
+  createTestDb,
+  fakeJev,
+  memoryStore,
+  MINUTE,
+  syntheticRecord,
+  T0,
+  users,
+} from './helpers'
 
 vi.mock('#shared/utils/drive/segment', async (original) =>
   (await import('./forced')).forcedDriveSegment(original),
@@ -241,5 +253,119 @@ describe('the next due instant', () => {
 
     await m.tick(driving.endsAt)
     expect(await due()).toBeNull()
+  })
+})
+
+describe('the author of the drive in progress', () => {
+  /** Ada's drive to (0, 80) playing, and the round beside it. */
+  async function adaDriving() {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
+    return { ...m, driving, during: at(T0, 10 * MINUTE) }
+  }
+
+  it('may submit, starting with their own LGTM, and ranks after everyone else', async () => {
+    const m = await adaDriving()
+    const mine = await m.submit(m.ada.id, { x: 0, y: 160 }, m.during)
+    expect(mine.accepted).toBe(true)
+    expect(await countLikes(db, mine.submission!.id)).toBe(1)
+    const other = await m.submit(m.bob.id, { x: 80, y: 80 }, m.during)
+    await like(db, mine.submission!.id, { userId: m.cy.id })
+    await like(db, mine.submission!.id, { userId: m.dee.id })
+
+    const state = await publicMissionState(db, { missionId: m.missionId, now: m.during })
+    const deferred = Object.fromEntries(state.round!.submissions.map((s) => [s.id, s.deferred]))
+    expect(deferred).toEqual({ [mine.submission!.id]: true, [other.submission!.id]: false })
+
+    const tick = await m.tick(m.driving.endsAt)
+    expect(tick.closed?.winnerSubmissionId).toBe(other.submission!.id)
+  })
+
+  it('wins when nobody else submitted during the drive', async () => {
+    const m = await adaDriving()
+    const mine = await m.submit(m.ada.id, { x: 0, y: 160 }, m.during)
+    const tick = await m.tick(m.driving.endsAt)
+    expect(tick.closed?.winnerSubmissionId).toBe(mine.submission!.id)
+  })
+})
+
+describe('a drive that stops moving', () => {
+  const SLICE_MS = 30_000
+
+  /**
+   * Ada's drive replaced by a record that moves at 0.1 m/s for 20 minutes, then stands still
+   * until the hour, so the backstop cuts it at 2100 s; Bob waits in the round beside it.
+   */
+  async function stalling() {
+    const m = await landed()
+    forced.records.push((real) =>
+      syntheticRecord({ start: real.start, stopAfterS: 1200, durationS: 3600 }),
+    )
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
+    const beside = (await getOpenRound(db, m.missionId))!
+    await m.submit(m.bob.id, { x: 80, y: 80 }, at(driving.startedAt, MINUTE))
+    const flag = (userId: string, afterStartMs: number) =>
+      flagSegment(db, driving.id, { userId, now: at(driving.startedAt, afterStartMs) })
+    return { ...m, driving, beside, flag, start: driving.outcome!.endPose }
+  }
+
+  it('fails at the last released pose once the quorum flags a window without progress', async () => {
+    const m = await stalling()
+    const now = at(m.driving.startedAt, 1815_000)
+    await m.flag(m.cy.id, 1800_000)
+    const state = await publicMissionState(db, { missionId: m.missionId, now })
+    // Bob, Cy active: a quorum of two.
+    expect(state.flags).toEqual({ count: 1, quorum: 2 })
+    expect((await m.tick(now)).settled).toBeNull()
+    expect((await getSegment(db, m.driving.id)).endsAt).toEqual(m.driving.endsAt)
+
+    await m.flag(m.dee.id, 1810_000)
+    await m.tick(now)
+    // Slices 0 … 59 are out at 1815 s; slice 60 now ends the drive, released at 1830 s.
+    const voided = await getSegment(db, m.driving.id)
+    expect(voided.status).toBe('driving')
+    expect(voided.endsAt).toEqual(at(m.driving.startedAt, 61 * SLICE_MS))
+    expect(voided.outcome).toMatchObject({
+      kind: 'failed',
+      reasons: ['flagged-not-moving'],
+      durationS: 1800,
+    })
+    const last = decodeSlice((await m.store.getInflated(segmentSliceKey(m.driving.id, 60)))!)
+    expect(last.outcome).toEqual(voided.outcome)
+    expect(await m.store.has(segmentSliceKey(m.driving.id, 59))).toBe(true)
+    expect(await m.store.has(segmentSliceKey(m.driving.id, 61))).toBe(false)
+    expect(await m.store.has(segmentSliceKey(m.driving.id, 119))).toBe(false)
+
+    const settled = await m.tick(voided.endsAt)
+    expect(settled.settled).toEqual({ segmentId: m.driving.id, status: 'failed' })
+    const after = await publicMissionState(db, { missionId: m.missionId, now: voided.endsAt })
+    expect(after.deaths.at(-1)!.x).toBeCloseTo(voided.outcome!.endPose.x, 3)
+    expect((await getRound(db, m.beside.id)).status).toBe('void')
+    expect(after.flags).toBeNull()
+  })
+
+  it('keeps driving while the flagged window still shows progress', async () => {
+    const m = await stalling()
+    await m.flag(m.cy.id, 1400_000)
+    await m.flag(m.dee.id, 1400_000)
+    await m.tick(at(m.driving.startedAt, 1500_000))
+    expect(await getSegment(db, m.driving.id)).toEqual(m.driving)
+  })
+
+  it('fails the drive without flags once the record shows no progress over the backstop', async () => {
+    const m = await landed()
+    forced.records.push((real) =>
+      syntheticRecord({ start: real.start, stopAfterS: 1200, durationS: 3600 }),
+    )
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
+    // At the release of slice 69 (2100 s) the frames up to 2099.5 s show 0.05 m over 900 s.
+    expect(driving.endsAt).toEqual(at(driving.startedAt, 71 * SLICE_MS))
+    expect(driving.outcome).toMatchObject({ kind: 'failed', reasons: ['no-progress'] })
+    expect(await m.store.has(segmentSliceKey(driving.id, 70))).toBe(true)
+    expect(await m.store.has(segmentSliceKey(driving.id, 71))).toBe(false)
+    expect((await m.tick(driving.endsAt)).settled?.status).toBe('failed')
   })
 })

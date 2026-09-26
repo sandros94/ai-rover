@@ -10,10 +10,11 @@ const props = withDefaults(
     submission: Submission
     /** Where the round measures goals from. */
     anchor: MapPoint
+    /** The signed-in user gave it an LGTM. */
     liked?: boolean
     /** Submitted by the signed-in user. */
     mine?: boolean
-    /** Liking needs a signed-in user; signed out, the button leads to sign-in. */
+    /** An LGTM needs a signed-in user; signed out, the button leads to sign-in. */
     signedIn?: boolean
     /** Its route is the one drawn on the map. */
     highlighted?: boolean
@@ -56,6 +57,15 @@ const route = computed(() => {
       />
       <span class="truncate text-sm font-medium">{{ submission.submitter.displayName }}</span>
       <UBadge v-if="mine" label="yours" size="sm" variant="subtle" />
+      <UBadge
+        v-if="submission.deferred"
+        data-test="deferred"
+        label="others take precedence"
+        color="neutral"
+        size="sm"
+        variant="outline"
+        title="Written by the author of the drive in progress: it wins only if nobody else's is left."
+      />
       <div class="ml-auto flex items-center gap-1">
         <UButton
           data-test="highlight"
@@ -72,12 +82,12 @@ const route = computed(() => {
           data-test="like"
           size="xs"
           :variant="liked ? 'solid' : 'outline'"
-          icon="i-lucide-heart"
+          icon="i-lucide-thumbs-up"
           :aria-pressed="liked"
-          :aria-label="liked ? 'Remove like' : 'Like'"
+          aria-label="LGTM"
           @click="emit('like', !liked)"
         >
-          {{ submission.likes }}
+          {{ submission.likes }} LGTM
         </UButton>
         <UButton
           v-else
@@ -85,10 +95,10 @@ const route = computed(() => {
           to="/login"
           size="xs"
           variant="outline"
-          icon="i-lucide-heart"
-          aria-label="Sign in to like"
+          icon="i-lucide-thumbs-up"
+          aria-label="Sign in to LGTM"
         >
-          {{ submission.likes }}
+          {{ submission.likes }} LGTM
         </UButton>
       </div>
     </div>

@@ -10,7 +10,7 @@ const DriveReplay = defineAsyncComponent(() =>
 )
 
 useSeoMeta({
-  title: () => (data.value ? `Drive ${data.value.drive.number} · Jev Rover` : 'Drive · Jev Rover'),
+  title: () => (data.value ? `Leg ${data.value.drive.number} · Jev Rover` : 'Leg · Jev Rover'),
 })
 </script>
 
@@ -27,14 +27,14 @@ useSeoMeta({
         aria-label="Back to the journey"
       />
       <h1 class="text-base font-semibold">
-        {{ data ? `Drive ${data.drive.number}` : 'Drive' }}
+        {{ data ? `Leg ${data.drive.number}` : 'Leg' }}
       </h1>
     </div>
     <UAlert
       v-if="error"
       color="error"
       variant="subtle"
-      title="This drive cannot be replayed."
+      title="This leg cannot be replayed."
       description="It is still driving, or it does not exist."
     />
     <ClientOnly v-else-if="data">

@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
+import { countLikes } from '#server/repositories/likes'
+import { pauseMission, resumeMission } from '#server/repositories/pauses'
 import { reanchorRound } from '#server/repositories/rounds'
 import { listRoundSubmissions, withdrawSubmission } from '#server/repositories/submissions'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
-import { tickMission } from '#server/utils/mission/tick'
 import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
 import { at, createTestDb, dbErrorOf, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
 
@@ -134,7 +135,7 @@ describe('submitGoal', () => {
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
-      seed: 'audit',
+      seed: 'fogged-goal',
       at: { x: 0, y: 0 },
       now: T0,
     })
@@ -234,22 +235,20 @@ describe('submitGoal', () => {
     expect((await m.submit(m.ada.id, { x: 0, y: 80 })).accepted).toBe(true)
   })
 
-  it('keeps the author of the drive in progress out of the next round', async () => {
-    const { ada, bob, submit, store, mission, jev } = await landed()
-    await submit(ada.id, { x: 0, y: 80 })
-    const closed = at(T0, MINUTE + 5 * MINUTE)
-    const tick = await tickMission(db, {
-      store,
-      jev: jev.client,
-      missionId: mission.id,
-      now: closed,
-    })
-    expect(tick.started).not.toBeNull()
-    const during = at(closed, MINUTE)
-    const refused = await submit(ada.id, { x: 0, y: 160 }, during).catch((error: unknown) => error)
+  it("starts an accepted goal with its author's LGTM", async () => {
+    const { ada, submit } = await landed()
+    const result = await submit(ada.id, { x: 0, y: 80 })
+    expect(await countLikes(db, result.submission!.id)).toBe(1)
+  })
+
+  it('refuses every goal while the mission is paused, with the pause message', async () => {
+    const { ada, submit, mission, jev } = await landed()
+    await pauseMission(db, mission.id, { message: 'Dust storm.', pausedBy: ada.id, at: T0 })
+    const refused = await submit(ada.id, { x: 0, y: 80 }).catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(LifecycleError)
-    expect((refused as LifecycleError).code).toBe('AUTHOR_DRIVING')
-    const other = await submit(bob.id, { x: 0, y: 160 }, during)
-    expect(other.accepted).toBe(true)
+    expect(refused).toMatchObject({ code: 'MISSION_PAUSED', message: 'Dust storm.' })
+    expect(jev.summaries).toHaveLength(0)
+    await resumeMission(db, mission.id, { at: at(T0, MINUTE) })
+    expect((await submit(ada.id, { x: 0, y: 80 })).accepted).toBe(true)
   })
 })

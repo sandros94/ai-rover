@@ -7,6 +7,7 @@ import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import MissionMap from '~/components/map/MissionMap.vue'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import InstrumentGrid from './InstrumentGrid.vue'
+import NotMovingFlag from './NotMovingFlag.vue'
 import PlaybackControls from './PlaybackControls.vue'
 import RoundPanel from './RoundPanel.vue'
 
@@ -21,7 +22,7 @@ const props = withDefaults(
   { serverOffsetMs: 0 },
 )
 
-/** Something the visitor did changed the mission state: a like, a submission. */
+/** Something the visitor did changed the mission state: an LGTM, a submission, a flag. */
 const emit = defineEmits<{ changed: [] }>()
 
 const { loggedIn } = useUserSession()
@@ -161,6 +162,27 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
     />
     <p v-else-if="!state" class="text-sm text-muted">Loading the mission…</p>
 
+    <UAlert
+      v-if="state?.pause"
+      data-test="pause"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-circle-pause"
+      title="The mission is paused: submissions and LGTMs wait until it resumes."
+      :description="state.pause.message"
+    >
+      <template #actions>
+        <span class="flex items-center gap-1 text-xs text-muted">
+          <UAvatar
+            :src="state.pause.by.avatarUrl ?? undefined"
+            :alt="state.pause.by.displayName"
+            size="3xs"
+          />
+          {{ state.pause.by.displayName }}
+        </span>
+      </template>
+    </UAlert>
+
     <template v-if="state && stopKey">
       <ClientOnly>
         <MissionMap
@@ -192,6 +214,13 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
               @live="playback.goLive"
             />
           </template>
+          <NotMovingFlag
+            v-if="state.segment && state.flags"
+            :segment-id="state.segment.id"
+            :flags="state.flags"
+            :signed-in="loggedIn"
+            @changed="emit('changed')"
+          />
           <RoundPanel
             v-model:highlight-id="highlightId"
             :state="state"

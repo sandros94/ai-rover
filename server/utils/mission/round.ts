@@ -4,31 +4,39 @@ import { setNextDueAt } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
 import { getDrivingSegment, getLatestSegment } from '../../repositories/segments'
 import type { ListedSubmission } from '../../repositories/submissions'
-import { listRoundSubmissions } from '../../repositories/submissions'
+import { getSubmission, listRoundSubmissions } from '../../repositories/submissions'
 import type { MissionRules } from '#shared/utils/mission'
 import { roundCloseAt } from '#shared/utils/mission'
 
 /**
- * An open round's open submissions (creation order) and when it closes, per `roundCloseAt`: the
- * drive it runs beside is the latest segment started no later than the round opened, since a
- * round opens in the same step that starts that drive.
+ * An open round's open submissions (creation order), when it closes, per `roundCloseAt`, and who
+ * wrote the drive it was opened beside. The drive before it is the latest segment started no
+ * later than the round opened; it was opened beside that drive when both began at the same
+ * instant, since a round opens in the same step that starts that drive (a round opened after a
+ * failure or a void round has no drive beside it).
  */
 export async function roundStanding(
   db: DB,
   round: Round,
   options: { rules: MissionRules; now: Date },
-): Promise<{ submissions: ListedSubmission[]; closesAt: Date | null }> {
+): Promise<{
+  submissions: ListedSubmission[]
+  closesAt: Date | null
+  /** Ranks last in this round: see `rankSubmissions`. */
+  drivingAuthorId: string | null
+}> {
   const submissions = (await listRoundSubmissions(db, round.id)).filter((s) => s.status === 'open')
   const latest = await getLatestSegment(db, round.missionId)
-  const driveEndsAt =
-    latest && latest.startedAt.getTime() <= round.opensAt.getTime() ? latest.endsAt : null
+  const before = latest && latest.startedAt.getTime() <= round.opensAt.getTime() ? latest : null
   const closesAt = roundCloseAt({
-    driveEndsAt,
+    driveEndsAt: before?.endsAt ?? null,
     firstSubmissionAt: submissions[0]?.createdAt ?? null,
     now: options.now,
     rules: options.rules,
   })
-  return { submissions, closesAt }
+  const beside = before && before.startedAt.getTime() === round.opensAt.getTime() ? before : null
+  const drivingAuthorId = beside ? (await getSubmission(db, beside.submissionId)).userId : null
+  return { submissions, closesAt, drivingAuthorId }
 }
 
 /**

@@ -43,7 +43,7 @@ const REASONS: Record<SubmissionRefusal, string> = {
 /** Error codes the submit route answers besides a refusal. */
 const CODES: Record<string, string> = {
   ALREADY_SUBMITTED: 'You already have a submission in this round; withdraw it to submit another.',
-  AUTHOR_DRIVING: 'The rover is driving your segment; submit again once it arrives.',
+  MISSION_PAUSED: 'The mission is paused: submissions resume when it does.',
   NO_OPEN_ROUND: 'No round is open right now.',
   OUT_OF_DISK: 'That point lies beyond the mapped ground.',
 }
