@@ -52,6 +52,27 @@ export interface SlipModel {
   eventAbove?: number
 }
 
+const DEG = Math.PI / 180
+
+/** The speed model a drive uses for omitted fields. */
+export const DEFAULT_SPEED_MODEL: Readonly<Required<SpeedModel>> = Object.freeze({
+  maxSpeedMps: 0.042,
+  slopeSlowdown: 0.5,
+  // UNVERIFIED: no published Perseverance turn-in-place rate was found; 3°/s is a judgement call.
+  turnRateRadPerS: 3 * DEG,
+  // Brings 0.042 m/s cruise down to the ~0.033 m/s AutoNav reports: 1 / 0.033 − 1 / 0.042 ≈ 6.5 s per metre.
+  thinkPauseS: 6.5,
+})
+
+/** The slip model a drive uses for omitted fields. */
+export const DEFAULT_SLIP_MODEL: Readonly<Required<SlipModel>> = Object.freeze({
+  gain: 1.2,
+  max: 0.95,
+  stuckAbove: 0.6,
+  stuckAfterM: 3,
+  eventAbove: 0.3,
+})
+
 export interface DriveOptions {
   /** The stop disk the segment starts in; its grid holds the true terrain. */
   disk: StopDisk
@@ -152,7 +173,6 @@ export interface DriveStats {
   revealMs: number
 }
 
-const DEG = Math.PI / 180
 /** Spacing of the lookahead samples, the ACE check interval. */
 const PROBE_STEP_M = 0.25
 /** Radius around a failed probe marked as seen: the rover has looked there closely. */
@@ -750,15 +770,21 @@ function resolve(options: DriveOptions): Resolved {
     maxDurationS = Infinity,
     maxReplans = 20,
   } = options
+  const S = DEFAULT_SPEED_MODEL
   const {
-    maxSpeedMps = 0.042,
-    slopeSlowdown = 0.5,
-    // UNVERIFIED: no published Perseverance turn-in-place rate was found; 3°/s is a judgement call.
-    turnRateRadPerS = 3 * DEG,
-    // Brings 0.042 m/s cruise down to the ~0.033 m/s AutoNav reports: 1 / 0.033 − 1 / 0.042 ≈ 6.5 s per metre.
-    thinkPauseS = 6.5,
+    maxSpeedMps = S.maxSpeedMps,
+    slopeSlowdown = S.slopeSlowdown,
+    turnRateRadPerS = S.turnRateRadPerS,
+    thinkPauseS = S.thinkPauseS,
   } = speed
-  const { gain = 1.2, max = 0.95, stuckAbove = 0.6, stuckAfterM = 3, eventAbove = 0.3 } = slip
+  const L = DEFAULT_SLIP_MODEL
+  const {
+    gain = L.gain,
+    max = L.max,
+    stuckAbove = L.stuckAbove,
+    stuckAfterM = L.stuckAfterM,
+    eventAbove = L.eventAbove,
+  } = slip
 
   const check = (ok: boolean, name: string, value: number, expected: string): void => {
     if (!ok) {

@@ -346,9 +346,10 @@ function worstPair(current: Evaluation): [string, string] {
 
 /**
  * Body-frame linkage points, 4 floats each (x, y, z, unused): wheels FL, FR, ML, MR, RL, RR
- * at indices 0–5, then the bogie pivots L, R at 6–7.
+ * at indices 0–5, then the bogie pivots L, R at 6–7. `delta` is the left rocker angle; the right
+ * rocker turns by its opposite.
  */
-function bodyLinkage(
+export function bodyLinkage(
   g: ResolvedRoverGeometry,
   delta: number,
   betaLeft: number,

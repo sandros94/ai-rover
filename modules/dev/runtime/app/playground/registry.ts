@@ -1,6 +1,7 @@
 import type { Component, PropType } from 'vue'
 import type { DriveEvent, SegmentRecord } from '#shared/utils/drive'
 import type { DiskWire } from '../../shared/disk-wire'
+import type { PlaygroundContext } from './fixtures'
 
 /** What an entry needs from the frame beyond the time scrubber. */
 export type PlaygroundNeed = 'record' | 'disk'
@@ -26,18 +27,119 @@ export interface PlaygroundEntry {
   group: 'instrument' | 'scene' | 'card'
   component: () => Promise<{ default: Component }>
   needs: PlaygroundNeed[]
+  /** The component's props from the frame's context; without it, {@link PLAYGROUND_PROPS}. */
+  bind?: (context: PlaygroundContext) => Record<string, unknown>
+}
+
+/** An app instrument shown on its own, fed from the fixture drive. */
+function instrument(
+  id: string,
+  title: string,
+  component: PlaygroundEntry['component'],
+  bind: NonNullable<PlaygroundEntry['bind']>,
+  needs: PlaygroundNeed[] = ['record'],
+): PlaygroundEntry {
+  return { id, title, group: 'instrument', component, needs, bind }
 }
 
 export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
-  {
-    id: 'attitude',
-    title: 'Attitude readout',
-    group: 'instrument',
-    component: () =>
+  instrument(
+    'rover-attitude',
+    'Rover attitude',
+    () =>
       // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
-      import('../components/playground/AttitudeReadout.vue'),
-    needs: ['record'],
-  },
+      import('~/components/instruments/RoverAttitude.vue'),
+    (c) => ({ frame: c.frame }),
+  ),
+  instrument(
+    'speed-odometer',
+    'Speed and odometer',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/SpeedOdometer.vue'),
+    (c) => ({
+      frame: c.frame,
+      events: c.events,
+      keyframes: c.record.keyframes,
+      missionBeforeM: c.tally.distanceM,
+    }),
+  ),
+  instrument(
+    'mission-clock',
+    'Mission clock',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/MissionClock.vue'),
+    (c) => ({
+      solsEpoch: c.solsEpoch,
+      nowMs: c.nowMs,
+      segmentStartedAt: c.segmentStartedAt,
+      simTime: c.t,
+    }),
+  ),
+  instrument(
+    'event-feed',
+    'Event feed',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/EventFeed.vue'),
+    (c) => ({ events: c.events, t: c.t }),
+  ),
+  instrument(
+    'slip-gauge',
+    'Slip gauge',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/SlipGauge.vue'),
+    (c) => ({ keyframes: c.record.keyframes, t: c.t }),
+  ),
+  instrument(
+    'reveal-meter',
+    'Reveal meter',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/RevealMeter.vue'),
+    (c) => ({
+      reveals: c.record.reveals,
+      t: c.t,
+      cellSize: c.cellSize,
+      journeyBeforeM2: c.journeyBeforeM2,
+    }),
+    ['disk', 'record'],
+  ),
+  instrument(
+    'planner-telemetry',
+    'Planner telemetry',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/PlannerTelemetry.vue'),
+    (c) => ({ metrics: c.metrics, profile: c.profile, slopeLimitDeg: c.slopeLimitDeg }),
+    ['disk', 'record'],
+  ),
+  instrument(
+    'judgment-card',
+    'Judgment card',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/JudgmentCard.vue'),
+    (c) => ({ judgment: c.judgment }),
+  ),
+  instrument(
+    'round-countdown',
+    'Round countdown',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/RoundCountdown.vue'),
+    (c) => c.round,
+  ),
+  instrument(
+    'journey-stats',
+    'Journey stats',
+    () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('~/components/instruments/JourneyStats.vue'),
+    (c) => ({ tally: c.tally }),
+  ),
   {
     id: 'stop-map',
     title: 'Stop map',

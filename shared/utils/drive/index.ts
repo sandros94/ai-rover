@@ -21,7 +21,7 @@ export type {
   SlipModel,
   SpeedModel,
 } from './segment'
-export { driveSegment } from './segment'
+export { DEFAULT_SLIP_MODEL, DEFAULT_SPEED_MODEL, driveSegment } from './segment'
 export type { JourneyKey } from './keys'
 export {
   assertSegmentId,

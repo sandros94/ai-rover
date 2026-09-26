@@ -15,6 +15,7 @@ import type { DiskWire } from '../../shared/disk-wire'
 import { decodeDiskWire } from '../../shared/disk-wire'
 import type { SegmentRecordJson } from '../../shared/record-json'
 import { jsonToRecord } from '../../shared/record-json'
+import { fixtureContext, scrubContext } from '../playground/fixtures'
 import type { PlaygroundEntry } from '../playground/registry'
 
 const props = defineProps<{ entry: PlaygroundEntry }>()
@@ -39,6 +40,23 @@ const playing = ref(false)
 const duration = computed(() => record.value?.outcome.durationS ?? 0)
 const frame = computed(() => record.value && interpolatePose(record.value.keyframes, t.value))
 const events = computed(() => record.value?.events.filter((event) => event.t <= t.value) ?? [])
+const recordContext = computed(() => record.value && fixtureContext(record.value, disk.value))
+const bound = computed(() => {
+  if (!record.value || !frame.value || !recordContext.value) return undefined
+  const base = { record: record.value, frame: frame.value, events: events.value, disk: disk.value }
+  if (!props.entry.bind) return base
+  return props.entry.bind({
+    ...recordContext.value,
+    ...base,
+    t: t.value,
+    ...scrubContext(record.value, t.value),
+  })
+})
+/** Scrub time to open at, from `?t=` in seconds: repeatable screenshots mid-drive. */
+const startAt = computed(() => {
+  const value = Number(route.query.t)
+  return Number.isFinite(value) && value > 0 ? value : 0
+})
 
 function select(name: string): void {
   void navigateTo({ query: { ...route.query, fixture: name } }, { replace: true })
@@ -63,7 +81,7 @@ async function load(name: string | undefined): Promise<void> {
         )
       : undefined
     record.value = next
-    t.value = 0
+    t.value = Math.min(startAt.value, next.outcome.durationS)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -139,7 +157,9 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
     </header>
     <main class="flex-1 p-6">
       <UAlert v-if="error" color="error" :title="error" />
-      <component :is="view" v-else-if="record && frame" v-bind="{ record, frame, events, disk }" />
+      <div v-else-if="bound" :class="{ 'max-w-2xl': entry.group === 'instrument' }">
+        <component :is="view" v-bind="bound" />
+      </div>
       <p v-else class="text-muted">Loading fixture…</p>
     </main>
   </div>

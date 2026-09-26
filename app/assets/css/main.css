@@ -7,3 +7,30 @@
 @theme static {
   --font-sans: 'Public Sans', sans-serif;
 }
+
+/*
+ * Instrument palette: categorical slots, the blue ramp's track step and the fixed status colours,
+ * each validated against the chart surfaces in its mode. Text never wears these; it keeps the
+ * Nuxt UI text tokens.
+ */
+:root {
+  --viz-series-1: #2a78d6;
+  --viz-series-2: #eb6834;
+  --viz-series-3: #1baf7a;
+  --viz-track: #cde2fb;
+  --viz-grid: #e1e0d9;
+  --viz-axis: #c3c2b7;
+  --viz-good: #0ca30c;
+  --viz-warning: #fab219;
+  --viz-serious: #ec835a;
+  --viz-critical: #d03b3b;
+}
+
+.dark {
+  --viz-series-1: #3987e5;
+  --viz-series-2: #d95926;
+  --viz-series-3: #199e70;
+  --viz-track: #184f95;
+  --viz-grid: #2c2c2a;
+  --viz-axis: #383835;
+}
