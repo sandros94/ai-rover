@@ -22,7 +22,14 @@ export { reachableFrom, slopeAt, traversableMask } from './analysis'
 export { viewshed } from './viewshed'
 export { CHUNK_FORMAT_VERSION, CHUNK_HEADER_BYTES, decodeChunk, encodeChunk } from './encode'
 export type { StopDisk } from './disk'
-export { chunksCoveringDisk, computeStopDisk, DEFAULT_STOP_RADIUS, worldToVertex } from './disk'
+export {
+  chunksCoveringDisk,
+  computeStopDisk,
+  DEFAULT_SNAP_RADIUS,
+  DEFAULT_STOP_RADIUS,
+  snapToPathable,
+  worldToVertex,
+} from './disk'
 export type { RevealedMask } from './revealed'
 export {
   createRevealedMask,
@@ -39,6 +46,7 @@ export type { StopManifest } from './manifest'
 export {
   buildStopManifest,
   chunkKey,
+  MISSION_ID,
   parseStopManifest,
   revealedKey,
   STOP_MANIFEST_VERSION,

@@ -6,7 +6,14 @@ import { mission, stop } from '../database/schema'
 
 export async function createMission(
   db: DB,
-  input: { seed: string; worldHash: string; config: MissionConfig; solsEpoch?: Date },
+  input: {
+    /** Made in code when the id must be known before the row exists (it names stop blobs). */
+    id?: string
+    seed: string
+    worldHash: string
+    config: MissionConfig
+    solsEpoch?: Date
+  },
 ): Promise<Mission> {
   const [row] = await db.insert(mission).values(input).returning()
   return row!

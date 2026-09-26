@@ -36,8 +36,15 @@ function oneOf(values: readonly string[]) {
 
 export const IDENTITY_PROVIDERS = ['github', 'atproto'] as const
 export const MISSION_STATUSES = ['active', 'ended'] as const
-export const ROUND_STATUSES = ['open', 'closed'] as const
+/** `void`: the drive beside the round failed, so nothing won it and it never starts a segment. */
+export const ROUND_STATUSES = ['open', 'closed', 'void'] as const
 export const SUBMISSION_STATUSES = ['open', 'rejected', 'won', 'lost', 'withdrawn'] as const
+/**
+ * Why a submission is `rejected`. `judged-infeasible`: Jev's verdict was reject when it was
+ * submitted. `invalidated-by-stop`: the drive it waited beside stopped short, and from the stop
+ * reached it broke a rule or was judged infeasible.
+ */
+export const REJECTION_REASONS = ['judged-infeasible', 'invalidated-by-stop'] as const
 export const SEGMENT_STATUSES = ['driving', 'arrived', 'stopped-short', 'failed'] as const
 
 /** Stored with the mission: world overrides (the seed is its own column) and the rules. */
@@ -124,10 +131,21 @@ export const round = snakeCase.table(
     missionId: uuid()
       .notNull()
       .references(() => mission.id),
-    /** Where the segment this round decides starts; several rounds share it after a failure. */
+    /**
+     * The stop the rover is at, or leaves from while the drive beside the round plays; the segment
+     * the round decides starts where the rover is once that drive settles. Several rounds share
+     * a stop after a failure.
+     */
     fromStopId: uuid()
       .notNull()
       .references(() => stop.id),
+    /**
+     * Where submissions are measured and planned from: the stop's position, or during a drive
+     * its planned destination (the winner's goal, already public), so nothing about where the
+     * drive really ends is used before it settles.
+     */
+    anchorX: doublePrecision().notNull(),
+    anchorY: doublePrecision().notNull(),
     opensAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     closesAt: timestamp({ withTimezone: true }),
     status: text({ enum: ROUND_STATUSES }).notNull().default('open'),
@@ -142,7 +160,7 @@ export const round = snakeCase.table(
     check('round_status_check', sql`${t.status} in (${oneOf(ROUND_STATUSES)})`),
     check(
       'round_winner_check',
-      sql`(${t.status} = 'open' and ${t.winnerSubmissionId} is null) or (${t.status} = 'closed' and ${t.winnerSubmissionId} is not null)`,
+      sql`(${t.status} in ('open', 'void') and ${t.winnerSubmissionId} is null) or (${t.status} = 'closed' and ${t.winnerSubmissionId} is not null)`,
     ),
   ],
 )
@@ -160,6 +178,8 @@ export const submission = snakeCase.table(
     goalX: doublePrecision().notNull(),
     goalY: doublePrecision().notNull(),
     status: text({ enum: SUBMISSION_STATUSES }).notNull().default('open'),
+    /** Set exactly when `status` is `rejected`. */
+    rejectionReason: text({ enum: REJECTION_REASONS }),
     judgment: jsonb().$type<StoredJudgment>().notNull(),
     metrics: jsonb().$type<NavMetrics>().notNull(),
     summary: jsonb().$type<SubmissionSummary>().notNull(),
@@ -175,6 +195,11 @@ export const submission = snakeCase.table(
       .where(sql`${t.status} = 'open'`),
     index('submission_round_idx').on(t.roundId),
     check('submission_status_check', sql`${t.status} in (${oneOf(SUBMISSION_STATUSES)})`),
+    // A check passes on unknown, and `in` over a null is unknown: hence the explicit `is not null`.
+    check(
+      'submission_rejection_check',
+      sql`(${t.status} = 'rejected' and ${t.rejectionReason} is not null and ${t.rejectionReason} in (${oneOf(REJECTION_REASONS)})) or (${t.status} <> 'rejected' and ${t.rejectionReason} is null)`,
+    ),
   ],
 )
 
@@ -344,6 +369,7 @@ export type NewRound = typeof round.$inferInsert
 export type Submission = typeof submission.$inferSelect
 export type NewSubmissionRow = typeof submission.$inferInsert
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number]
+export type RejectionReason = (typeof REJECTION_REASONS)[number]
 export type SubmissionLike = typeof submissionLike.$inferSelect
 export type Segment = typeof segment.$inferSelect
 export type NewSegment = typeof segment.$inferInsert

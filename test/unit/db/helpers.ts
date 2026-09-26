@@ -98,7 +98,11 @@ export async function seedMission(db: DB) {
     manifestKey: 'terrain/0123456789abcdef/stops/0.json',
     revealedKey: 'terrain/0123456789abcdef/revealed/0.bin',
   })
-  const round = await openRound(db, { missionId: mission.id, fromStopId: stop.id })
+  const round = await openRound(db, {
+    missionId: mission.id,
+    fromStopId: stop.id,
+    anchor: { x: 0, y: 0 },
+  })
   const user = await createUser(db, { displayName: 'Ada' })
   return { mission, stop, round, user }
 }

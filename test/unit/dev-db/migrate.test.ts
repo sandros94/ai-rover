@@ -11,7 +11,7 @@ import {
   RESET_REMEDY,
   resetLocalDatabase,
 } from '~~/modules/dev-db/runtime/server/utils/migrate'
-import { copyMigrations, INIT, startLocalDatabase } from './helpers'
+import { copyMigrations, INIT, MIGRATIONS, startLocalDatabase } from './helpers'
 
 let local: Awaited<ReturnType<typeof startLocalDatabase>>
 let migrations: Awaited<ReturnType<typeof copyMigrations>>
@@ -34,26 +34,35 @@ async function rows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
 const initFile = () => join(migrations.dir, INIT, 'migration.sql')
 
 describe('migrateLocalDatabase', () => {
-  it('applies the pending migration once and records its digest', async () => {
+  it('applies the pending migrations once and records their digests', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     expect(await migrateLocalDatabase(local.url, migrations.dir)).toBeNull()
-    expect(log).toHaveBeenCalledWith(`[database] applied 1 migration(s): ${INIT}`)
+    expect(log).toHaveBeenCalledWith(
+      `[database] applied ${MIGRATIONS.length} migration(s): ${MIGRATIONS.join(', ')}`,
+    )
 
-    const applied = await rows<{ name: string }>(sql`select name from netlify.migrations`)
-    expect(applied).toEqual([{ name: INIT }])
-    const digest = createHash('sha256')
-      .update(await readFile(initFile()))
-      .digest('hex')
+    const applied = await rows<{ name: string }>(
+      sql`select name from netlify.migrations order by name`,
+    )
+    expect(applied).toEqual(MIGRATIONS.map((name) => ({ name })))
+    const digests = await Promise.all(
+      MIGRATIONS.map(async (name) => ({
+        name,
+        digest: createHash('sha256')
+          .update(await readFile(join(migrations.dir, name, 'migration.sql')))
+          .digest('hex'),
+      })),
+    )
     expect(
       await rows<{ name: string; digest: string }>(
-        sql`select name, digest from jev_dev.migration_digest`,
+        sql`select name, digest from jev_dev.migration_digest order by name`,
       ),
-    ).toEqual([{ name: INIT, digest }])
+    ).toEqual(digests)
 
     log.mockClear()
     expect(await migrateLocalDatabase(local.url, migrations.dir)).toBeNull()
     expect(log).not.toHaveBeenCalled()
-    expect(await rows(sql`select name from netlify.migrations`)).toHaveLength(1)
+    expect(await rows(sql`select name from netlify.migrations`)).toHaveLength(MIGRATIONS.length)
   })
 
   it('refuses when the recorded digest no longer matches the file', async () => {
@@ -92,7 +101,9 @@ describe('migrateLocalDatabase', () => {
     await useDB().execute(sql`delete from jev_dev.migration_digest`)
 
     expect(await migrateLocalDatabase(local.url, migrations.dir)).toBeNull()
-    expect(await rows(sql`select name from jev_dev.migration_digest`)).toEqual([{ name: INIT }])
+    expect(await rows(sql`select name from jev_dev.migration_digest order by name`)).toEqual(
+      MIGRATIONS.map((name) => ({ name })),
+    )
   })
 
   it('turns a failing migration into a refusal', async () => {
@@ -106,7 +117,9 @@ describe('migrateLocalDatabase', () => {
       /^The local database could not be brought up to its migrations: .*nowhere/,
     )
     expect(refusal).toContain(RESET_REMEDY)
-    expect(await rows(sql`select name from netlify.migrations`)).toEqual([{ name: INIT }])
+    expect(await rows(sql`select name from netlify.migrations order by name`)).toEqual(
+      MIGRATIONS.map((name) => ({ name })),
+    )
   })
 
   it('leaves a database that is not on this machine untouched', async () => {
@@ -116,7 +129,7 @@ describe('migrateLocalDatabase', () => {
     ).toBeNull()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('db.example.com:5432'))
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('secret'))
-    expect(await rows(sql`select name from netlify.migrations`)).toEqual([])
+    expect(await rows(sql`select name from netlify.migrations order by name`)).toEqual([])
   })
 })
 
@@ -148,8 +161,9 @@ describe('prepareLocalDatabase and resetLocalDatabase', () => {
     expect(
       await rows(sql`select 1 from information_schema.schemata where schema_name = 'scratch'`),
     ).toEqual([])
-    expect(await rows(sql`select name from netlify.migrations`)).toEqual([{ name: INIT }])
-    expect(await rows(sql`select name from jev_dev.migration_digest`)).toEqual([{ name: INIT }])
+    const names = MIGRATIONS.map((name) => ({ name }))
+    expect(await rows(sql`select name from netlify.migrations order by name`)).toEqual(names)
+    expect(await rows(sql`select name from jev_dev.migration_digest order by name`)).toEqual(names)
   })
 
   it('refuses to reset a database that is not on this machine', async () => {

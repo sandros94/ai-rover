@@ -26,18 +26,19 @@ import { MemoryBlobs } from './helpers'
 const world = defineWorld({ seed: 'mars' })
 const disk = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 150 })
 const mask = revealDisk(createRevealedMask(world), disk)
+const missionId = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
 
 describe('publishStop', () => {
   it('writes every chunk, the mask, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    const result = await publishStop(store, { world, disk, mask, stopIndex: 0 })
-    const hash = worldHash(world)
-    const manifestKey = stopManifestKey(hash, 0)
+    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
+    const manifestKey = stopManifestKey(missionId, 0)
     expect(result.manifestKey).toBe(manifestKey)
     expect(blobs.writes).toHaveLength(disk.chunks.length + 2)
     expect(blobs.writes.at(-1)).toBe(manifestKey)
     const manifest = parseStopManifest(await store.getJson(manifestKey))
+    expect(manifest).toMatchObject({ missionId, worldHash: worldHash(world) })
     expect(blobs.writes.slice(0, -1)).toEqual([
       ...manifest.chunks.map((c) => c.key),
       manifest.revealedKey,
@@ -54,14 +55,13 @@ describe('publishStop', () => {
   it('skips chunks already stored on a later stop', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    await publishStop(store, { world, disk, mask, stopIndex: 0 })
+    await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
     blobs.writes.length = 0
-    const result = await publishStop(store, { world, disk, mask, stopIndex: 1 })
-    const hash = worldHash(world)
+    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 1 })
     expect(result.skipped).toHaveLength(disk.chunks.length)
     expect(blobs.writes).toEqual([
-      parseStopManifest(await store.getJson(stopManifestKey(hash, 1))).revealedKey,
-      stopManifestKey(hash, 1),
+      parseStopManifest(await store.getJson(stopManifestKey(missionId, 1))).revealedKey,
+      stopManifestKey(missionId, 1),
     ])
   })
 })

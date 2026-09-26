@@ -25,12 +25,6 @@ export async function listStops(db: DB, missionId: string): Promise<Stop[]> {
   return db.select().from(stop).where(eq(stop.missionId, missionId)).orderBy(asc(stop.index))
 }
 
-/** The stop a segment reached, created with it; undefined for a failure. */
-export async function getStopReachedBy(db: DB, segmentId: string): Promise<Stop | undefined> {
-  const [row] = await db.select().from(stop).where(eq(stop.fromSegmentId, segmentId))
-  return row
-}
-
 /** One more than the highest stop index of the mission; 0 before its landing stop. */
 export async function nextStopIndex(db: DB, missionId: string): Promise<number> {
   const [row] = await db

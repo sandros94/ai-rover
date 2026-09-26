@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DB } from '#server/database/db'
 import { createMission, getMission, setCurrentStop } from '#server/repositories/missions'
 import { createStop, getStop, listStops } from '#server/repositories/stops'
-import { closeRound, getOpenRound, openRound } from '#server/repositories/rounds'
+import {
+  closeRound,
+  getOpenRound,
+  getRound,
+  openRound,
+  reanchorRound,
+  voidRound,
+} from '#server/repositories/rounds'
 import { createSubmission, listRoundSubmissions } from '#server/repositories/submissions'
 import { createUser } from '#server/repositories/users'
 import { CONFIG, createTestDb, dbErrorOf, seedMission, submissionInput } from './helpers'
@@ -84,7 +91,9 @@ describe('rounds', () => {
     const { mission, stop, round } = await seedMission(db)
     expect(round).toMatchObject({ status: 'open', closesAt: null, winnerSubmissionId: null })
     expect(await getOpenRound(db, mission.id)).toEqual(round)
-    const error = await dbErrorOf(openRound(db, { missionId: mission.id, fromStopId: stop.id }))
+    const error = await dbErrorOf(
+      openRound(db, { missionId: mission.id, fromStopId: stop.id, anchor: { x: 0, y: 0 } }),
+    )
     expect(error?.code).toBe('INVALID_STATE')
   })
 
@@ -103,7 +112,11 @@ describe('rounds', () => {
     expect(await getOpenRound(db, mission.id)).toBeUndefined()
 
     // A retry from the same stop after a failure opens a second round from it.
-    const retry = await openRound(db, { missionId: mission.id, fromStopId: stop.id })
+    const retry = await openRound(db, {
+      missionId: mission.id,
+      fromStopId: stop.id,
+      anchor: { x: 0, y: 0 },
+    })
     expect(retry.status).toBe('open')
   })
 
@@ -134,7 +147,52 @@ describe('rounds', () => {
       winnerSubmissionId: (await createSubmission(db, submissionInput(a.round.id, a.user.id))).id,
       closesAt: new Date(),
     })
-    const error = await dbErrorOf(openRound(db, { missionId: a.mission.id, fromStopId: b.stop.id }))
+    const error = await dbErrorOf(
+      openRound(db, { missionId: a.mission.id, fromStopId: b.stop.id, anchor: { x: 0, y: 0 } }),
+    )
     expect(error?.code).toBe('INVALID_STATE')
+  })
+
+  it('voids an open round: no winner, its open submissions lost, and allows a new round', async () => {
+    const { mission, stop, round, user } = await seedMission(db)
+    const waiting = await createSubmission(db, submissionInput(round.id, user.id))
+    const closesAt = new Date('2026-09-25T13:00:00Z')
+    const voided = await voidRound(db, round.id, { closesAt })
+    expect(voided).toMatchObject({ status: 'void', winnerSubmissionId: null, closesAt })
+    expect((await listRoundSubmissions(db, round.id)).map((s) => s.id + s.status)).toEqual([
+      `${waiting.id}lost`,
+    ])
+    expect((await dbErrorOf(voidRound(db, round.id, { closesAt })))?.code).toBe('INVALID_STATE')
+    const fresh = await openRound(db, { missionId: mission.id, fromStopId: stop.id, anchor: stop })
+    expect(fresh.status).toBe('open')
+  })
+
+  it('moves an open round to another stop of its mission and anchor, and refuses otherwise', async () => {
+    const a = await seedMission(db)
+    const b = await seedMission(db)
+    const next = await createStop(db, {
+      missionId: a.mission.id,
+      index: 1,
+      x: 5,
+      y: 6,
+      headingRad: 0,
+      manifestKey: 'm',
+      revealedKey: 'r',
+    })
+    const moved = await reanchorRound(db, a.round.id, {
+      fromStopId: next.id,
+      anchor: { x: 5, y: 7 },
+    })
+    expect(moved).toMatchObject({ fromStopId: next.id, anchorX: 5, anchorY: 7 })
+    expect(await getRound(db, a.round.id)).toEqual(moved)
+    expect(
+      (await dbErrorOf(reanchorRound(db, a.round.id, { fromStopId: b.stop.id, anchor: next })))
+        ?.code,
+    ).toBe('INVALID_STATE')
+    await voidRound(db, a.round.id, { closesAt: new Date() })
+    expect(
+      (await dbErrorOf(reanchorRound(db, a.round.id, { fromStopId: next.id, anchor: next })))?.code,
+    ).toBe('INVALID_STATE')
+    expect((await dbErrorOf(getRound(db, MISSING)))?.code).toBe('NOT_FOUND')
   })
 })

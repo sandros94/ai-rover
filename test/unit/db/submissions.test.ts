@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DB } from '#server/database/db'
+import { eq } from 'drizzle-orm'
+import { submission as submissionTable } from '#server/database/schema'
 import { closeRound } from '#server/repositories/rounds'
 import {
   createSubmission,
   listRoundSubmissions,
+  rejectSubmission,
+  reviseSubmission,
   setSubmissionStatus,
   withdrawSubmission,
 } from '#server/repositories/submissions'
@@ -66,13 +70,55 @@ describe('submissions', () => {
     expect(
       (await dbErrorOf(withdrawSubmission(db, submission.id, { userId: other.id })))?.code,
     ).toBe('INVALID_STATE')
-    await setSubmissionStatus(db, submission.id, 'rejected')
+    await rejectSubmission(db, submission.id, { reason: 'judged-infeasible' })
     expect(
       (await dbErrorOf(withdrawSubmission(db, submission.id, { userId: user.id })))?.code,
     ).toBe('INVALID_STATE')
     expect((await dbErrorOf(setSubmissionStatus(db, submission.id, 'won')))?.code).toBe(
       'INVALID_STATE',
     )
+  })
+
+  it('revises and rejects only open submissions, a rejection always carrying its reason', async () => {
+    const { round, user } = await seedMission(db)
+    const submission = await createSubmission(db, submissionInput(round.id, user.id))
+    expect(submission.rejectionReason).toBeNull()
+    const metrics = { ...METRICS, straightLineM: 90 }
+    const revised = await reviseSubmission(db, submission.id, {
+      judgment: { ...JUDGMENT, feasible: 0.5 },
+      metrics,
+      summary: SUMMARY,
+    })
+    expect(revised).toMatchObject({ status: 'open', metrics, judgment: { feasible: 0.5 } })
+    const rejected = await rejectSubmission(db, submission.id, { reason: 'invalidated-by-stop' })
+    expect(rejected).toMatchObject({ status: 'rejected', rejectionReason: 'invalidated-by-stop' })
+    expect(
+      (
+        await dbErrorOf(
+          reviseSubmission(db, submission.id, { judgment: JUDGMENT, metrics, summary: SUMMARY }),
+        )
+      )?.code,
+    ).toBe('INVALID_STATE')
+    expect(
+      (await dbErrorOf(rejectSubmission(db, submission.id, { reason: 'judged-infeasible' })))?.code,
+    ).toBe('INVALID_STATE')
+    // The schema refuses a rejection without a reason and a reason on anything else.
+    const REJECTION_CHECK = { cause: { code: '23514', constraint: 'submission_rejection_check' } }
+    const stored = await createSubmission(db, {
+      ...submissionInput(round.id, user.id, { x: 60, y: 0 }),
+      status: 'rejected',
+      rejectionReason: 'judged-infeasible',
+    })
+    expect(stored.rejectionReason).toBe('judged-infeasible')
+    await expect(
+      db
+        .update(submissionTable)
+        .set({ rejectionReason: null })
+        .where(eq(submissionTable.id, stored.id)),
+    ).rejects.toMatchObject(REJECTION_CHECK)
+    await expect(
+      db.update(submissionTable).set({ status: 'lost' }).where(eq(submissionTable.id, stored.id)),
+    ).rejects.toMatchObject(REJECTION_CHECK)
   })
 
   it('refuses a submission to a closed round', async () => {

@@ -21,12 +21,16 @@ export function segmentSliceKey(segmentId: string, sliceIndex: number): string {
 
 /** What a served journey key names; keys of any other shape are not served. */
 export type JourneyKey =
+  /** A chunk of a world's terrain. */
   | { kind: 'terrain' }
+  /** A mission's stop manifest or revealed mask. */
+  | { kind: 'stop' }
   | { kind: 'segment-manifest'; segmentId: string }
   | { kind: 'segment-slice'; segmentId: string; index: number }
 
-const TERRAIN_KEY =
-  /^terrain\/[0-9a-f]{16}\/(?:chunks\/-?\d{1,10}_-?\d{1,10}\.bin|revealed\/\d{1,15}\.bin|stops\/\d{1,15}\.json)$/
+const TERRAIN_KEY = /^terrain\/[0-9a-f]{16}\/chunks\/-?\d{1,10}_-?\d{1,10}\.bin$/
+const STOP_KEY =
+  /^missions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:revealed\/(?:0|[1-9]\d{0,14})\.bin|stops\/(?:0|[1-9]\d{0,14})\.json)$/
 const SEGMENT_KEY =
   /^segments\/([A-Za-z0-9_-]{1,64})\/(?:(manifest\.json)|slices\/(0|[1-9]\d{0,14})\.bin)$/
 
@@ -36,6 +40,7 @@ const SEGMENT_KEY =
  */
 export function parseJourneyKey(key: string): JourneyKey | null {
   if (TERRAIN_KEY.test(key)) return { kind: 'terrain' }
+  if (STOP_KEY.test(key)) return { kind: 'stop' }
   const match = SEGMENT_KEY.exec(key)
   if (!match) return null
   const segmentId = match[1]!

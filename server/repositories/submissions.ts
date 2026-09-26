@@ -3,22 +3,33 @@ import type { NavMetrics } from '#shared/utils/nav/plan'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
 import type { DB } from '../database/db'
 import { DbError, isUniqueViolation } from '../database/errors'
-import type { StoredJudgment, Submission, SubmissionStatus } from '../database/schema'
+import type {
+  RejectionReason,
+  StoredJudgment,
+  Submission,
+  SubmissionStatus,
+} from '../database/schema'
 import { round, submission, submissionLike, userAccount } from '../database/schema'
 
-export interface NewSubmission {
+/** What planning and judging a goal produced; revised when the plan's start moves. */
+export interface SubmissionAssessment {
+  judgment: StoredJudgment
+  metrics: NavMetrics
+  summary: SubmissionSummary
+}
+
+export type NewSubmission = SubmissionAssessment & {
   roundId: string
   userId: string
   /** The goal after snapping to a pathable cell, world metres. */
   goal: { x: number; y: number }
-  judgment: StoredJudgment
-  metrics: NavMetrics
-  summary: SubmissionSummary
-  /** `rejected` stores a refused submission, which holds no place in the round. Default `open`. */
-  status?: 'open' | 'rejected'
   /** Default: the database's clock. */
   createdAt?: Date
-}
+} & (
+    | { status?: 'open' }
+    /** A refused submission, stored with its reason; it holds no place in the round. */
+    | { status: 'rejected'; rejectionReason: RejectionReason }
+  )
 
 export interface ListedSubmission extends Submission {
   likes: number
@@ -95,22 +106,54 @@ export async function listRoundSubmissions(db: DB, roundId: string): Promise<Lis
   }))
 }
 
-/** Settles an open submission; settled ones never change again. */
+/** Settles an open submission; settled ones never change again. Rejecting takes a reason. */
 export async function setSubmissionStatus(
   db: DB,
   submissionId: string,
-  status: Exclude<SubmissionStatus, 'open'>,
+  status: Exclude<SubmissionStatus, 'open' | 'rejected'>,
+): Promise<Submission> {
+  return updateOpen(db, submissionId, { status }, `become ${status}`)
+}
+
+export async function rejectSubmission(
+  db: DB,
+  submissionId: string,
+  options: { reason: RejectionReason },
+): Promise<Submission> {
+  return updateOpen(
+    db,
+    submissionId,
+    { status: 'rejected', rejectionReason: options.reason },
+    'be rejected',
+  )
+}
+
+/** Replaces an open submission's judgment, metrics and summary, as re-planned and re-judged. */
+export async function reviseSubmission(
+  db: DB,
+  submissionId: string,
+  assessment: SubmissionAssessment,
+): Promise<Submission> {
+  const { judgment, metrics, summary } = assessment
+  return updateOpen(db, submissionId, { judgment, metrics, summary }, 'be revised')
+}
+
+async function updateOpen(
+  db: DB,
+  submissionId: string,
+  fields: Partial<Submission>,
+  action: string,
 ): Promise<Submission> {
   const [row] = await db
     .update(submission)
-    .set({ status })
+    .set(fields)
     .where(and(eq(submission.id, submissionId), eq(submission.status, 'open')))
     .returning()
   if (row) return row
   await assertSubmissionExists(db, submissionId)
   throw new DbError(
     'INVALID_STATE',
-    `Submission ${submissionId} is already settled; only an open submission can become ${status}.`,
+    `Submission ${submissionId} is already settled; only an open submission can ${action}.`,
   )
 }
 

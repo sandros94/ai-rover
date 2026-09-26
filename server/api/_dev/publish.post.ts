@@ -15,6 +15,9 @@ import { createJourneyStore } from '../../utils/journey/store'
 
 const finite = v.pipe(v.number(), v.finite())
 
+/** Stop blobs are per mission; the smoke publishes outside any mission, under this id. */
+const SMOKE_MISSION_ID = '00000000-0000-0000-0000-000000000000'
+
 const BodySchema = v.object({
   seed: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
   goal: v.object({ x: finite, y: finite }),
@@ -59,7 +62,7 @@ export default defineHandler(async (event) => {
       driveSegment(world, { disk, revealed: mask, start, goal: body.goal }),
     )
     const stop = await time('publishStopMs', () =>
-      publishStop(store, { world, disk, mask, stopIndex: 0 }),
+      publishStop(store, { world, disk, mask, missionId: SMOKE_MISSION_ID, stopIndex: 0 }),
     )
     const startedAt = Math.round(Date.now() + body.startedAtOffsetS * 1000)
     const segment = await time('publishSegmentMs', () =>

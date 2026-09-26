@@ -51,20 +51,27 @@ describe('worldHash', () => {
   })
 })
 
+const MISSION = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+
 describe('blob keys', () => {
-  it('follow the documented layout', () => {
+  it('follow the documented layout: chunks per world, stops and masks per mission', () => {
     expect(chunkKey('0123456789abcdef', { cx: -3, cy: 7 })).toBe(
       'terrain/0123456789abcdef/chunks/-3_7.bin',
     )
-    expect(revealedKey('0123456789abcdef', 4)).toBe('terrain/0123456789abcdef/revealed/4.bin')
-    expect(stopManifestKey('0123456789abcdef', 4)).toBe('terrain/0123456789abcdef/stops/4.json')
+    expect(revealedKey(MISSION, 4)).toBe(`missions/${MISSION}/revealed/4.bin`)
+    expect(stopManifestKey(MISSION, 4)).toBe(`missions/${MISSION}/stops/4.json`)
   })
 
   it('refuses a negative or fractional stop index', () => {
-    expect(terrainErrorOf(() => revealedKey('0123456789abcdef', -1))?.code).toBe('OUT_OF_BOUNDS')
-    expect(terrainErrorOf(() => stopManifestKey('0123456789abcdef', 1.5))?.code).toBe(
-      'OUT_OF_BOUNDS',
-    )
+    expect(terrainErrorOf(() => revealedKey(MISSION, -1))?.code).toBe('OUT_OF_BOUNDS')
+    expect(terrainErrorOf(() => stopManifestKey(MISSION, 1.5))?.code).toBe('OUT_OF_BOUNDS')
+  })
+
+  it('refuses a mission id that is not a lowercase UUID', () => {
+    for (const id of ['', '0123456789abcdef', MISSION.toUpperCase(), `${MISSION}/..`]) {
+      expect(terrainErrorOf(() => revealedKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
+      expect(terrainErrorOf(() => stopManifestKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
+    }
   })
 
   it('refuses non-integer chunk coordinates', () => {
@@ -77,18 +84,19 @@ describe('blob keys', () => {
 describe('stop manifest', () => {
   const world = defineWorld({ seed: 'mars' })
   const disk = computeStopDisk(world, { center: { x: 12.5, y: -3 }, radius: 70 })
-  const manifest = buildStopManifest(world, disk, { stopIndex: 3 })
+  const manifest = buildStopManifest(world, disk, { missionId: MISSION, stopIndex: 3 })
   const hash = worldHash(world)
 
   it('describes the disk with its blob keys', () => {
     expect(STOP_MANIFEST_VERSION).toBe(1)
     expect(manifest).toEqual({
       version: 1,
+      missionId: MISSION,
       worldHash: hash,
       stop: { index: 3, x: 12.5, y: -3 },
       radius: 70,
       chunks: disk.chunks.map((c) => ({ cx: c.cx, cy: c.cy, key: chunkKey(hash, c) })),
-      revealedKey: revealedKey(hash, 3),
+      revealedKey: revealedKey(MISSION, 3),
     })
   })
 
@@ -117,8 +125,9 @@ describe('stop manifest', () => {
   })
 
   it('refuses a non-integer stop index when building', () => {
-    expect(terrainErrorOf(() => buildStopManifest(world, disk, { stopIndex: -1 }))?.code).toBe(
-      'OUT_OF_BOUNDS',
-    )
+    expect(
+      terrainErrorOf(() => buildStopManifest(world, disk, { missionId: MISSION, stopIndex: -1 }))
+        ?.code,
+    ).toBe('OUT_OF_BOUNDS')
   })
 })

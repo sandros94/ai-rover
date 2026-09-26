@@ -6,6 +6,7 @@ import {
   defineWorld,
   generateChunk,
   MASK_TRAVERSABLE,
+  snapToPathable,
   TerrainError,
   worldToVertex,
 } from '#shared/utils/terrain'
@@ -229,5 +230,52 @@ describe('computeStopDisk', () => {
     expect(full.chunks).toEqual(chunksCoveringDisk(world, { center: { x: 0, y: 0 }, radius: 500 }))
     expect(full.grid.width).toBe(16 * n + 1)
     expect(full.visible).toHaveLength(full.grid.width * full.grid.height)
+  })
+})
+
+describe('snapToPathable', () => {
+  const world = defineWorld({ seed: 'mars' })
+  const base = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 100 })
+  const { width } = base.grid
+  const at = (x: number, y: number) => (y - base.origin.j) * width + (x - base.origin.i)
+  /** The disk with the given world vertices made untraversable and unreachable. */
+  function blocked(vertices: [number, number][]) {
+    const traversable = base.traversable.slice()
+    const reachable = base.reachable.slice()
+    for (const [x, y] of vertices) traversable[at(x, y)] = reachable[at(x, y)] = 0
+    return { ...base, traversable, reachable }
+  }
+
+  it('keeps a point on a pathable vertex at that vertex', () => {
+    expect(base.reachable[at(30, 40)]).toBe(1)
+    expect(snapToPathable(base, { x: 30.4, y: 39.6 })).toEqual({ x: 30, y: 40 })
+  })
+
+  it('moves a point off a blocked vertex to the nearest pathable one', () => {
+    const disk = blocked([
+      [30, 40],
+      [31, 40],
+      [30, 41],
+      [30, 39],
+    ])
+    // (29, 40) is 1.2 m away; the diagonal (31, 39) and (31, 41) are 1.28 m away.
+    expect(snapToPathable(disk, { x: 30.2, y: 40 })).toEqual({ x: 29, y: 40 })
+  })
+
+  it('refuses when nothing pathable lies within the search radius', () => {
+    const square: [number, number][] = []
+    for (let y = 30; y <= 50; y++) for (let x = 20; x <= 40; x++) square.push([x, y])
+    expect(snapToPathable(blocked(square), { x: 30, y: 40 })).toBeUndefined()
+    // A larger radius reaches past the blocked square.
+    expect(snapToPathable(blocked(square), { x: 30, y: 40 }, { radiusM: 12 })).toBeDefined()
+  })
+
+  it('refuses a point outside the disk', () => {
+    expect(snapToPathable(base, { x: 0, y: 400 })).toBeUndefined()
+    // Vertices beyond the disk radius are never candidates, even within the search radius.
+    expect(snapToPathable(base, { x: 0, y: 106 })).toBeUndefined()
+    expect(terrainErrorOf(() => snapToPathable(base, { x: Number.NaN, y: 0 }))?.code).toBe(
+      'OUT_OF_BOUNDS',
+    )
   })
 })

@@ -9,6 +9,9 @@ import type { World } from './world'
 /** Radius of a stop disk when none is given: twice the longest segment (250 m). */
 export const DEFAULT_STOP_RADIUS = 500
 
+/** How far {@link snapToPathable} looks for a pathable vertex when none is given, metres. */
+export const DEFAULT_SNAP_RADIUS = 5
+
 /** Everything the map and the planner need around one stationary point. */
 export interface StopDisk {
   /** World metres. */
@@ -112,6 +115,42 @@ export function computeStopDisk(
   const reachable = reachableFrom(traversable, { width, height, start: viewer })
   const visible = viewshed(grid, { viewer, mastHeight, radius: radius / cellSize })
   return { center, radius, chunks, grid, origin, traversable, reachable, visible }
+}
+
+/**
+ * The vertex nearest `point` that is traversable, reachable from the disk centre and within the
+ * disk radius, searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point;
+ * undefined when there is none. Equal distances go to the lowest (j, i).
+ */
+export function snapToPathable(
+  disk: StopDisk,
+  point: { x: number; y: number },
+  options: { radiusM?: number } = {},
+): { x: number; y: number } | undefined {
+  assertPoint(point, 'snapToPathable')
+  const radiusM = options.radiusM ?? DEFAULT_SNAP_RADIUS
+  assertRadius(radiusM, 'snapToPathable')
+  const { center, radius, origin, grid, traversable, reachable } = disk
+  const { width, height, cellSize } = grid
+  const reach = Math.ceil(radiusM / cellSize)
+  const ci = Math.round(point.x / cellSize) - origin.i
+  const cj = Math.round(point.y / cellSize) - origin.j
+  let best: { x: number; y: number } | undefined
+  let bestDistance = Infinity
+  for (let j = Math.max(0, cj - reach); j <= Math.min(height - 1, cj + reach); j++) {
+    for (let i = Math.max(0, ci - reach); i <= Math.min(width - 1, ci + reach); i++) {
+      const k = j * width + i
+      if (!traversable[k] || !reachable[k]) continue
+      const x = (origin.i + i) * cellSize
+      const y = (origin.j + j) * cellSize
+      const distance = Math.hypot(x - point.x, y - point.y)
+      if (distance > radiusM || distance >= bestDistance) continue
+      if (Math.hypot(x - center.x, y - center.y) > radius) continue
+      best = { x, y }
+      bestDistance = distance
+    }
+  }
+  return best
 }
 
 /** Distance from `value` to the closed interval [lo, hi]. */

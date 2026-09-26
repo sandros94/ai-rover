@@ -21,16 +21,22 @@ import type { JourneyStore, PutResult } from './store'
 const BINARY = { contentType: 'application/octet-stream' }
 
 /**
- * Publishes a stop: every chunk of its disk not yet stored (chunks are immutable per world), the
- * revealed mask as of this stop, then the stop manifest, so a reader that finds the manifest
- * finds everything it names.
+ * Publishes a mission's stop: every chunk of its disk not yet stored (chunks are immutable per
+ * world), the revealed mask as of this stop, then the stop manifest, so a reader that finds the
+ * manifest finds everything it names.
  */
 export async function publishStop(
   store: JourneyStore,
-  options: { world: World; disk: StopDisk; mask: RevealedMask; stopIndex: number },
+  options: {
+    world: World
+    disk: StopDisk
+    mask: RevealedMask
+    missionId: string
+    stopIndex: number
+  },
 ): Promise<{ manifestKey: string; written: PutResult[]; skipped: string[] }> {
-  const { world, disk, mask, stopIndex } = options
-  const manifest = buildStopManifest(world, disk, { stopIndex })
+  const { world, disk, mask, missionId, stopIndex } = options
+  const manifest = buildStopManifest(world, disk, { missionId, stopIndex })
   const written: PutResult[] = []
   const skipped: string[] = []
   for (const { cx, cy, key } of manifest.chunks) {
@@ -43,7 +49,7 @@ export async function publishStop(
     )
   }
   written.push(await store.putImmutable(manifest.revealedKey, encodeRevealedMask(mask), BINARY))
-  const manifestKey = stopManifestKey(manifest.worldHash, stopIndex)
+  const manifestKey = stopManifestKey(missionId, stopIndex)
   written.push(await store.putJson(manifestKey, manifest))
   return { manifestKey, written, skipped }
 }

@@ -8,7 +8,7 @@ import { createMissionAtStop } from '#server/utils/mission/create'
 import { tickMission } from '#server/utils/mission/tick'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import { parseStopManifest, revealedKey, stopManifestKey } from '#shared/utils/terrain'
-import { createTestDb, memoryStore, T0, tableCounts } from './helpers'
+import { createTestDb, fakeJev, memoryStore, T0, tableCounts } from './helpers'
 
 let db: DB
 let close: () => Promise<void>
@@ -37,11 +37,13 @@ describe('createMissionAtStop', () => {
       y: -20,
       headingRad: 0,
       fromSegmentId: null,
-      manifestKey: stopManifestKey(mission.worldHash, 0),
-      revealedKey: revealedKey(mission.worldHash, 0),
+      manifestKey: stopManifestKey(mission.id, 0),
+      revealedKey: revealedKey(mission.id, 0),
     })
     expect(round).toMatchObject({
       fromStopId: stop.id,
+      anchorX: 10,
+      anchorY: -20,
       status: 'open',
       opensAt: T0,
       closesAt: null,
@@ -52,6 +54,7 @@ describe('createMissionAtStop', () => {
     expect(published.manifestKey).toBe(stop.manifestKey)
     const manifest = parseStopManifest(await store.getJson(stop.manifestKey))
     expect(manifest.stop).toEqual({ index: 0, x: 10, y: -20 })
+    expect(manifest.missionId).toBe(mission.id)
     expect(blobs.blobs.has(stop.revealedKey)).toBe(true)
   })
 
@@ -65,7 +68,8 @@ describe('createMissionAtStop', () => {
     })
     const before = await tableCounts(db)
     const writes = blobs.writes.length
-    const result = await tickMission(db, { store, missionId: mission.id, now: T0 })
+    const jev = fakeJev().client
+    const result = await tickMission(db, { store, jev, missionId: mission.id, now: T0 })
     expect(result).toEqual({ settled: null, closed: null, started: null, opened: null })
     expect(await tableCounts(db)).toEqual(before)
     expect(blobs.writes).toHaveLength(writes)

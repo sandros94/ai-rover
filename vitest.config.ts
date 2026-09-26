@@ -24,6 +24,8 @@ export default defineConfig({
         },
         test: {
           name: 'unit',
+          /** Database-backed files each start an in-memory Postgres; under a full parallel run one can take seconds. */
+          testTimeout: 20_000,
           include: ['test/unit/**/*.{test,spec}.ts'],
           environment: 'node',
         },

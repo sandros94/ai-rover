@@ -10,12 +10,15 @@ import type { World } from './world'
 export const STOP_MANIFEST_VERSION = 1
 
 const WORLD_HASH = /^[0-9a-f]{16}$/
+/** A mission id as the database makes them: a lowercase UUID. */
+export const MISSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const int32 = v.pipe(v.number(), v.integer(), v.minValue(-0x80000000), v.maxValue(0x7fffffff))
 
 /** JSON manifest of one stop: the disk's chunk blobs and the revealed mask as of that stop. */
 export const StopManifestSchema = v.object({
   version: v.literal(STOP_MANIFEST_VERSION),
+  missionId: v.pipe(v.string(), v.regex(MISSION_ID)),
   worldHash: v.pipe(v.string(), v.regex(WORLD_HASH)),
   stop: v.object({
     index: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
@@ -47,33 +50,37 @@ export function chunkKey(worldHash: string, coords: ChunkCoords): string {
   return `terrain/${worldHash}/chunks/${coords.cx}_${coords.cy}.bin`
 }
 
-/** Key of the revealed mask accumulated up to and including stop `stopIndex`. */
-export function revealedKey(worldHash: string, stopIndex: number): string {
-  assertWorldHash(worldHash)
+/**
+ * Key of the mission's revealed mask accumulated up to and including stop `stopIndex`. Masks and
+ * stops are per mission, since two missions on one world see different ground; chunks are not.
+ */
+export function revealedKey(missionId: string, stopIndex: number): string {
+  assertMissionId(missionId)
   assertStopIndex(stopIndex)
-  return `terrain/${worldHash}/revealed/${stopIndex}.bin`
+  return `missions/${missionId}/revealed/${stopIndex}.bin`
 }
 
-export function stopManifestKey(worldHash: string, stopIndex: number): string {
-  assertWorldHash(worldHash)
+export function stopManifestKey(missionId: string, stopIndex: number): string {
+  assertMissionId(missionId)
   assertStopIndex(stopIndex)
-  return `terrain/${worldHash}/stops/${stopIndex}.json`
+  return `missions/${missionId}/stops/${stopIndex}.json`
 }
 
 export function buildStopManifest(
   world: World,
   disk: StopDisk,
-  options: { stopIndex: number },
+  options: { missionId: string; stopIndex: number },
 ): StopManifest {
-  const { stopIndex } = options
+  const { missionId, stopIndex } = options
   const hash = worldHash(world)
   return {
     version: STOP_MANIFEST_VERSION,
+    missionId,
     worldHash: hash,
     stop: { index: stopIndex, x: disk.center.x, y: disk.center.y },
     radius: disk.radius,
     chunks: disk.chunks.map(({ cx, cy }) => ({ cx, cy, key: chunkKey(hash, { cx, cy }) })),
-    revealedKey: revealedKey(hash, stopIndex),
+    revealedKey: revealedKey(missionId, stopIndex),
   }
 }
 
@@ -102,6 +109,15 @@ function assertWorldHash(hash: string): void {
     throw new TerrainError(
       'INVALID_CONFIG',
       `World hash is "${hash}"; pass the 16 hex characters returned by worldHash(world).`,
+    )
+  }
+}
+
+function assertMissionId(missionId: string): void {
+  if (!MISSION_ID.test(missionId)) {
+    throw new TerrainError(
+      'OUT_OF_BOUNDS',
+      `Mission id is ${JSON.stringify(missionId)}; pass the mission's id, a lowercase UUID.`,
     )
   }
 }

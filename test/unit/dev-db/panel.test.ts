@@ -11,7 +11,7 @@ import { prepareLocalDatabase } from '~~/modules/dev-db/runtime/server/utils/mig
 import { seedLocalMission } from '~~/modules/dev-db/runtime/server/utils/seed'
 import { databaseStatus } from '~~/modules/dev-db/runtime/server/utils/status'
 import { MemoryBlobs } from '../journey/helpers'
-import { copyMigrations, INIT, startLocalDatabase } from './helpers'
+import { copyMigrations, INIT, MIGRATIONS, startLocalDatabase } from './helpers'
 
 let local: Awaited<ReturnType<typeof startLocalDatabase>>
 let migrations: Awaited<ReturnType<typeof copyMigrations>>
@@ -91,15 +91,15 @@ describe('databaseStatus', () => {
       pending: [],
       blobs: { store: 'journey', keys: blobs.blobs.size },
     })
-    expect(status.applied).toEqual([
-      {
-        name: INIT,
+    expect(status.applied).toEqual(
+      MIGRATIONS.map((name, k) => ({
+        name,
         recordedAt: expect.any(String),
         digest: expect.stringMatching(/^[0-9a-f]{64}$/),
-        fileDigest: status.applied[0]!.digest,
+        fileDigest: status.applied[k]!.digest,
         drifted: false,
-      },
-    ])
+      })),
+    )
     expect(status.counts).toMatchObject({ mission: 1, stop: 1, round: 1, submission: 0 })
     expect(JSON.stringify(status)).not.toContain('postgres://')
   })

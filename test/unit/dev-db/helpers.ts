@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -39,3 +40,6 @@ export async function copyMigrations(): Promise<{ dir: string; remove: () => Pro
 }
 
 export const INIT = '20260925213758_init'
+
+/** Every generated migration, in the order the applier runs them. */
+export const MIGRATIONS = readdirSync(MIGRATIONS_DIR).toSorted()

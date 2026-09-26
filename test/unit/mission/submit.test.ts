@@ -5,6 +5,7 @@ import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
+import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
 import { at, createTestDb, dbErrorOf, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
 
 vi.setConfig({ testTimeout: 60_000 })
@@ -65,13 +66,79 @@ describe('submitGoal', () => {
     expect(jev.summaries).toEqual([submission!.summary])
   })
 
+  it('snaps a goal on blocked ground to the nearest pathable vertex before the rules', async () => {
+    // A low slope limit leaves blocked ground next to pathable ground near the stop.
+    const world = { slopeLimitDeg: 6 }
+    const { store } = memoryStore()
+    const created = await createMissionAtStop(db, {
+      store,
+      seed: 'mars',
+      at: { x: 0, y: 0 },
+      world,
+      now: T0,
+    })
+    const disk = computeStopDisk(defineWorld({ seed: 'mars', ...world }), {
+      center: { x: 0, y: 0 },
+    })
+    const { width } = disk.grid
+    const pathable = (x: number, y: number) => {
+      const k = (y - disk.origin.j) * width + (x - disk.origin.i)
+      return disk.traversable[k] === 1 && disk.reachable[k] === 1
+    }
+    // A blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
+    let edge: { x: number; y: number } | undefined
+    let island: { x: number; y: number } | undefined
+    for (let y = 60; y <= 200 && !(edge && island); y++) {
+      for (let x = -200; x <= 200 && !(edge && island); x++) {
+        if (pathable(x, y)) continue
+        let near = false
+        for (let dy = -5; dy <= 5; dy++) {
+          for (let dx = -5; dx <= 5; dx++) {
+            if (Math.hypot(dx, dy) <= 5 && pathable(x + dx, y + dy)) near = true
+          }
+        }
+        if (near && pathable(x + 1, y)) edge ??= { x, y }
+        if (!near) island ??= { x, y }
+      }
+    }
+    expect(edge && island).toBeDefined()
+    const jev = fakeJev()
+    const [ada] = await users(db, 'Ada')
+    const submit = (goal: { x: number; y: number }) =>
+      submitGoal(db, {
+        store,
+        jev: jev.client,
+        missionId: created.mission.id,
+        userId: ada!.id,
+        goal,
+        now: at(T0, MINUTE),
+      })
+
+    expect(await submit(island!)).toEqual({
+      accepted: false,
+      reason: 'unpathable',
+      submission: null,
+    })
+    expect(jev.summaries).toHaveLength(0)
+    const snapped = await submit(edge!)
+    expect(snapped.submission).not.toBeNull()
+    const goal = { x: snapped.submission!.goalX, y: snapped.submission!.goalY }
+    expect(goal).not.toEqual(edge)
+    expect(pathable(goal.x, goal.y)).toBe(true)
+    expect(Math.hypot(goal.x - edge!.x, goal.y - edge!.y)).toBe(1)
+  })
+
   it('stores a rejected verdict as a rejected submission and reports it', async () => {
     const { ada, submit, round } = await landed(() => ({ feasible: 0.1, verdict: 'reject' }))
     const result = await submit(ada.id, { x: 0, y: 80 })
     expect(result).toMatchObject({
       accepted: false,
       reason: 'judged-infeasible',
-      submission: { status: 'rejected', judgment: { verdict: 'reject' } },
+      submission: {
+        status: 'rejected',
+        rejectionReason: 'judged-infeasible',
+        judgment: { verdict: 'reject' },
+      },
     })
     // A rejection holds no place in the round: the user may submit again.
     const [listed] = await listRoundSubmissions(db, round.id)
@@ -92,10 +159,15 @@ describe('submitGoal', () => {
   })
 
   it('keeps the author of the drive in progress out of the next round', async () => {
-    const { ada, bob, submit, store, mission } = await landed()
+    const { ada, bob, submit, store, mission, jev } = await landed()
     await submit(ada.id, { x: 0, y: 80 })
     const closed = at(T0, MINUTE + 5 * MINUTE)
-    const tick = await tickMission(db, { store, missionId: mission.id, now: closed })
+    const tick = await tickMission(db, {
+      store,
+      jev: jev.client,
+      missionId: mission.id,
+      now: closed,
+    })
     expect(tick.started).not.toBeNull()
     const during = at(closed, MINUTE)
     const refused = await submit(ada.id, { x: 0, y: 160 }, during).catch((error: unknown) => error)

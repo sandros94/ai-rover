@@ -30,8 +30,8 @@ export interface PublicSubmission {
 
 /**
  * The mission as anyone may see it at `now`. While a drive plays, nothing names where it ends:
- * no outcome, no end time, and not the stop the open round starts from (the planned goal is in the
- * drive's public manifest).
+ * no outcome and no end time; the open round leaves from the stop the rover left and is anchored
+ * on the drive's planned goal, both already public.
  */
 export interface PublicMissionState {
   now: Date
@@ -42,6 +42,10 @@ export interface PublicMissionState {
   round: {
     id: string
     opensAt: Date
+    /** The stop the rover is at, or left from while a drive plays. */
+    fromStopId: string
+    /** Where submissions are measured and planned from: that stop, or the planned goal. */
+    anchor: { x: number; y: number }
     /**
      * Null while a drive plays, since the round closes when the drive ends and that end is
      * private until then; also null while the rover idles and nobody has submitted.
@@ -91,6 +95,8 @@ export async function publicMissionState(
       id: open.id,
       opensAt: open.opensAt,
       closesAt: playing ? null : closesAt,
+      fromStopId: open.fromStopId,
+      anchor: { x: open.anchorX, y: open.anchorY },
       submissions: submissions.map((s) => ({
         id: s.id,
         goal: { x: s.goalX, y: s.goalY },

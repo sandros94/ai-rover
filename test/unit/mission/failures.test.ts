@@ -1,35 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import { getMission } from '#server/repositories/missions'
-import { getOpenRound } from '#server/repositories/rounds'
+import { getOpenRound, getRound } from '#server/repositories/rounds'
 import { getSegment, listDeaths } from '#server/repositories/segments'
 import { getStop } from '#server/repositories/stops'
+import { getSubmission } from '#server/repositories/submissions'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
-import type { DriveOutcome } from '#shared/utils/drive'
+import { failAt, forced } from './forced'
 import { at, createTestDb, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
 
-/**
- * Outcomes forced onto the next drives, in order: the rover still drives the real terrain, but
- * the record ends as given. Hidden hazards severe enough to fail a drive are rare on default
- * terrain, so failures are injected here.
- */
-const forced = vi.hoisted(() => ({ outcomes: [] as ((real: DriveOutcome) => DriveOutcome)[] }))
-
-vi.mock('#shared/utils/drive/segment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('#shared/utils/drive/segment')>()
-  return {
-    ...actual,
-    driveSegment: (...args: Parameters<typeof actual.driveSegment>) => {
-      const driven = actual.driveSegment(...args)
-      const force = forced.outcomes.shift()
-      return force
-        ? { ...driven, record: { ...driven.record, outcome: force(driven.record.outcome) } }
-        : driven
-    },
-  }
-})
+vi.mock('#shared/utils/drive/segment', async (original) =>
+  (await import('./forced')).forcedDriveSegment(original),
+)
 
 vi.setConfig({ testTimeout: 60_000 })
 
@@ -38,37 +22,39 @@ let close: () => Promise<void>
 beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())
 
-/** A failure with the rover dead at `from + offset`. */
-function failAt(from: { x: number; y: number }, offset: { x: number; y: number }) {
-  return (real: DriveOutcome): DriveOutcome => ({
-    ...real,
-    kind: 'failed',
-    reasons: ['stuck'],
-    endPose: { x: from.x + offset.x, y: from.y + offset.y, headingRad: real.endPose.headingRad },
+async function landed() {
+  const { store } = memoryStore()
+  const created = await createMissionAtStop(db, {
+    store,
+    seed: 'mars',
+    at: { x: 0, y: 0 },
+    now: T0,
   })
+  const missionId = created.mission.id
+  const jev = fakeJev()
+  const [ada, bob, cy] = await users(db, 'Ada', 'Bob', 'Cy')
+  return {
+    ...created,
+    missionId,
+    store,
+    ada: ada!,
+    bob: bob!,
+    cy: cy!,
+    submit: (userId: string, goal: { x: number; y: number }, now: Date) =>
+      submitGoal(db, { store, jev: jev.client, missionId, userId, goal, now }),
+    tick: (now: Date) => tickMission(db, { store, jev: jev.client, missionId, now }),
+  }
 }
 
 describe('failures', () => {
   it('records the death, retries from the same stop and resets after three clustered strikes', async () => {
-    const { store } = memoryStore()
-    const { mission, stop: stop0 } = await createMissionAtStop(db, {
-      store,
-      seed: 'mars',
-      at: { x: 0, y: 0 },
-      now: T0,
-    })
-    const missionId = mission.id
-    const jev = fakeJev()
-    const [ada, bob] = await users(db, 'Ada', 'Bob')
-    const submit = (userId: string, goal: { x: number; y: number }, now: Date) =>
-      submitGoal(db, { store, jev: jev.client, missionId, userId, goal, now })
-    const tick = (now: Date) => tickMission(db, { store, missionId, now })
+    const m = await landed()
 
     // Stop 1, reached for real.
-    await submit(ada!.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const reach = await getSegment(db, (await tick(at(T0, 6 * MINUTE))).started!.segmentId)
-    await tick(reach.endsAt)
-    const stop1 = await getStop(db, (await getMission(db, missionId)).currentStopId!)
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const reach = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
+    await m.tick(reach.endsAt)
+    const stop1 = await getStop(db, (await getMission(db, m.missionId)).currentStopId!)
     expect(stop1.index).toBe(1)
 
     // Three failures from stop 1, their deaths pairwise within 50 m, away from the route east.
@@ -78,65 +64,80 @@ describe('failures', () => {
       { x: -40, y: -45 },
     ]
     const goal = { x: stop1.x + 80, y: stop1.y }
-    const authors = [bob!, ada!, bob!]
+    const authors = [m.bob, m.ada, m.bob]
     let now = at(reach.endsAt, MINUTE)
-    let previous = reach
+    let last = reach
     for (const [k, death] of deaths.entries()) {
       forced.outcomes.push(failAt(stop1, death))
-      const submitted = await submit(authors[k]!.id, goal, now)
+      const submitted = await m.submit(authors[k]!.id, goal, now)
       expect(submitted.accepted).toBe(true)
-      const started = (await tick(k === 0 ? at(now, 5 * MINUTE) : previous.endsAt)).started!
+      const { goalX, goalY } = submitted.submission!
+      const started = (await m.tick(at(now, 5 * MINUTE))).started!
       const segment = await getSegment(db, started.segmentId)
       expect(segment).toMatchObject({ fromStopId: stop1.id, attempt: k + 1, status: 'driving' })
-      // The failure stays private while the drive plays.
-      expect(await listDeaths(db, missionId)).toHaveLength(k)
-      const next = (await getOpenRound(db, missionId))!
-      expect(next.fromStopId).toBe(k < 2 ? stop1.id : stop0.id)
-      previous = segment
-      now = at(segment.startedAt, MINUTE)
+      // The failure stays private while the drive plays: the next round waits at the goal.
+      expect(await listDeaths(db, m.missionId)).toHaveLength(k)
+      const next = (await getOpenRound(db, m.missionId))!
+      expect(next).toMatchObject({ fromStopId: stop1.id, anchorX: goalX, anchorY: goalY })
+
+      const settled = await m.tick(segment.endsAt)
+      expect(settled.settled).toEqual({ segmentId: segment.id, status: 'failed' })
+      expect(await getRound(db, next.id)).toMatchObject({
+        status: 'void',
+        winnerSubmissionId: null,
+      })
+      last = segment
+      now = at(segment.endsAt, MINUTE)
     }
 
-    await tick(previous.endsAt)
-    const settled = await getSegment(db, previous.id)
-    expect(settled).toMatchObject({
+    expect(await getSegment(db, last.id)).toMatchObject({
       status: 'failed',
       toStopId: null,
       deathX: stop1.x - 40,
       deathY: stop1.y - 45,
     })
-    expect(await listDeaths(db, missionId, { fromStopId: stop1.id })).toHaveLength(3)
-    expect((await getMission(db, missionId)).currentStopId).toBe(stop0.id)
-    expect((await getOpenRound(db, missionId))!.fromStopId).toBe(stop0.id)
+    expect(await listDeaths(db, m.missionId, { fromStopId: stop1.id })).toHaveLength(3)
+    const stop0 = m.stop
+    expect((await getMission(db, m.missionId)).currentStopId).toBe(stop0.id)
+    expect(await getOpenRound(db, m.missionId)).toMatchObject({
+      fromStopId: stop0.id,
+      anchorX: stop0.x,
+      anchorY: stop0.y,
+    })
   })
 
-  it('keeps the mission at the stop after a single failure and refuses goals near the death', async () => {
-    const { store } = memoryStore()
-    const { mission, stop } = await createMissionAtStop(db, {
-      store,
-      seed: 'mars',
-      at: { x: 0, y: 0 },
-      now: T0,
-    })
-    const jev = fakeJev()
-    const [ada] = await users(db, 'Ada')
-    const submit = (goal: { x: number; y: number }, now: Date) =>
-      submitGoal(db, { store, jev: jev.client, missionId: mission.id, userId: ada!.id, goal, now })
-    forced.outcomes.push(failAt(stop, { x: 0, y: 60 }))
-    await submit({ x: 0, y: 80 }, at(T0, MINUTE))
-    const started = (
-      await tickMission(db, { store, missionId: mission.id, now: at(T0, 6 * MINUTE) })
-    ).started!
+  it('voids the round beside a failed drive: its open submissions are lost, a fresh round opens', async () => {
+    const m = await landed()
+    forced.outcomes.push(failAt(m.stop, { x: 0, y: 60 }))
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const started = (await m.tick(at(T0, 6 * MINUTE))).started!
     const segment = await getSegment(db, started.segmentId)
-    const settled = await tickMission(db, { store, missionId: mission.id, now: segment.endsAt })
-    expect(settled.settled).toEqual({ segmentId: segment.id, status: 'failed' })
-    expect((await getMission(db, mission.id)).currentStopId).toBe(stop.id)
-    expect((await getOpenRound(db, mission.id))!.fromStopId).toBe(stop.id)
+    const beside = (await getOpenRound(db, m.missionId))!
+    const waiting = await m.submit(m.bob.id, { x: 80, y: 80 }, at(T0, 10 * MINUTE))
+    expect(waiting.accepted).toBe(true)
+
+    const tick = await m.tick(segment.endsAt)
+    expect(tick.settled).toEqual({ segmentId: segment.id, status: 'failed' })
+    // Nothing wins a voided round, so nothing starts.
+    expect(tick.closed).toBeNull()
+    expect(tick.started).toBeNull()
+    expect(await getRound(db, beside.id)).toMatchObject({
+      status: 'void',
+      winnerSubmissionId: null,
+      closesAt: segment.endsAt,
+    })
+    expect((await getSubmission(db, waiting.submission!.id)).status).toBe('lost')
+    const fresh = (await getOpenRound(db, m.missionId))!
+    expect(fresh.id).not.toBe(beside.id)
+    expect(fresh).toMatchObject({ fromStopId: m.stop.id, anchorX: 0, anchorY: 0 })
+    expect(tick.opened).toEqual({ roundId: fresh.id })
+    expect((await getMission(db, m.missionId)).currentStopId).toBe(m.stop.id)
 
     const later = at(segment.endsAt, MINUTE)
-    expect(await submit({ x: 10, y: 75 }, later)).toMatchObject({
+    expect(await m.submit(m.bob.id, { x: 10, y: 75 }, later)).toMatchObject({
       accepted: false,
       reason: 'near-death-zone',
     })
-    expect(await submit({ x: 0, y: -80 }, later)).toMatchObject({ accepted: true })
+    expect(await m.submit(m.bob.id, { x: 0, y: -80 }, later)).toMatchObject({ accepted: true })
   })
 })

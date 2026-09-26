@@ -3,6 +3,8 @@ import { defineHandler, HTTPError } from 'nitro/h3'
 import { DbError } from '../../database/errors'
 import { getActiveMission } from '../../repositories/missions'
 import { useDB } from '../db'
+import { useJevClient } from '../jev'
+import type { JevClient } from '../jev/client'
 import { JudgeError } from '../jev/errors'
 import type { JourneyStore } from '../journey/store'
 import { createJourneyStore } from '../journey/store'
@@ -50,6 +52,14 @@ export function httpErrorOf(error: unknown): HTTPError {
 }
 
 /**
+ * The server's Jev client, created only when a tick has something to judge, so routes keep
+ * working without a TypeSafe key until a settlement needs one.
+ */
+const LAZY_JEV: JevClient = {
+  judgeSubmission: (summary, options) => useJevClient().judgeSubmission(summary, options),
+}
+
+/**
  * A mission route: never cached, errors mapped by {@link httpErrorOf}, and the mission brought up
  * to date before the handler runs, so every read and write sees the state the lazy trigger
  * implies at `now`.
@@ -69,7 +79,7 @@ export function defineMissionHandler<T>(
       }
       const store = createJourneyStore()
       const now = requestNow(event)
-      const tick = await tickMission(useDB(), { missionId: mission.id, store, now })
+      const tick = await tickMission(useDB(), { missionId: mission.id, store, jev: LAZY_JEV, now })
       return await handler(event, { missionId: mission.id, store, now, tick })
     } catch (error) {
       throw httpErrorOf(error)

@@ -5,6 +5,7 @@ import { getMission } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
 import { getDrivingSegment, listDeaths } from '../../repositories/segments'
 import { getStop } from '../../repositories/stops'
+import type { SubmissionAssessment } from '../../repositories/submissions'
 import {
   createSubmission,
   getSubmission,
@@ -12,32 +13,80 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import type { JourneyStore } from '../journey/store'
-import type { GoalRefusal } from '#shared/utils/mission'
+import type { GoalRefusal, MapPoint, MissionRules } from '#shared/utils/mission'
 import { checkPathClearOfDeaths, checkSubmissionGoal } from '#shared/utils/mission'
 import { planSegment, summarizeSubmission } from '#shared/utils/nav'
-import { revealedOverDisk } from '#shared/utils/terrain'
+import type { StopDisk, World } from '#shared/utils/terrain'
+import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
 /**
  * Why a goal was not accepted. Closed set.
  *
+ * - `unpathable`: no traversable vertex reachable from the stop lies near the goal; nothing is
+ *   stored.
  * - `too-near`, `too-far`, `near-death-zone`: the goal breaks a mission rule; nothing is stored.
  * - `path-near-death-zone`: the planned route passes too close to a death; nothing is stored.
  * - `judged-infeasible`: Jev's verdict is reject; the submission is stored as `rejected`.
  */
-export type SubmissionRefusal = GoalRefusal | 'path-near-death-zone' | 'judged-infeasible'
+export type SubmissionRefusal =
+  | 'unpathable'
+  | GoalRefusal
+  | 'path-near-death-zone'
+  | 'judged-infeasible'
 
 export type SubmitResult =
   | { accepted: true; submission: Submission }
   | { accepted: false; reason: SubmissionRefusal; submission: Submission | null }
 
+/** What a goal is planned over: a stop's disk, what was seen there, and where plans start. */
+export interface PlanningGround {
+  world: World
+  disk: StopDisk
+  /** One byte per disk-grid vertex, as `revealedOverDisk` gives it. */
+  revealed: Uint8Array
+  start: MapPoint
+}
+
 /**
- * Submits a goal to the mission's open round: the goal snapped to the nearest vertex, checked
- * against the rules and the settled deaths, planned from the round's stop over what the rover has
- * seen, then judged by Jev. Throws `ALREADY_SUBMITTED` (before any planning or Jev request) while
- * the user has an open submission in the round, and `AUTHOR_DRIVING` while the rover drives the
- * user's own segment.
+ * A goal checked against the rules and the settled deaths from `ground.start`, planned over the
+ * ground, then judged by Jev; a refusal by rule asks Jev nothing. The judgment may still be a
+ * reject, which the caller stores as such.
+ */
+export async function assessGoal(
+  ground: PlanningGround,
+  options: { goal: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules; jev: JevClient },
+): Promise<
+  | { ok: true; assessment: SubmissionAssessment }
+  | { ok: false; reason: GoalRefusal | 'path-near-death-zone' }
+> {
+  const { world, disk, revealed, start } = ground
+  const { goal, deaths, rules, jev } = options
+  const rule = checkSubmissionGoal(goal, { start, deaths, rules })
+  if (!rule.ok) return rule
+  const plan = planSegment(disk, {
+    revealed,
+    start,
+    goal,
+    slopeLimitDeg: world.config.slopeLimitDeg,
+  })
+  if (plan.polyline.length > 0 && !checkPathClearOfDeaths(plan.polyline, { deaths, rules }).ok) {
+    return { ok: false, reason: 'path-near-death-zone' }
+  }
+  const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
+  const { cached: _cached, usage: _usage, ...judgment } = await jev.judgeSubmission(summary)
+  return { ok: true, assessment: { judgment, metrics: plan.metrics, summary } }
+}
+
+/**
+ * Submits a goal to the mission's open round: the goal snapped to the nearest pathable vertex,
+ * checked against the rules and the settled deaths, planned from the round's anchor over the
+ * disk of its stop and what the rover had seen there, then judged by Jev. During a drive that is
+ * the stop the rover left and its mask from before the drive, so nothing the drive discovers is
+ * used. Throws `ALREADY_SUBMITTED` (before any planning or Jev request) while the user has an
+ * open submission in the round, and `AUTHOR_DRIVING` while the rover drives the user's own
+ * segment.
  */
 export async function submitGoal(
   db: DB,
@@ -77,41 +126,34 @@ export async function submitGoal(
     )
   }
 
-  const { rules } = mission.config
   const world = missionWorld(mission)
-  const { cellSize } = world.config
-  const goal = {
-    x: Math.round(options.goal.x / cellSize) * cellSize,
-    y: Math.round(options.goal.y / cellSize) * cellSize,
-  }
   const from = await getStop(db, round.fromStopId)
-  const start = { x: from.x, y: from.y }
-  const deaths = await listDeaths(db, missionId)
-  const rule = checkSubmissionGoal(goal, { start, deaths, rules })
-  if (!rule.ok) return { accepted: false, reason: rule.reason, submission: null }
-
   const disk = stopDisk(world, from)
-  const revealed = revealedOverDisk(await loadRevealedMask(store, from), disk)
-  const plan = planSegment(disk, {
-    revealed,
-    start,
-    goal,
-    slopeLimitDeg: world.config.slopeLimitDeg,
-  })
-  if (plan.polyline.length > 0 && !checkPathClearOfDeaths(plan.polyline, { deaths, rules }).ok) {
-    return { accepted: false, reason: 'path-near-death-zone', submission: null }
+  const goal = snapToPathable(disk, options.goal)
+  if (!goal) return { accepted: false, reason: 'unpathable', submission: null }
+  const ground: PlanningGround = {
+    world,
+    disk,
+    revealed: revealedOverDisk(await loadRevealedMask(store, from), disk),
+    start: { x: round.anchorX, y: round.anchorY },
   }
-  const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
-  const { cached: _cached, usage: _usage, ...judgment } = await jev.judgeSubmission(summary)
-  const rejected = judgment.verdict === 'reject'
+  const assessed = await assessGoal(ground, {
+    goal,
+    deaths: await listDeaths(db, missionId),
+    rules: mission.config.rules,
+    jev,
+  })
+  if (!assessed.ok) return { accepted: false, reason: assessed.reason, submission: null }
+
+  const rejected = assessed.assessment.judgment.verdict === 'reject'
   const submission = await createSubmission(db, {
     roundId: round.id,
     userId,
     goal,
-    judgment,
-    metrics: plan.metrics,
-    summary,
-    status: rejected ? 'rejected' : 'open',
+    ...assessed.assessment,
+    ...(rejected
+      ? { status: 'rejected' as const, rejectionReason: 'judged-infeasible' as const }
+      : { status: 'open' as const }),
     createdAt: now,
   })
   return rejected

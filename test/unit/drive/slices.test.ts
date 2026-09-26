@@ -265,8 +265,9 @@ describe('journey keys', () => {
   it('parses only the served key shapes', () => {
     const hash = '0123456789abcdef'
     expect(parseJourneyKey(`terrain/${hash}/chunks/-3_4.bin`)).toEqual({ kind: 'terrain' })
-    expect(parseJourneyKey(`terrain/${hash}/revealed/0.bin`)).toEqual({ kind: 'terrain' })
-    expect(parseJourneyKey(`terrain/${hash}/stops/12.json`)).toEqual({ kind: 'terrain' })
+    const mission = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+    expect(parseJourneyKey(`missions/${mission}/revealed/0.bin`)).toEqual({ kind: 'stop' })
+    expect(parseJourneyKey(`missions/${mission}/stops/12.json`)).toEqual({ kind: 'stop' })
     expect(parseJourneyKey('segments/smoke-1/manifest.json')).toEqual({
       kind: 'segment-manifest',
       segmentId: 'smoke-1',
@@ -286,6 +287,12 @@ describe('journey keys', () => {
       'segments/a/slices/-1.bin',
       'segments/a/other.json',
       `/terrain/${hash}/stops/0.json`,
+      // Stops and masks were once keyed by world; those keys are no longer served.
+      `terrain/${hash}/stops/0.json`,
+      `terrain/${hash}/revealed/0.bin`,
+      'missions/not-a-uuid/stops/0.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/01.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/chunks/0_0.bin',
     ]) {
       expect(parseJourneyKey(key)).toBeNull()
     }
