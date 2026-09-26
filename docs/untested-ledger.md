@@ -29,3 +29,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 25. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
 26. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
 27. Chunk blobs carry the true heights and traversable bits of unrevealed ground; a client reading them with the public plan can anticipate a stopped-short point before the slices release (audit 2026-09-27). Decision pending: accept, or serve per-stop chunk views with unrevealed vertices flattened.
+28. The attempt cap is checked before an insert without being atomic with it; concurrent submits can exceed it by a few.
+29. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
+30. The reachability flood fill crosses unseen ground, so whether a seen vertex is pathable can depend on hidden terrain.
+31. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
