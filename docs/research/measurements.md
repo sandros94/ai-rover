@@ -79,6 +79,8 @@ Desktop, 2026-09-25, seed `mars`, 500 m disk:
 
 About 95 % of the time is the pose solve at every step. Effective flat-ground speed 0.0331 m/s (100 m in 3,024 s). Keyframes 547 KB per hour raw, ~1.3 MB per 250 m. Events JSON ~26 KB per 250 m, mostly per-metre pauses. Reveal deltas 1.2k–22k vertices (5–90 KB) per 250 m, at most ~245 vertices in one metre. The 50 m corridor viewshed on the 1025² grid costs 0.8–1.3 ms per metre.
 
+With continuous driving (0.033 m/s cruise, imaging stops every 25 m) the 150 m Mars drive takes 5,375 s at 0.0286 m/s effective: start, six turns, six imaging stops, arrival. The JPL rover model: hero 29,674 triangles / 632 KB, low 8,789 / 220 KB, ~19 draw calls, 60 fps on a desktop GPU, ~1.0 s / 0.4 s to load locally; the lazy three.js chunk is ~232 KB gzip.
+
 Interpolation at 2 Hz against re-solved poses over 500 random times: max wheel height error 5.7e-5 m, max wheel-to-ground gap 5.8e-5 m, body height 4.8e-6 m.
 
 The default terrain produced no replans and no slip events on any run: the relief tuning is what will make drives eventful.
