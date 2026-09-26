@@ -26,3 +26,5 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 22. Jev re-judgments at settlement run inside the tick transaction under the advisory lock; an upstream outage stalls settlement until it answers.
 23. The local PGlite data directory (`.netlify/db`) was corrupted once by an abrupt dev-server kill (`RuntimeError: Aborted()` at start); moving it aside and letting the module re-migrate fixed it. Unknown whether the platform emulator guards against this.
 24. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
+25. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
+26. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
