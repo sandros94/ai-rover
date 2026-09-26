@@ -36,13 +36,13 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Early experiment: candidate-route Choice over 3–8 code-generated routes, compared against the code planner's own pick on recorded fixtures.
 - Cache keyed by hash(state, questions, model); pin `jev-1.13.0`. Recorded fixtures for tests; live calls only in a tagged manual suite.
 
-## Phase 4 — Persistence + lifecycle (Netlify DB + Blobs) — blob side done (slices, deflated store, time-gated routes); database and lifecycle pending
+## Phase 4 — Persistence + lifecycle (Netlify DB + Blobs) — done: schema and migrations, local database module, lifecycle tick, submissions, likes, rounds, settlement, failure zones, public routes
 
 - Schema: user, submission, like, segment (attempt), checkpoint; state machine idle → collecting → driving → arrived | failed.
 - Journal writer: one immutable blob per attempt; CDN route with cache tags.
 - Segment resolution: lazy, in the first request after window close, under a DB lock (background function only if the Phase 0 measurement demands).
 
-## Phase 5 — Auth (needed before submissions/likes go live, not before)
+## Phase 5 — Auth — done: session module, GitHub, AT Protocol public client, login page
 
 - JWE cookie session (`unauth` h3v2 + `unjwt`) with nuxt-auth-utils-like DX; GitHub OAuth hand-rolled; AT Protocol OAuth hand-rolled public client (PAR, PKCE, DPoP via `unjwt`/`unsecure`, handle→DID→PDS discovery), login-only.
 

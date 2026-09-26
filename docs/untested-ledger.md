@@ -20,3 +20,9 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 16. Slip model constants (gain 1.2, stuck above 0.6 for 3 m, loose-regolith noise at 80 m wavelength): judgement calls, untested against the JPL slip data beyond the qualitative 50–94 % figures.
 17. `drizzle-orm/netlify-db` driver against a deployed Netlify Database (HTTP + WebSocket pool inside Functions): only PGlite and the local emulation have run.
 18. Migration application on a real deploy: Netlify applies `netlify/database/migrations/*/migration.sql` before publish; unexercised until the first deploy.
+19. `unauth` `defineSession` does not forward `sessionHeader` to `unjwt`, so a sealed session token is also accepted from a request header, not only the cookie; upstream fix pending, then pass `sessionHeader: false`.
+20. `unjwt` always adds `cty: application/json` to a `dpop+jwt` header; bsky.social accepted it, other authorization servers untested.
+21. Nitro bundles h3 rc.22 while the project pins rc.29; both load side by side and work, but the mixed versions are unverified beyond the current routes.
+22. Jev re-judgments at settlement run inside the tick transaction under the advisory lock; an upstream outage stalls settlement until it answers.
+23. The local PGlite data directory (`.netlify/db`) was corrupted once by an abrupt dev-server kill (`RuntimeError: Aborted()` at start); moving it aside and letting the module re-migrate fixed it. Unknown whether the platform emulator guards against this.
+24. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
