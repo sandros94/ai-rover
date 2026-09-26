@@ -62,7 +62,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Fog that hides on both views; relief with contours; full-viewport HUD layout with floating panels; 3D default.
 - JPL URDF hero rover.
 - Multi-segment replay: done.
-- Inspectable map objects: hover cards and focus for checkpoints, ghosts and submissions on both views; low-poly ghosts with a full model only while focused; recentre returns to the rover.
+- Inspectable map objects: done on the live page; the replay page is not inspectable yet.
 
 ## Later — Biomes
 
