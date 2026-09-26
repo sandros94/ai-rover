@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { useRequestFetch, useState } from '#imports'
+import { useRequestFetch, useRequestHeaders, useState } from '#imports'
 import type { UserSession } from '../../types'
 
 /**
@@ -9,13 +9,15 @@ import type { UserSession } from '../../types'
 export function useUserSession() {
   const session = useState<UserSession>('jev-user-session', () => ({}))
   const request = useRequestFetch()
+  // During SSR the request fetch does not carry the visitor's cookies on its own.
+  const cookie = useRequestHeaders(['cookie'])
   return {
     loggedIn: computed(() => Boolean(session.value.user)),
     user: computed(() => session.value.user ?? null),
     session,
     async fetch() {
       session.value = await request<UserSession>('/api/_auth/session', {
-        headers: { accept: 'application/json' },
+        headers: { accept: 'application/json', ...cookie },
         retry: false,
       }).catch(() => ({}))
     },
