@@ -56,6 +56,11 @@ Current, settled design decisions with their reasons. This file describes the pr
 - **Segment length is 50–250 m** (about 20 minutes to 1.5 hours of driving), destination snapped to the rover's pathable component. Tunable.
 - **Route-choice experiment is offline.** A script over recorded terrain fixtures has code generate 3–8 routes and Jev pick one, compared against the planner's own cost ranking; the result decides whether route selection ships.
 
+## Client
+
+- **The browser reads through one data layer.** Composables fetch stop manifests, chunks (progressively: pick ring and viewport first), revealed masks and segment slices (gated by release time), decode the binary formats, run the shared interpolation and keep a playback clock synced to wall-clock; every visual reads from it, and it is tested on recorded fixtures without a browser.
+- **3D is the goal, the stop disk is the first step.** The full free-roam streaming world is the destination; the first implementation renders the current stop disk with chunk LOD, the rover playing keyframes, a follow camera, trail and ghosts, and confirms the project working locally in a production-like posture.
+
 ## Dashboard and instruments
 
 - **Every metric gets its own instrument, built in isolation.** Each reading the record exposes (attitude and suspension angles, speed and odometer, mission clock, slip, reveals, planner telemetry, round countdown, per-user tallies) is developed as a standalone component with its own tailored graphic: an animated side and rear view of the rocker-bogie showing the live rocker, bogie, pitch and roll rather than a dial; charts for series. The complete dashboard assembles them last.
@@ -67,7 +72,8 @@ Current, settled design decisions with their reasons. This file describes the pr
 - **Terrain code is shared, pure TypeScript.** Height function, masks, planner and viewshed live under `shared/utils/terrain/` (the folder Nuxt auto-imports) with no Node or browser API, so the server computes disks with exactly the code the browser's preview planner runs over fetched chunks.
 - **Chunks are binary and deflated.** Each chunk is one blob: a small fixed header, `Float32` heights, `Uint8` masks, deflated at write time with the web-standard `CompressionStream` and inflated natively in the browser. No parse cost, compact storage.
 - **The browser loads progressively.** The chunks under the pick ring and the viewport come first so the page shows ground immediately; the rest of the disk and any replay data load lazily, since a visitor checking in mid-segment may never replay it.
-- **Dev-only code is tagged.** Throwaway routes, pages and fixtures carry a `TODO(dev-only)` comment so they can be found and removed in one search.
+- **Development-only code lives in one local module.** Routes, pages, playground and fixtures that exist only for development are registered by the `dev` module after its `nuxt.options.dev` check, so no production or test build bundles them; nothing dev-only sits under `server/` or `app/pages/`. Files still carry a `TODO(dev-only)` comment when they are throwaway rather than permanent tooling.
+- **Instruments are built in an in-house playground.** The dev module serves one page per instrument and per scene, fed by fixture data from a real drive record with a time scrubber, following the page-per-component idea of component playgrounds; Compodium is tried but not relied on under Nuxt 5 and TypeScript 7.
 - **Scale parameters are world configuration, not constants.** Chunk size (64 m), cell size (1 m), mast height (2 m), slope limit (16°) and crater statistics are fields of the world definition, so they can be tuned without touching the algorithms.
 
 ## Withdrawn
