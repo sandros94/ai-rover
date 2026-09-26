@@ -4,10 +4,10 @@ import type { StopDisk } from '../terrain/disk'
 import { completeStopDisk, snapToPathable } from '../terrain/disk'
 import type { StopManifest } from '../terrain/manifest'
 import type { MapPoint, MissionRules, SubmissionRefusal } from '../mission'
+import { estimatedDriveMinutes } from '../drive/estimate'
 import { planGoal } from '../mission/plan-goal'
 import type { NavMetrics } from '../nav/plan'
 import { traceSegment } from '../nav/trace'
-import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
 import type { DiskTerrain } from './terrain-sampler'
 
 /** What a preview can refuse: everything but the refusals only the server gives. Closed set. */
@@ -35,7 +35,7 @@ export type PreviewResult =
        */
       segmentSlopes: (number | null)[]
       metrics: NavMetrics
-      /** Path length at the effective drive speed, whole minutes; 0 when not reached. */
+      /** `estimatedDriveMinutes` of the plan; 0 when not reached. */
       estimatedMinutes: number
     }
 
@@ -80,14 +80,14 @@ export function previewPlan(
   const planned = planGoal(disk, { revealed, start: anchor, goal, deaths, rules, slopeLimitDeg })
   if (!planned.ok) return { ok: false, reason: planned.reason, goal }
   const { plan } = planned
-  const { reached, pathLengthM } = plan.metrics
+  const { reached } = plan.metrics
   return {
     ok: true,
     goal,
     polyline: reached ? plan.polyline : [],
     segmentSlopes: reached ? segmentSlopes(disk, revealed, plan.route.waypoints) : [],
     metrics: plan.metrics,
-    estimatedMinutes: reached ? Math.round(pathLengthM / AUTONAV_EFFECTIVE_MPS / 60) : 0,
+    estimatedMinutes: estimatedDriveMinutes(plan),
   }
 }
 

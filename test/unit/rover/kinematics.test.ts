@@ -184,13 +184,13 @@ describe('poseOnTerrain over a step under the left rear wheel', () => {
   })
 
   it('turns the left bogie negative when its rear wheel climbs', () => {
-    // The wider middle track lets body roll lift ML more than RL, a 1.2 mrad departure from ACE.
+    // The wider middle track lets body roll lift ML more than RL, a 1.5 mrad departure from ACE.
     expect(pose.bogie.left).toBeLessThan(0)
     expect(Math.abs(pose.bogie.left - handBogieLeft(G))).toBeLessThan(2e-3)
   })
 
   it('leaves the right bogie nearly level and turns the differential', () => {
-    expect(Math.abs(pose.bogie.right)).toBeLessThan(0.02 * Math.abs(pose.bogie.left))
+    expect(Math.abs(pose.bogie.right)).toBeLessThan(0.025 * Math.abs(pose.bogie.left))
     expect(Math.abs(pose.differentialRad)).toBeGreaterThan(1e-3)
     expect(pose.rocker.right).toBe(-pose.rocker.left)
   })

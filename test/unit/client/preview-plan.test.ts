@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionRules } from '#shared/utils/mission'
+import { estimatedDriveMinutes } from '#shared/utils/drive'
 import { planSegment } from '#shared/utils/nav'
 import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
 import type { StopDisk } from '#shared/utils/terrain'
@@ -76,7 +77,8 @@ describe('previewPlan on the recorded journey', () => {
     expect(JSON.stringify(result.polyline)).toBe(JSON.stringify(server.polyline))
     expect({ ...result.metrics, computeMs: 0 }).toEqual({ ...server.metrics, computeMs: 0 })
     expect(result.metrics.reached).toBe(true)
-    expect(result.estimatedMinutes).toBe(
+    expect(result.estimatedMinutes).toBe(estimatedDriveMinutes(server))
+    expect(result.estimatedMinutes).toBeGreaterThan(
       Math.round(server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
     )
   })

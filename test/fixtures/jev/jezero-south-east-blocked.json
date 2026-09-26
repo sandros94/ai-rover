@@ -40,7 +40,7 @@
       },
       "time_confidence": {
         "type": "score",
-        "instructions": "How closely will the actual drive time match the estimated drive minutes? Slopes, loose ground, turns in place and unseen ground add pauses, slowdowns and replans.",
+        "instructions": "How closely will the actual drive time match the estimated drive minutes? The estimate counts imaging stops and turns in place; slopes and loose ground slow the rover, and blocking ground found on unseen stretches adds assessments and replans.",
         "criteria": [
           "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
           "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
@@ -89,8 +89,8 @@
       },
       "time_confidence": {
         "type": "score",
-        "score": 0.09,
-        "confidence": 0.93,
+        "score": 0.14,
+        "confidence": 0.89,
         "legend": {
           "0": "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
           "1": "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
@@ -99,11 +99,11 @@
           "4": "The route is fully seen, firm, gentle and nearly straight with few turns; the drive will take almost exactly the estimate."
         },
         "probabilities": {
-          "0": 0.98,
+          "0": 0.96,
           "1": 0,
           "2": 0,
-          "3": 0.01,
-          "4": 0.01
+          "3": 0.02,
+          "4": 0.02
         }
       },
       "risk": {
@@ -125,7 +125,7 @@
       }
     },
     "usage": {
-      "input_tokens": 1096,
+      "input_tokens": 1104,
       "output_tokens": 67
     }
   }

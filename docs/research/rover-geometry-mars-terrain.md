@@ -32,8 +32,8 @@ Method: parsed glTF nodes; clustered wheel-mesh vertices per side / longitudinal
 - Longitudinal (rover frame origin at middle axle): front **+1.185 m**, middle 0, rear **−1.075 m**; wheelbase front→rear **2.26 m**. Identical (±3 mm) in the Curiosity model ⇒ same chassis.
 - Track (centre-to-centre): front/rear **2.13 m**, middle **2.37 m** (middle wheels protrude; outer edge = 2.705 m overall width). Lateral centres taken as outer-edge − half wheel width; ±2 cm.
 - Wheel radius 0.263 m; wheel width (Perseverance model) 0.335 m; Curiosity official 0.40 m [S5].
-- Pivots (model-eyeballed from suspension mesh; ±5 cm, UNVERIFIED): rocker/differential pivot ≈ (z +0.25, y 0.92); bogie pivot ≈ (z −0.42, y 0.85), i.e. 0.33 m behind middle axle.
-- Link lengths implied (DERIVED): rocker: pivot→front wheel 1.07 m, pivot→bogie 0.67 m; bogie: pivot→middle 0.67 m, pivot→rear 0.95 m. Nominal link angles vs. horizontal: rocker-front 38° down-forward, rocker-bogie 6° down-aft, bogie-middle 61° down-forward, bogie-rear 38° down-aft.
+- Pivots (exact, from the JPL `m2020-urdf-models` URDF at commit c422fc6, converted to x forward / z up): rocker (differential) pivot at x +0.304, z 0.893; bogie pivot at x −0.450, z 0.663, i.e. 0.45 m behind the middle axle. The earlier mesh-eyeballed estimates (rocker x +0.34 / z 0.92, bogie x −0.33 / z 0.85) were 12–19 cm off.
+- Link lengths that follow: rocker pivot→front wheel 1.083 m, rocker pivot→bogie pivot 0.788 m; bogie pivot→middle wheel 0.602 m, bogie pivot→rear wheel 0.742 m. Flat-ground link angles: rocker 35.6°, bogie 41.6°. URDF wheel mounts sit at y ±1.0625 (front/rear) and ±1.1845 (middle), 2.5 mm from the values used here.
 - Body (model): belly bottom y ≈ 0.67 m, body z-extent −1.18…+0.90 m, width 1.55 m.
 
 ### 1.3 Rocker-bogie kinematics — ACE, Otsu et al. arXiv 1808.00031 [S13]

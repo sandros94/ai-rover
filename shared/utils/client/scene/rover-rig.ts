@@ -82,9 +82,9 @@ export interface RigTransforms {
 
 /**
  * Poses the JPL model from a keyframe: the body placement as recorded, and each joint turned by
- * the recorded suspension angle or wheel spin about its URDF axis. The model's pivots are the
- * URDF's, not the solver geometry's, so its hubs follow the solver's wheel centres closely but
- * not exactly (a few centimetres on steps).
+ * the recorded suspension angle or wheel spin about its URDF axis. The solver's default geometry
+ * shares the model's pivots, so the hubs sit on the solver's wheel centres to within the 2.5 mm
+ * the wheel mounts differ by.
  */
 export function rigTransforms(frame: ArrayLike<number>): RigTransforms {
   const attitude = frameAttitude(frame)

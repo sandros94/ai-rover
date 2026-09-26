@@ -1,5 +1,6 @@
 export type { DriveErrorCode } from './errors'
 export { DriveError } from './errors'
+export { estimatedDriveMinutes } from './estimate'
 export type { KeyframeBlock } from './keyframes'
 export {
   decodeKeyframes,

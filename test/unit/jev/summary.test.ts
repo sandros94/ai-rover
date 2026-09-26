@@ -102,7 +102,8 @@ describe('summarizeSubmission', () => {
       unseen_label: 'mostly seen',
       turns_in_place: 0,
       loose_ground_label: 'firm',
-      estimated_drive_minutes: Math.round(120 / 0.033 / 60),
+      // 120 m at 0.033 m/s and four 30 s imaging stops, no turns: 3756.4 s.
+      estimated_drive_minutes: 63,
     })
     expect(summary.failure_reason).toBeUndefined()
     expect(summary.rover.limits).toContain('16 degrees')

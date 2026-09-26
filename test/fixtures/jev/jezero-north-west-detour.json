@@ -23,7 +23,7 @@
         "unseen_label": "mostly seen",
         "turns_in_place": 2,
         "loose_ground_label": "some loose ground",
-        "estimated_drive_minutes": 60
+        "estimated_drive_minutes": 62
       }
     },
     "questions": {
@@ -48,7 +48,7 @@
       },
       "time_confidence": {
         "type": "score",
-        "instructions": "How closely will the actual drive time match the estimated drive minutes? Slopes, loose ground, turns in place and unseen ground add pauses, slowdowns and replans.",
+        "instructions": "How closely will the actual drive time match the estimated drive minutes? The estimate counts imaging stops and turns in place; slopes and loose ground slow the rover, and blocking ground found on unseen stretches adds assessments and replans.",
         "criteria": [
           "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
           "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
@@ -74,12 +74,12 @@
     "answers": {
       "feasible": {
         "type": "noul",
-        "noul": 0.44
+        "noul": 0.43
       },
       "distance_confidence": {
         "type": "score",
-        "score": 1.92,
-        "confidence": 0.22,
+        "score": 1.89,
+        "confidence": 0.25,
         "legend": {
           "0": "No route was found, or the route crosses mostly unseen ground with a long detour, so replans will likely change the driven distance a lot.",
           "1": "The route crosses mostly unseen ground, or partly unseen ground with a long detour; the driven distance will likely differ noticeably from the plan.",
@@ -89,16 +89,16 @@
         },
         "probabilities": {
           "0": 0,
-          "1": 0.47,
-          "2": 0.13,
-          "3": 0.4,
+          "1": 0.48,
+          "2": 0.14,
+          "3": 0.38,
           "4": 0
         }
       },
       "time_confidence": {
         "type": "score",
-        "score": 2.46,
-        "confidence": 0.61,
+        "score": 2.55,
+        "confidence": 0.62,
         "legend": {
           "0": "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
           "1": "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
@@ -109,14 +109,14 @@
         "probabilities": {
           "0": 0,
           "1": 0,
-          "2": 0.54,
-          "3": 0.46,
+          "2": 0.45,
+          "3": 0.55,
           "4": 0
         }
       },
       "risk": {
         "type": "score",
-        "score": 1.02,
+        "score": 1.03,
         "confidence": 0.96,
         "legend": {
           "0": "Seen, firm and gentle ground all the way; nothing is likely to stop the rover.",
@@ -133,7 +133,7 @@
       }
     },
     "usage": {
-      "input_tokens": 1167,
+      "input_tokens": 1175,
       "output_tokens": 67
     }
   }

@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
+import { estimatedDriveMinutes } from '../drive/estimate'
 import type { StopDisk } from '../terrain/disk'
 import type { World } from '../terrain/world'
 import { NavError } from './errors'
@@ -54,7 +54,7 @@ const ReachedRouteSchema = v.strictObject({
   turns_in_place: wholeMetres,
   /** Over the seen part of the path. */
   loose_ground_label: v.picklist(LOOSE_GROUND_LABELS),
-  /** Path length at the AutoNav rate; stops and slope slowdown come on top. */
+  /** Path at the AutoNav rate plus imaging stops and turns in place; slope slowdown comes on top. */
   estimated_drive_minutes: wholeMetres,
 })
 
@@ -175,7 +175,7 @@ export function summarizeSubmission(
       unseen_label: unseenLabel(metrics.unrevealedFraction),
       turns_in_place: metrics.turnCount,
       loose_ground_label: looseGroundLabel(meanLooseness),
-      estimated_drive_minutes: Math.round(metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
+      estimated_drive_minutes: estimatedDriveMinutes(plan),
     },
   }
 }

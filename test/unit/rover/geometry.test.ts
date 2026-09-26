@@ -14,16 +14,21 @@ describe('defineRoverGeometry', () => {
     expect(g).toEqual(DEFAULT_ROVER_GEOMETRY)
   })
 
-  it('derives link lengths and flat link angles matching the model estimates', () => {
+  it('takes the suspension pivots from the JPL URDF', () => {
+    expect(DEFAULT_ROVER_GEOMETRY.rockerPivot).toEqual({ x: 0.304, z: 0.893 })
+    expect(DEFAULT_ROVER_GEOMETRY.bogiePivot).toEqual({ x: -0.45, z: 0.663 })
+  })
+
+  it('derives link lengths and flat link angles from the pivots', () => {
     const { links, rockerFlatRad, bogieFlatRad } = DEFAULT_ROVER_GEOMETRY
-    // Model-derived: rocker 1.07 / 0.67 m, bogie 0.67 / 0.95 m; rocker-front 38°, bogie-middle 61°.
-    expect(links.rockerFront).toBeCloseTo(1.07, 2)
-    expect(links.rockerBogie).toBeCloseTo(0.67, 2)
-    expect(links.bogieMiddle).toBeCloseTo(0.67, 2)
-    expect(links.bogieRear).toBeCloseTo(0.95, 2)
+    expect(links.rockerFront).toBeCloseTo(1.083, 3)
+    expect(links.rockerBogie).toBeCloseTo(0.788, 3)
+    expect(links.bogieMiddle).toBeCloseTo(0.602, 3)
+    expect(links.bogieRear).toBeCloseTo(0.742, 3)
+    expect(links.frontToBogie).toBeCloseTo(1.683, 3)
     expect(links.middleToRear).toBeCloseTo(1.075, 12)
-    expect(rockerFlatRad / DEG).toBeCloseTo(38, 0)
-    expect(bogieFlatRad / DEG).toBeCloseTo(61, 0)
+    expect(rockerFlatRad / DEG).toBeCloseTo(35.57, 2)
+    expect(bogieFlatRad / DEG).toBeCloseTo(41.63, 2)
   })
 
   it('is frozen', () => {

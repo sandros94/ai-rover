@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { Point3, RoverPose } from '#shared/utils/rover'
-import { poseOnTerrain } from '#shared/utils/rover'
+import { DEFAULT_ROVER_GEOMETRY, poseOnTerrain } from '#shared/utils/rover'
 import type { Quat } from '#shared/utils/client/scene/rover-parts'
 import { flatFrame } from '#shared/utils/client/scene/rover-parts'
 import type { RigNode } from '#shared/utils/client/scene/rover-rig'
@@ -192,23 +192,32 @@ for (const file of ['rover.glb', 'rover-low.glb']) {
       expect(nodes.get('differential')!.parent).toBe('chassis')
     })
 
-    it('puts the wheel hubs within 5 cm of the solver on flat ground', () => {
+    it('pivots the rockers and bogies where the solver geometry does', () => {
+      const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+      const rocker = worldOrigin(nodes, rest, 'left_rocker')
+      const bogie = worldOrigin(nodes, rest, 'left_bogie')
+      const { rockerPivot, bogiePivot } = DEFAULT_ROVER_GEOMETRY
+      expect(Math.hypot(rocker.x - rockerPivot.x, rocker.z - rockerPivot.z)).toBeLessThan(5e-4)
+      expect(Math.hypot(bogie.x - bogiePivot.x, bogie.z - bogiePivot.z)).toBeLessThan(5e-4)
+    })
+
+    it('puts the wheel hubs within 5 mm of the solver on flat ground', () => {
       const pose = poseOnTerrain(() => 0, { x: 7, y: -3, headingRad: 0.6 })
       const rig = rigTransforms(frameOf(pose))
       const off = HUBS.filter(
-        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.05,
+        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
       )
       expect(off).toEqual([])
     })
 
-    it('follows the solver within 10 cm with the left rear wheel up a step', () => {
+    it('follows the solver within 5 mm with the left rear wheel up a step', () => {
       // A 20 cm ledge under the left rear wheel only.
       const ground = (x: number, y: number) => (x < -0.8 && y > 0.6 ? 0.2 : 0)
       const pose = poseOnTerrain(ground, { x: 0, y: 0, headingRad: 0 })
       expect(pose.bogie.left).toBeLessThan(-5 * DEG)
       const rig = rigTransforms(frameOf(pose))
       const off = HUBS.filter(
-        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.1,
+        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
       )
       expect(off).toEqual([])
       // The rig's signs matter: the same angles negated put the rear hub far off.

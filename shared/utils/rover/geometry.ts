@@ -76,9 +76,11 @@ export interface ResolvedRoverGeometry {
 }
 
 /**
- * Wheel centres and pivots from NASA's Perseverance model; pivots are eyeballed from the
- * suspension mesh (±5 cm). The belly footprint is the model's body extent at the 0.60 m
- * clearance the landing-site rock criterion implies.
+ * Suspension pivots from NASA/JPL's Mars 2020 URDF
+ * (github.com/nasa-jpl/m2020-urdf-models@c422fc6d96f2684521fb64049448d611e670f140, the source of
+ * `public/models/rover/`) with every joint at zero, to the millimetre. Wheel centres are from
+ * NASA's Perseverance model and agree with the URDF's within 2.5 mm. The belly footprint is the
+ * model's body extent at the 0.60 m clearance the landing-site rock criterion implies.
  */
 const DEFAULTS = {
   wheelRadius: 0.263,
@@ -86,8 +88,8 @@ const DEFAULTS = {
   frontWheel: { x: 1.185, y: 1.065 },
   middleWheel: { x: 0, y: 1.185 },
   rearWheel: { x: -1.075, y: 1.065 },
-  rockerPivot: { x: 0.34, z: 0.92 },
-  bogiePivot: { x: -0.33, z: 0.85 },
+  rockerPivot: { x: 0.304, z: 0.893 },
+  bogiePivot: { x: -0.45, z: 0.663 },
   bellyClearance: 0.6,
   bellyLength: 2.08,
   bellyWidth: 1.55,
