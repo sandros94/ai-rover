@@ -21,8 +21,13 @@ export default defineNuxtConfig({
   runtimeConfig: {
     /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
     typesafeToken: '',
-    /** JSON of an `oct` JWK for A256GCM sealing the session cookies, from `NUXT_SESSION_KEY`. */
+    /**
+     * Seals the session cookies, from `NUXT_SESSION_KEY`: the JSON of an `oct` JWK for A256GCM,
+     * or a random secret of at least 32 characters the key is derived from.
+     */
     sessionKey: '',
+    /** Unlocks `/admin` and `POST /api/admin/seed`, from `NUXT_ADMIN_TOKEN`; empty disables them. */
+    adminToken: '',
     oauth: {
       /** Comma list of origins sign-in may redirect to, from `NUXT_OAUTH_ORIGINS`. */
       origins: '',

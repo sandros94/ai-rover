@@ -6,6 +6,7 @@ import {
   SESSION_MAX_AGE_SECONDS,
 } from '~~/modules/auth/runtime/server/lib/session'
 import { createSessionRoutes } from '~~/modules/auth/runtime/server/lib/routes'
+import { sessionKey } from '~~/modules/auth/runtime/server/lib/key'
 import { cookieHeader, KEY, openCookie, ORIGIN, setCookies } from './helpers'
 
 const USER = {
@@ -160,10 +161,47 @@ describe('session key', () => {
   })
 
   it('refuses a key that is not a 256-bit oct JWK', () => {
-    expect(() => createUserSessions({ key: 'hunter2', dev: false })).toThrow(/NUXT_SESSION_KEY/)
     expect(() =>
       createUserSessions({ key: JSON.stringify({ kty: 'oct', k: 'c2hvcnQ' }), dev: false }),
     ).toThrow(/NUXT_SESSION_KEY/)
+    expect(() => createUserSessions({ key: '{"kty":"oct","k":', dev: false })).toThrow(/JWK/)
+  })
+
+  it('uses a JWK as given', async () => {
+    const jwk = JSON.parse(KEY)
+    expect(await sessionKey(KEY, false)()).toEqual({ kty: 'oct', k: jwk.k, alg: 'A256GCM' })
+  })
+
+  it('derives a stable 256-bit key from a secret of at least 32 characters', async () => {
+    const secret = 'x7Qp2mVr9LkT4nWc8ZsB3hJd6FgY1aEu5RoK'.padEnd(40, 'q')
+    const first = sessionKey(secret, false)
+    const a = await first()
+    expect(a).toMatchObject({ kty: 'oct', alg: 'A256GCM' })
+    expect(a.k).toMatch(/^[\w-]{43}$/)
+    expect(await first()).toBe(a)
+    expect(await sessionKey(secret, false)()).toEqual(a)
+    const other = await sessionKey(`${secret.slice(0, -1)}r`, false)()
+    expect(other.k).not.toBe(a.k)
+  })
+
+  it('seals and opens sessions with a derived key across restarts', async () => {
+    const secret = 'Tg4hW9qLz2Nc7Vb1Xm5Rk8Pd3Js6Fy0Ae'
+    const a = appOver(createUserSessions({ key: secret, dev: false }))
+    const b = appOver(createUserSessions({ key: secret, dev: false }))
+    const login = await a.request(`${ORIGIN}/login`, { method: 'POST' })
+    const me = await b.request(`${ORIGIN}/me`, { headers: { cookie: cookieHeader(login) } })
+    expect((await me.json()).user).toEqual(USER)
+  })
+
+  it('refuses a secret shorter than 32 characters, naming both accepted forms', () => {
+    for (const key of ['hunter2', 'a'.repeat(20), 'b'.repeat(31)]) {
+      expect(() => createUserSessions({ key, dev: false })).toThrow(
+        /NUXT_SESSION_KEY.*JWK.*at least 32 characters/,
+      )
+    }
+    expect(() =>
+      createUserSessions({ key: 'jev-rover development session key', dev: false }),
+    ).toThrow(/public development seed/)
   })
 
   it('derives a stable dev key, warns once, and drops the __Host- prefix and Secure in dev', async () => {

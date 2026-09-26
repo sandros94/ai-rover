@@ -6,7 +6,7 @@ export const SegmentParams = SubmissionParams
 /** Validation failures as a 400 naming each offending field. */
 export const BAD_INPUT = {
   onError: (result: {
-    issues: readonly { message: string; path?: readonly (PropertyKey | { key: PropertyKey })[] }[]
+    issues: readonly { message: string; path?: readonly (PropertyKey | { key: unknown })[] }[]
   }) => ({
     status: 400,
     message: result.issues
