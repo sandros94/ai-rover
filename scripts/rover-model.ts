@@ -1,9 +1,9 @@
 /**
- * Builds the articulated rover models under `public/models/rover/` from NASA/JPL's
- * `m2020-urdf-models` (pinned commit): the chassis with its mast, the rockers, bogies,
- * differential, steering links and wheels, one node per URDF joint, decimated, with the 1k atlas
- * as WebP and meshopt-compressed geometry. `rover.glb` is the hero model, `rover-low.glb` the
- * phone model. Deterministic for a given source commit; re-running overwrites both files.
+ * Builds the articulated rover model `public/models/rover/rover.glb` from NASA/JPL's
+ * `m2020-urdf-models` (pinned commit): the chassis, the remote sensing mast and its head, the
+ * rockers, bogies, differential, steering links and wheels, one node per URDF joint, at full
+ * resolution (vertices welded only where bitwise identical), with the 2k atlas as WebP and
+ * meshopt-compressed geometry. Deterministic for a given source commit; re-running overwrites it.
  *
  * Run from the repository root (sources are downloaded to the directory given, or to a temporary
  * directory, never into the repository):
@@ -14,6 +14,10 @@
  * between the middle wheels; the app's body frame is x forward, y left, z up with the same origin,
  * so every URDF point p becomes C·p with C = diag(1, −1, −1), a half turn about x. Node names and
  * joint axes (in the app frame) are recorded in each joint node's `extras`.
+ *
+ * Pose. Every joint sits at zero except the mast's, which are baked deployed (`deployedMast`):
+ * at zero the head hangs face down and turned aft. The arm is left out: the URDF carries its
+ * joint limits but not the pose JPL stows it in for driving.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -22,23 +26,32 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Material, Node as GltfNode } from '@gltf-transform/core'
 import { Document, NodeIO } from '@gltf-transform/core'
-import { MeshoptSimplifier } from 'meshoptimizer'
 
 const REPO = 'nasa-jpl/m2020-urdf-models'
 const COMMIT = 'c422fc6d96f2684521fb64049448d611e670f140'
 const RAW = `https://raw.githubusercontent.com/${REPO}/${COMMIT}`
 const OUT_DIR = fileURLToPath(new URL('../public/models/rover/', import.meta.url))
 
-/** A kept URDF link: the app node it becomes, and further links whose meshes ride on it. */
+const OUT_FILE = 'rover.glb'
+/** The source atlas: `1k`, `2k`, `4k` or `8k`, re-encoded as WebP at its own size. */
+const ATLAS = '2k'
+/**
+ * Meshopt quantization bits. Positions are quantized over each mesh's bounds: 14 bits over the
+ * 3.0 m chassis is a 0.18 mm step, 0.09 mm error at most. Texture coordinates get 14 bits, an
+ * eighth of a texel on the 2k atlas.
+ */
+const QUANTIZE = { position: 14, texcoord: 14 }
+
+/** A kept URDF link and the app node it becomes. */
 interface KeptLink {
   link: string
   node: string
-  /** Rigid URDF links merged into this node (the mast rides on the chassis). */
-  riders?: string[]
 }
 
 const KEPT: KeptLink[] = [
-  { link: 'Body_Chassis', node: 'chassis', riders: ['Body_RSM_AZ', 'Body_RSM_EL'] },
+  { link: 'Body_Chassis', node: 'chassis' },
+  { link: 'Body_RSM_AZ', node: 'mast_azimuth' },
+  { link: 'Body_RSM_EL', node: 'mast_elevation' },
   { link: 'Body_Differential', node: 'differential' },
   { link: 'Body_RockerLeft', node: 'left_rocker' },
   { link: 'Body_RockerRight', node: 'right_rocker' },
@@ -55,64 +68,6 @@ const KEPT: KeptLink[] = [
   { link: 'Body_WheelLeftRear', node: 'wheel_lr' },
   { link: 'Body_WheelRightRear', node: 'wheel_rr' },
 ]
-
-interface Variant {
-  file: string
-  /** Atlas edge in pixels. */
-  texture: number
-  /** Target triangles per source mesh, by mesh file stem. */
-  triangles: (stem: string) => number
-  /** Simplifier error ceiling, as a fraction of each mesh's extent. */
-  error: number
-}
-
-/** Budgets: ~30k triangles for the hero, ~8k for phones; wheels and links keep their outline. */
-const VARIANTS: Variant[] = [
-  {
-    file: 'rover.glb',
-    texture: 1024,
-    triangles: (stem) => BUDGET_HERO[kindOf(stem)],
-    error: 0.05,
-  },
-  {
-    file: 'rover-low.glb',
-    texture: 512,
-    triangles: (stem) => BUDGET_LOW[kindOf(stem)],
-    error: 0.08,
-  },
-]
-
-type MeshKind = 'chassis' | 'mast' | 'head' | 'steerFront' | 'steerRear' | 'wheel' | 'link' | 'diff'
-const BUDGET_HERO: Record<MeshKind, number> = {
-  chassis: 14_000,
-  mast: 500,
-  head: 2_000,
-  steerFront: 1_000,
-  steerRear: 700,
-  wheel: 900,
-  link: 1_100,
-  diff: 400,
-}
-const BUDGET_LOW: Record<MeshKind, number> = {
-  chassis: 2_900,
-  mast: 150,
-  head: 500,
-  steerFront: 250,
-  steerRear: 180,
-  wheel: 300,
-  link: 300,
-  diff: 100,
-}
-
-function kindOf(stem: string): MeshKind {
-  if (stem === 'CHASSIS') return 'chassis'
-  if (stem === 'RSM') return 'mast'
-  if (stem === 'RSM_Head') return 'head'
-  if (stem === 'CenterDifferential') return 'diff'
-  if (stem.startsWith('Wheel_')) return 'wheel'
-  if (stem.startsWith('Steer_')) return stem.endsWith('Front') ? 'steerFront' : 'steerRear'
-  return 'link'
-}
 
 // ---------------------------------------------------------------------------------------------
 // URDF
@@ -132,6 +87,8 @@ interface UrdfJoint {
   child: string
   origin: Rigid
   axis: Vec3
+  /** Lower and upper joint limits, radians, for revolute joints. */
+  limit?: [number, number]
 }
 
 interface UrdfLink {
@@ -158,6 +115,7 @@ function parseUrdf(xml: string): { links: Map<string, UrdfLink>; joints: UrdfJoi
   for (const match of text.matchAll(/<joint name="([^"]+)" type="([^"]+)">([\s\S]*?)<\/joint>/g)) {
     const [, name, type, body] = match
     const axis = /<axis xyz="([^"]+)"/.exec(body!)?.[1]
+    const limit = /<limit lower="([^"]+)" upper="([^"]+)"/.exec(body!)
     joints.push({
       name: name!,
       type: type!,
@@ -165,6 +123,7 @@ function parseUrdf(xml: string): { links: Map<string, UrdfLink>; joints: UrdfJoi
       child: /<child link="([^"]+)"/.exec(body!)![1]!,
       origin: originOf(body!),
       axis: axis ? vec(axis) : [0, 0, 0],
+      ...(limit && { limit: [Number(limit[1]), Number(limit[2])] as [number, number] }),
     })
   }
   return { links, joints }
@@ -239,10 +198,30 @@ const transformPoint = (a: Rigid, p: Vec3): Vec3 => add(apply(a.r, p), a.t)
 const C: Mat3 = [1, 0, 0, 0, -1, 0, 0, 0, -1]
 const toApp = (a: Rigid): Rigid => ({ r: mulMat(mulMat(C, a.r), C), t: apply(C, a.t) })
 
-/** Each link's pose in the rover frame with every joint at zero. */
-function linkPoses(joints: UrdfJoint[]): Map<string, { pose: Rigid; joint?: UrdfJoint }> {
+/** Rotation by `angle` radians about the unit `axis` (Rodrigues). */
+function aboutAxis([x, y, z]: Vec3, angle: number): Mat3 {
+  const c = Math.cos(angle)
+  const s = Math.sin(angle)
+  const k = 1 - c
+  return [
+    c + x * x * k,
+    x * y * k - z * s,
+    x * z * k + y * s,
+    y * x * k + z * s,
+    c + y * y * k,
+    y * z * k - x * s,
+    z * x * k - y * s,
+    z * y * k + x * s,
+    c + z * z * k,
+  ]
+}
+
+type LinkPoses = Map<string, { pose: Rigid; joint?: UrdfJoint }>
+
+/** Each link's pose in the rover frame, joints at `values` (radians, by joint name) or zero. */
+function linkPoses(joints: UrdfJoint[], values: Map<string, number>): LinkPoses {
   const byChild = new Map(joints.map((j) => [j.child, j]))
-  const poses = new Map<string, { pose: Rigid; joint?: UrdfJoint }>()
+  const poses: LinkPoses = new Map()
   const resolve = (link: string): Rigid => {
     const known = poses.get(link)
     if (known) return known.pose
@@ -253,12 +232,71 @@ function linkPoses(joints: UrdfJoint[]): Map<string, { pose: Rigid; joint?: Urdf
       poses.set(link, { pose })
       return pose
     }
-    const pose = compose(resolve(joint.parent), joint.origin)
+    const pose = compose(resolve(joint.parent), jointTransform(joint, values.get(joint.name) ?? 0))
     poses.set(link, { pose, joint })
     return pose
   }
   for (const joint of joints) resolve(joint.child)
   return poses
+}
+
+/** A joint's child frame in its parent's, the joint turned to `value`. */
+const jointTransform = (joint: UrdfJoint, value: number): Rigid =>
+  value === 0
+    ? joint.origin
+    : { r: mulMat(joint.origin.r, aboutAxis(joint.axis, value)), t: joint.origin.t }
+
+const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+]
+const scale = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k]
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+
+/**
+ * The value of revolute `joint` that turns `from` (a direction in its child frame) onto `to` (a
+ * direction in its parent frame, perpendicular to the axis), within the joint's limits.
+ */
+function aim(joint: UrdfJoint, from: Vec3, to: Vec3): number {
+  // `to` in the joint's own frame, before it turns; both directions projected off the axis.
+  const target = apply(transpose(joint.origin.r), to)
+  const flat = (v: Vec3): Vec3 => sub(v, scale(joint.axis, dot(joint.axis, v)))
+  const [f, t] = [flat(from), flat(target)]
+  let angle = Math.atan2(dot(joint.axis, cross(f, t)), dot(f, t))
+  const [lower, upper] = joint.limit ?? [-Infinity, Infinity]
+  while (angle < lower) angle += 2 * Math.PI
+  while (angle > upper) angle -= 2 * Math.PI
+  if (angle < lower) throw new Error(`rover-model: ${joint.name} cannot reach the wanted pose.`)
+  return angle
+}
+
+/**
+ * The remote sensing mast deployed, as it drives on Mars: the mast is upright in the chassis
+ * mesh; the head's elevation joint levels the Navcam boresight (the left Navcam frame towards its
+ * field-of-view frame) and the azimuth joint turns it forward. At zero both joints leave the head
+ * facing the deck and turned aft (the azimuth joint's origin carries a 179° yaw).
+ */
+function deployedMast(joints: UrdfJoint[]): Map<string, number> {
+  const byName = (name: string) => {
+    const joint = joints.find((j) => j.name === name)
+    if (!joint) throw new Error(`rover-model: joint ${name} is not in the URDF.`)
+    return joint
+  }
+  const azimuth = byName('RSM_AZ_ENC')
+  const elevation = byName('RSM_EL_ENC')
+  const camera = byName('Joint_for_Frame_NCL').origin.t
+  const boresight = sub(byName('Joint_for_Frame_NCL_FOV').origin.t, camera)
+  const forward: Vec3 = [1, 0, 0]
+  // Level within the azimuth link, whose z axis is the rover's: the boresight onto its +x ...
+  const el = aim(elevation, boresight, forward)
+  // ... and the azimuth link's +x onto the rover's (the chassis is the rover frame).
+  const az = aim(azimuth, forward, forward)
+  return new Map([
+    [azimuth.name, az],
+    [elevation.name, el],
+  ])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -270,8 +308,8 @@ async function ensureSources(dir: string, stems: string[]): Promise<void> {
     ['README.md', 'README.md'],
     ['rover/m2020.urdf', 'm2020.urdf'],
     [
-      'rover/meshes/Textures/M2020_Rover_Texture_1k.jpg',
-      'meshes/Textures/M2020_Rover_Texture_1k.jpg',
+      `rover/meshes/Textures/M2020_Rover_Texture_${ATLAS}.jpg`,
+      `meshes/Textures/M2020_Rover_Texture_${ATLAS}.jpg`,
     ],
     ...stems.flatMap((stem) => [
       [`rover/meshes/${stem}.gltf`, `meshes/${stem}.gltf`],
@@ -287,13 +325,10 @@ async function ensureSources(dir: string, stems: string[]): Promise<void> {
   }
   // The meshes reference `Textures/M2020_Rover_Texture.jpg`; the repository's README says to
   // copy the wanted resolution to that name.
-  const alias = join(dir, 'meshes', 'Textures', 'M2020_Rover_Texture.jpg')
-  if (!existsSync(alias)) {
-    writeFileSync(
-      alias,
-      readFileSync(join(dir, 'meshes', 'Textures', 'M2020_Rover_Texture_1k.jpg')),
-    )
-  }
+  writeFileSync(
+    join(dir, 'meshes', 'Textures', 'M2020_Rover_Texture.jpg'),
+    readFileSync(join(dir, 'meshes', 'Textures', `M2020_Rover_Texture_${ATLAS}.jpg`)),
+  )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -311,76 +346,39 @@ interface MeshData {
   indices: Uint32Array<ArrayBuffer>
 }
 
-/**
- * The link's mesh, welded by the CLI and decimated to about `target` triangles. The JPL meshes are
- * many small parts cut by texture seams, so the simplifier may drop tiny parts (`Prune`) and
- * collapse across seams (`Permissive`), with texture coordinates weighted into the error.
- */
-async function simplified(
-  io: NodeIO,
-  src: string,
-  work: string,
-  stem: string,
-  target: number,
-  error: number,
-): Promise<MeshData> {
-  const welded = join(work, `${stem}-welded.glb`)
-  if (!existsSync(welded)) cli('weld', join(src, 'meshes', `${stem}.gltf`), welded)
-  const doc = await io.read(welded)
+/** The link's mesh at full resolution, its bitwise identical vertices welded by the CLI. */
+async function welded(io: NodeIO, src: string, work: string, stem: string): Promise<MeshData> {
+  const out = join(work, `${stem}-welded.glb`)
+  if (!existsSync(out)) cli('weld', join(src, 'meshes', `${stem}.gltf`), out)
+  const doc = await io.read(out)
   const primitive = doc.getRoot().listMeshes()[0]!.listPrimitives()[0]!
-  const positions = Float32Array.from(primitive.getAttribute('POSITION')!.getArray()!)
-  const uvs = Float32Array.from(primitive.getAttribute('TEXCOORD_0')!.getArray()!)
-  let indices: Uint32Array = Uint32Array.from(primitive.getIndices()!.getArray()!)
-  if (target * 3 < indices.length) {
-    await MeshoptSimplifier.ready
-    ;[indices] = MeshoptSimplifier.simplifyWithAttributes(
-      indices,
-      positions,
-      3,
-      uvs,
-      2,
-      [0.5, 0.5],
-      null,
-      target * 3,
-      error,
-      ['Prune', 'Permissive'],
-    )
-  }
-  return compact(positions, uvs, indices)
-}
-
-/** Drops the vertices no triangle uses, keeping first-use order. */
-function compact(positions: Float32Array, uvs: Float32Array, indices: Uint32Array): MeshData {
-  const remap = new Int32Array(positions.length / 3).fill(-1)
-  const keptPositions: number[] = []
-  const keptUvs: number[] = []
-  const out = new Uint32Array(indices.length)
-  indices.forEach((vertex, k) => {
-    if (remap[vertex] === -1) {
-      remap[vertex] = keptPositions.length / 3
-      keptPositions.push(...positions.subarray(3 * vertex, 3 * vertex + 3))
-      keptUvs.push(...uvs.subarray(2 * vertex, 2 * vertex + 2))
-    }
-    out[k] = remap[vertex]!
-  })
   return {
-    positions: Float32Array.from(keptPositions),
-    uvs: Float32Array.from(keptUvs),
-    indices: out,
+    positions: Float32Array.from(primitive.getAttribute('POSITION')!.getArray()!),
+    uvs: Float32Array.from(primitive.getAttribute('TEXCOORD_0')!.getArray()!),
+    indices: Uint32Array.from(primitive.getIndices()!.getArray()!),
   }
 }
 
-async function build(src: string, work: string, variant: Variant): Promise<{ triangles: number }> {
+interface Built {
+  triangles: number
+  /** Joint values baked into the node transforms, radians, by URDF joint name. */
+  baked: Map<string, number>
+  /** File sizes in bytes: the shipped file, and the same before meshopt compression. */
+  bytes: { meshopt: number; plain: number }
+}
+
+async function build(src: string, work: string): Promise<Built> {
   const io = new NodeIO()
   const urdf = parseUrdf(readFileSync(join(src, 'm2020.urdf'), 'utf8'))
-  const poses = linkPoses(urdf.joints)
+  const baked = deployedMast(urdf.joints)
+  const poses = linkPoses(urdf.joints, baked)
 
   const doc = new Document()
   const buffer = doc.createBuffer()
   const atlas = doc
     .createTexture('atlas')
     .setMimeType('image/jpeg')
-    .setImage(readFileSync(join(src, 'meshes', 'Textures', 'M2020_Rover_Texture_1k.jpg')))
+    .setImage(readFileSync(join(src, 'meshes', 'Textures', `M2020_Rover_Texture_${ATLAS}.jpg`)))
   const material: Material = doc
     .createMaterial('rover')
     .setBaseColorTexture(atlas)
@@ -395,62 +393,55 @@ async function build(src: string, work: string, variant: Variant): Promise<{ tri
     if (!entry) throw new Error(`rover-model: link ${kept.link} is not in the URDF.`)
     const node = doc.createNode(kept.node)
     const joint = entry.joint
-    // Local transform: the joint origin relative to the nearest kept ancestor, in app axes.
+    // Local transform: the joint (at its baked value) relative to the nearest kept ancestor, in
+    // app axes.
     const parentKept = joint ? keptAncestor(joint.parent, poses) : undefined
     const parentPose = parentKept ? poses.get(parentKept.link)!.pose : undefined
     const local = toApp(parentPose ? compose(invert(parentPose), entry.pose) : entry.pose)
     node.setTranslation(round(local.t)).setRotation(quatOf(local.r))
     if (joint) {
+      const value = baked.get(joint.name)
       node.setExtras({
         joint: joint.name,
         axis: round(apply(C, apply(joint.origin.r, joint.axis))),
+        ...(value !== undefined && { baked: Math.round(value * 1e6) / 1e6 }),
       })
     }
     if (parentKept) nodes.get(parentKept.node)!.addChild(node)
     else scene.addChild(node)
     nodes.set(kept.node, node)
 
-    for (const link of [kept.link, ...(kept.riders ?? [])]) {
-      const visual = urdf.links.get(link)?.visual
-      if (!visual) continue
-      const pose = poses.get(link)!.pose
-      // Mesh vertices into the node's frame: node⁻¹ · link · visual, then app axes.
-      const toNode = toApp(compose(invert(entry.pose), compose(pose, visual.origin)))
-      const data = await simplified(
-        io,
-        src,
-        work,
-        visual.stem,
-        variant.triangles(visual.stem),
-        variant.error,
+    const visual = urdf.links.get(kept.link)?.visual
+    if (!visual) continue
+    // Mesh vertices into the node's frame: the visual origin, then app axes.
+    const toNode = toApp(visual.origin)
+    const data = await welded(io, src, work, visual.stem)
+    console.log(`  ${visual.stem}: ${data.indices.length / 3} triangles`)
+    for (let k = 0; k < data.positions.length; k += 3) {
+      const p = transformPoint(
+        toNode,
+        apply(C, [data.positions[k]!, data.positions[k + 1]!, data.positions[k + 2]!]),
       )
-      console.log(`  ${variant.file} ${visual.stem}: ${data.indices.length / 3} triangles`)
-      for (let k = 0; k < data.positions.length; k += 3) {
-        const p = transformPoint(
-          toNode,
-          apply(C, [data.positions[k]!, data.positions[k + 1]!, data.positions[k + 2]!]),
-        )
-        data.positions.set(p, k)
-      }
-      triangles += data.indices.length / 3
-      const primitive = doc
-        .createPrimitive()
-        .setMaterial(material)
-        .setAttribute(
-          'POSITION',
-          doc.createAccessor().setType('VEC3').setArray(data.positions).setBuffer(buffer),
-        )
-        .setAttribute(
-          'TEXCOORD_0',
-          doc.createAccessor().setType('VEC2').setArray(data.uvs).setBuffer(buffer),
-        )
-        .setIndices(doc.createAccessor().setType('SCALAR').setArray(data.indices).setBuffer(buffer))
-      // Mesh on a child node: quantization rescales mesh nodes, the joint node stays exact.
-      const meshNode = doc
-        .createNode(`${kept.node}:${visual.stem}`)
-        .setMesh(doc.createMesh(visual.stem).addPrimitive(primitive))
-      node.addChild(meshNode)
+      data.positions.set(p, k)
     }
+    triangles += data.indices.length / 3
+    const primitive = doc
+      .createPrimitive()
+      .setMaterial(material)
+      .setAttribute(
+        'POSITION',
+        doc.createAccessor().setType('VEC3').setArray(data.positions).setBuffer(buffer),
+      )
+      .setAttribute(
+        'TEXCOORD_0',
+        doc.createAccessor().setType('VEC2').setArray(data.uvs).setBuffer(buffer),
+      )
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(data.indices).setBuffer(buffer))
+    // Mesh on a child node: quantization rescales mesh nodes, the joint node stays exact.
+    const meshNode = doc
+      .createNode(`${kept.node}:${visual.stem}`)
+      .setMesh(doc.createMesh(visual.stem).addPrimitive(primitive))
+    node.addChild(meshNode)
   }
   doc.getRoot().setDefaultScene(scene)
   doc.getRoot().getAsset().extras = {
@@ -458,33 +449,27 @@ async function build(src: string, work: string, variant: Variant): Promise<{ tri
     source: `github.com/${REPO}@${COMMIT}`,
   }
 
-  const assembled = join(work, `assembled-${variant.file}`)
+  const assembled = join(work, 'assembled.glb')
   await io.write(assembled, doc)
-  const resized = join(work, `resized-${variant.file}`)
-  if (variant.texture < 1024) {
-    cli(
-      'resize',
-      assembled,
-      resized,
-      '--width',
-      String(variant.texture),
-      '--height',
-      String(variant.texture),
-    )
-  } else {
-    cli('copy', assembled, resized)
-  }
-  const webp = join(work, `webp-${variant.file}`)
-  cli('webp', resized, webp, '--quality', '82')
+  const webp = join(work, 'webp.glb')
+  cli('webp', assembled, webp, '--quality', '82')
   mkdirSync(OUT_DIR, { recursive: true })
-  cli('meshopt', webp, join(OUT_DIR, variant.file), '--level', 'medium')
-  return { triangles }
+  const out = join(OUT_DIR, OUT_FILE)
+  cli(
+    'meshopt',
+    webp,
+    out,
+    '--level',
+    'medium',
+    '--quantize-position',
+    String(QUANTIZE.position),
+    '--quantize-texcoord',
+    String(QUANTIZE.texcoord),
+  )
+  return { triangles, baked, bytes: { meshopt: statSync(out).size, plain: statSync(webp).size } }
 }
 
-function keptAncestor(
-  link: string,
-  poses: Map<string, { pose: Rigid; joint?: UrdfJoint }>,
-): KeptLink | undefined {
+function keptAncestor(link: string, poses: LinkPoses): KeptLink | undefined {
   for (let current: string | undefined = link; current;) {
     const kept = KEPT.find((k) => k.link === current)
     if (kept) return kept
@@ -522,13 +507,15 @@ mkdirSync(src, { recursive: true })
 const work = mkdtempSync(join(src, 'build-'))
 await ensureSources(src, [])
 const urdf = parseUrdf(readFileSync(join(src, 'm2020.urdf'), 'utf8'))
-const meshStems = KEPT.flatMap((k) => [k.link, ...(k.riders ?? [])])
-  .map((link) => urdf.links.get(link)?.visual?.stem)
-  .filter((stem): stem is string => Boolean(stem))
+const meshStems = KEPT.map((k) => urdf.links.get(k.link)?.visual?.stem).filter(
+  (stem): stem is string => Boolean(stem),
+)
 await ensureSources(src, meshStems)
 
-for (const variant of VARIANTS) {
-  const { triangles } = await build(src, work, variant)
-  const bytes = statSync(join(OUT_DIR, variant.file)).size
-  console.log(`${variant.file}: ${triangles} triangles, ${bytes} bytes`)
+const { triangles, baked, bytes } = await build(src, work)
+for (const [joint, value] of baked) {
+  console.log(`baked ${joint} = ${value.toFixed(6)} rad (${((value * 180) / Math.PI).toFixed(3)}°)`)
 }
+console.log(
+  `${OUT_FILE}: ${triangles} triangles, ${bytes.meshopt} bytes (${bytes.plain} before meshopt)`,
+)

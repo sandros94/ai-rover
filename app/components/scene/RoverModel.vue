@@ -34,10 +34,10 @@ const props = withDefaults(
     geometry?: ResolvedRoverGeometry
     /** Draw as a red translucent silhouette, for a death marker. */
     ghost?: boolean
-    /** Which rover to draw; by default the JPL model at this device's detail, the light one for ghosts. */
+    /** Which rover to draw; the JPL model by default, the procedural one standing in until it loads. */
     variant?: RoverVariant
   }>(),
-  { geometry: () => DEFAULT_ROVER_GEOMETRY, ghost: false, variant: undefined },
+  { geometry: () => DEFAULT_ROVER_GEOMETRY, ghost: false, variant: 'model' },
 )
 
 const emit = defineEmits<{
@@ -45,9 +45,6 @@ const emit = defineEmits<{
   ready: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
 }>()
 
-const variant = computed<RoverVariant>(
-  () => props.variant ?? (props.ghost ? 'low' : useRoverVariant()),
-)
 const baseURL = useRuntimeConfig().app.baseURL
 
 const partsAt = (frame: Float32Array) => roverParts(frameAttitude(frame), props.geometry)
@@ -158,7 +155,7 @@ function showModel(object: Object3D | undefined): void {
 
 let unmounted = false
 watch(
-  variant,
+  () => props.variant,
   async (wanted) => {
     if (wanted === 'procedural') {
       showModel(undefined)
@@ -166,16 +163,13 @@ watch(
       return
     }
     try {
-      const loaded = await loadRoverModel(wanted, baseURL)
-      if (unmounted || variant.value !== wanted) return
+      const loaded = await loadRoverModel(baseURL)
+      if (unmounted || props.variant !== wanted) return
       showModel(loaded.scene.clone())
       emit('ready', { variant: wanted, triangles: loaded.triangles, loadMs: loaded.loadMs })
     } catch (error) {
       // The procedural rover stays: the scene works without the download.
-      console.warn(
-        `RoverModel: the ${wanted} rover model did not load; drawing the procedural rover.`,
-        error,
-      )
+      console.warn('RoverModel: the rover model did not load; drawing the procedural rover.', error)
     }
   },
   { immediate: true },

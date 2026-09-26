@@ -71,6 +71,15 @@ function worldOrigin(
   rig: ReturnType<typeof rigTransforms>,
   name: string,
 ): Point3 {
+  return worldPose(nodes, rig, name).position
+}
+
+/** World position and orientation of a node, as `worldOrigin` composes them. */
+function worldPose(
+  nodes: Map<string, { node: GltfNode; parent?: string }>,
+  rig: ReturnType<typeof rigTransforms>,
+  name: string,
+): { position: Point3; orientation: Quat } {
   const chain: GltfNode[] = []
   for (let current: string | undefined = name; current; current = nodes.get(current)!.parent) {
     chain.unshift(nodes.get(current)!.node)
@@ -85,7 +94,7 @@ function worldOrigin(
     const joint = rig.joints[node.name as RigNode] ?? IDENTITY
     orientation = multiply(multiply(orientation, { x: qx, y: qy, z: qz, w: qw }), joint)
   }
-  return position
+  return { position, orientation }
 }
 
 /** The keyframe a producer writes for a solved pose. */
@@ -157,80 +166,93 @@ describe('rigTransforms', () => {
   })
 })
 
-for (const file of ['rover.glb', 'rover-low.glb']) {
-  describe(`the rig on ${file}`, () => {
-    const nodes = tree(readNodes(file))
+describe('the rig on rover.glb', () => {
+  const nodes = tree(readNodes('rover.glb'))
 
-    it('names a node for every rig joint, turning about the URDF joint axis', () => {
-      const fromModel = ROVER_RIG_NODES.map((name) => {
-        const extras = nodes.get(name)?.node.extras
-        const [x, y, z] = extras?.axis ?? []
-        return { name, joint: extras?.joint, axis: { x, y, z } }
-      })
-      const fromRig = ROVER_RIG_NODES.map((name) => ({
-        name,
-        joint: RIG_JOINTS[name].urdf,
-        axis: RIG_JOINTS[name].axis,
-      }))
-      expect(fromModel).toEqual(fromRig)
+  it('names a node for every rig joint, turning about the URDF joint axis', () => {
+    const fromModel = ROVER_RIG_NODES.map((name) => {
+      const extras = nodes.get(name)?.node.extras
+      const [x, y, z] = extras?.axis ?? []
+      return { name, joint: extras?.joint, axis: { x, y, z } }
     })
-
-    it('hangs the wheels on the chassis, rockers and bogies as the URDF does', () => {
-      const parents = Object.fromEntries(HUBS.map((h) => [h, nodes.get(h)!.parent]))
-      expect(parents).toEqual({
-        wheel_lf: 'steer_lf',
-        wheel_rf: 'steer_rf',
-        wheel_lm: 'left_bogie',
-        wheel_rm: 'right_bogie',
-        wheel_lr: 'steer_lr',
-        wheel_rr: 'steer_rr',
-      })
-      expect(nodes.get('steer_lf')!.parent).toBe('left_rocker')
-      expect(nodes.get('steer_lr')!.parent).toBe('left_bogie')
-      expect(nodes.get('left_bogie')!.parent).toBe('left_rocker')
-      expect(nodes.get('left_rocker')!.parent).toBe('chassis')
-      expect(nodes.get('differential')!.parent).toBe('chassis')
-    })
-
-    it('pivots the rockers and bogies where the solver geometry does', () => {
-      const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
-      const rocker = worldOrigin(nodes, rest, 'left_rocker')
-      const bogie = worldOrigin(nodes, rest, 'left_bogie')
-      const { rockerPivot, bogiePivot } = DEFAULT_ROVER_GEOMETRY
-      expect(Math.hypot(rocker.x - rockerPivot.x, rocker.z - rockerPivot.z)).toBeLessThan(5e-4)
-      expect(Math.hypot(bogie.x - bogiePivot.x, bogie.z - bogiePivot.z)).toBeLessThan(5e-4)
-    })
-
-    it('puts the wheel hubs within 5 mm of the solver on flat ground', () => {
-      const pose = poseOnTerrain(() => 0, { x: 7, y: -3, headingRad: 0.6 })
-      const rig = rigTransforms(frameOf(pose))
-      const off = HUBS.filter(
-        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
-      )
-      expect(off).toEqual([])
-    })
-
-    it('follows the solver within 5 mm with the left rear wheel up a step', () => {
-      // A 20 cm ledge under the left rear wheel only.
-      const ground = (x: number, y: number) => (x < -0.8 && y > 0.6 ? 0.2 : 0)
-      const pose = poseOnTerrain(ground, { x: 0, y: 0, headingRad: 0 })
-      expect(pose.bogie.left).toBeLessThan(-5 * DEG)
-      const rig = rigTransforms(frameOf(pose))
-      const off = HUBS.filter(
-        (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
-      )
-      expect(off).toEqual([])
-      // The rig's signs matter: the same angles negated put the rear hub far off.
-      const flipped = rigTransforms(
-        withField(
-          withField(frameOf(pose), 'bogieL', -pose.bogie.left),
-          'rockerL',
-          -pose.rocker.left,
-        ),
-      )
-      expect(distance(worldOrigin(nodes, flipped, 'wheel_lr'), pose.wheels[4]!)).toBeGreaterThan(
-        0.1,
-      )
-    })
+    const fromRig = ROVER_RIG_NODES.map((name) => ({
+      name,
+      joint: RIG_JOINTS[name].urdf,
+      axis: RIG_JOINTS[name].axis,
+    }))
+    expect(fromModel).toEqual(fromRig)
   })
-}
+
+  it('hangs the wheels on the chassis, rockers and bogies as the URDF does', () => {
+    const parents = Object.fromEntries(HUBS.map((h) => [h, nodes.get(h)!.parent]))
+    expect(parents).toEqual({
+      wheel_lf: 'steer_lf',
+      wheel_rf: 'steer_rf',
+      wheel_lm: 'left_bogie',
+      wheel_rm: 'right_bogie',
+      wheel_lr: 'steer_lr',
+      wheel_rr: 'steer_rr',
+    })
+    expect(nodes.get('steer_lf')!.parent).toBe('left_rocker')
+    expect(nodes.get('steer_lr')!.parent).toBe('left_bogie')
+    expect(nodes.get('left_bogie')!.parent).toBe('left_rocker')
+    expect(nodes.get('left_rocker')!.parent).toBe('chassis')
+    expect(nodes.get('differential')!.parent).toBe('chassis')
+  })
+
+  it('bakes the mast deployed: head on top, Navcam boresight level and forward', () => {
+    expect(nodes.get('mast_azimuth')!.parent).toBe('chassis')
+    expect(nodes.get('mast_elevation')!.parent).toBe('mast_azimuth')
+    const baked = ['mast_azimuth', 'mast_elevation'].map((name) => {
+      const extras = nodes.get(name)!.node.extras as { joint?: string; baked?: number }
+      return [extras.joint, extras.baked]
+    })
+    // 181° and 91°: the URDF's zero leaves the head facing the deck, turned aft.
+    expect(baked).toEqual([
+      ['RSM_AZ_ENC', 3.159045],
+      ['RSM_EL_ENC', 1.588253],
+    ])
+    const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+    const head = worldPose(nodes, rest, 'mast_elevation')
+    // The elevation axis sits 1.92 m above the ground, above the mast foot on the deck.
+    expect(head.position.z).toBeCloseTo(1.919, 3)
+    // The Navcam boresight is the elevation link's +x (URDF and body frames share x).
+    const boresight = rotate(head.orientation, { x: 1, y: 0, z: 0 })
+    expect(distance(boresight, { x: 1, y: 0, z: 0 })).toBeLessThan(1e-4)
+  })
+
+  it('pivots the rockers and bogies where the solver geometry does', () => {
+    const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+    const rocker = worldOrigin(nodes, rest, 'left_rocker')
+    const bogie = worldOrigin(nodes, rest, 'left_bogie')
+    const { rockerPivot, bogiePivot } = DEFAULT_ROVER_GEOMETRY
+    expect(Math.hypot(rocker.x - rockerPivot.x, rocker.z - rockerPivot.z)).toBeLessThan(5e-4)
+    expect(Math.hypot(bogie.x - bogiePivot.x, bogie.z - bogiePivot.z)).toBeLessThan(5e-4)
+  })
+
+  it('puts the wheel hubs within 5 mm of the solver on flat ground', () => {
+    const pose = poseOnTerrain(() => 0, { x: 7, y: -3, headingRad: 0.6 })
+    const rig = rigTransforms(frameOf(pose))
+    const off = HUBS.filter(
+      (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
+    )
+    expect(off).toEqual([])
+  })
+
+  it('follows the solver within 5 mm with the left rear wheel up a step', () => {
+    // A 20 cm ledge under the left rear wheel only.
+    const ground = (x: number, y: number) => (x < -0.8 && y > 0.6 ? 0.2 : 0)
+    const pose = poseOnTerrain(ground, { x: 0, y: 0, headingRad: 0 })
+    expect(pose.bogie.left).toBeLessThan(-5 * DEG)
+    const rig = rigTransforms(frameOf(pose))
+    const off = HUBS.filter(
+      (hub, k) => distance(worldOrigin(nodes, rig, hub), pose.wheels[k]!) >= 0.005,
+    )
+    expect(off).toEqual([])
+    // The rig's signs matter: the same angles negated put the rear hub far off.
+    const flipped = rigTransforms(
+      withField(withField(frameOf(pose), 'bogieL', -pose.bogie.left), 'rockerL', -pose.rocker.left),
+    )
+    expect(distance(worldOrigin(nodes, flipped, 'wheel_lr'), pose.wheels[4]!)).toBeGreaterThan(0.1)
+  })
+})

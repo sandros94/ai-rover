@@ -43,7 +43,7 @@ const props = withDefaults(
     deathRadiusM?: number
     /** The stop disk's fog over `chunks`; without it every chunk shows its true ground. */
     fog?: ChunkFog & { rects?: GridRect[] }
-    /** The rover to draw; by default the JPL model at this device's detail. */
+    /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
     roverVariant?: RoverVariant
   }>(),
   {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue'
+import { useRuntimeConfig } from '#imports'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { RoverVariant } from '~/composables/useRoverVariant'
-import { useRoverVariant } from '~/composables/useRoverVariant'
 
 const props = defineProps<{
   /** The 19 keyframe values at the scrub time. */
@@ -18,13 +18,22 @@ const StopScene = defineAsyncComponent(
 
 const VARIANTS: { value: RoverVariant; label: string }[] = [
   { value: 'procedural', label: 'Procedural' },
-  { value: 'low', label: 'Low' },
-  { value: 'hero', label: 'Hero' },
+  { value: 'model', label: 'Model' },
 ]
 
-/** Starts on the model this device would get in the app. */
-const variant = ref<RoverVariant>(useRoverVariant())
+const variant = ref<RoverVariant>('model')
 const shown = ref<{ variant: RoverVariant; triangles: number; loadMs: number }>()
+/** The model file's size, from the same load the scene made (the loader caches it). */
+const bytes = ref<number>()
+const baseURL = useRuntimeConfig().app.baseURL
+
+async function onReady(info: { variant: RoverVariant; triangles: number; loadMs: number }) {
+  shown.value = info
+  if (info.variant !== 'model' || bytes.value) return
+  // Lazy, like the scene: the loader brings three.js.
+  const { loadRoverModel } = await import('~/utils/rover-model')
+  bytes.value = (await loadRoverModel(baseURL)).bytes
+}
 
 /** The frame moved to the origin, attitude, spins and suspension kept: the rover alone on a plane. */
 const atOrigin = computed(() => {
@@ -51,7 +60,8 @@ const atOrigin = computed(() => {
       <p class="text-sm text-muted" data-testid="rover-model-stats">
         <template v-if="shown && shown.variant === variant">
           {{ shown.triangles.toLocaleString('en') }} triangles
-          <template v-if="shown.variant !== 'procedural'">
+          <template v-if="shown.variant === 'model'">
+            <template v-if="bytes">· {{ (bytes / 1e6).toFixed(2) }} MB</template>
             · loaded in {{ Math.round(shown.loadMs) }} ms
           </template>
         </template>
@@ -60,7 +70,7 @@ const atOrigin = computed(() => {
     </div>
     <div class="h-[60vh] min-h-72 overflow-hidden rounded-md border border-default">
       <ClientOnly>
-        <StopScene :frame="atOrigin" :rover-variant="variant" @rover-ready="shown = $event" />
+        <StopScene :frame="atOrigin" :rover-variant="variant" @rover-ready="onReady" />
       </ClientOnly>
     </div>
     <p class="text-xs text-muted">

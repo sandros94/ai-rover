@@ -7,36 +7,36 @@ export interface LoadedRoverModel {
   /** The model's scene, shared: place a `clone()` of it. */
   scene: Group
   triangles: number
+  /** Size of the downloaded file, bytes. */
+  bytes: number
   /** Fetch, decode and parse time of the first load, milliseconds. */
   loadMs: number
 }
 
-const FILES = { hero: 'rover.glb', low: 'rover-low.glb' } as const
-
-const loads = new Map<string, Promise<LoadedRoverModel>>()
+let load: Promise<LoadedRoverModel> | undefined
 
 /**
- * The JPL rover model from `public/models/rover/`, fetched once per page per variant. Its meshes
- * carry no normals, so they are shaded flat, with Lambert materials over the texture atlas.
+ * The JPL rover model, `public/models/rover/rover.glb`, fetched once per page. Its meshes carry
+ * no normals, so they are shaded flat, with Lambert materials over the texture atlas.
  */
-export function loadRoverModel(
-  variant: keyof typeof FILES,
-  baseURL: string,
-): Promise<LoadedRoverModel> {
-  const url = `${baseURL.replace(/\/?$/, '/')}models/rover/${FILES[variant]}`
-  let load = loads.get(url)
+export function loadRoverModel(baseURL: string): Promise<LoadedRoverModel> {
   if (!load) {
-    load = parse(url)
+    const started = parse(`${baseURL.replace(/\/?$/, '/')}models/rover/rover.glb`)
     // A failed load is not cached: a later mount tries again.
-    load.catch(() => loads.delete(url))
-    loads.set(url, load)
+    started.catch(() => {
+      if (load === started) load = undefined
+    })
+    load = started
   }
   return load
 }
 
 async function parse(url: string): Promise<LoadedRoverModel> {
   const started = performance.now()
-  const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url)
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`loadRoverModel: GET ${url} answered ${response.status}.`)
+  const data = await response.arrayBuffer()
+  const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(data, '')
   const lambert = new Map<MeshStandardMaterial, MeshLambertMaterial>()
   let triangles = 0
   gltf.scene.traverse((object) => {
@@ -53,5 +53,10 @@ async function parse(url: string): Promise<LoadedRoverModel> {
     const index = mesh.geometry.index
     triangles += (index ? index.count : mesh.geometry.attributes.position!.count) / 3
   })
-  return { scene: gltf.scene, triangles, loadMs: performance.now() - started }
+  return {
+    scene: gltf.scene,
+    triangles,
+    bytes: data.byteLength,
+    loadMs: performance.now() - started,
+  }
 }
