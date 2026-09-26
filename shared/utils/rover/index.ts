@@ -12,3 +12,4 @@ export type { PlanarPose, Point3, PoseOnTerrainOptions, RoverPose } from './kine
 export { poseOnTerrain } from './kinematics'
 export type { CheckLimitsOptions, LimitReason, LimitVerdict, RoverLimits } from './limits'
 export { checkLimits, DEFAULT_ROVER_LIMITS } from './limits'
+export { AUTONAV_EFFECTIVE_MPS, ROVER_MAX_SPEED_MPS } from './speed'

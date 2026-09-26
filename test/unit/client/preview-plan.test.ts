@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionRules } from '#shared/utils/mission'
-import { EFFECTIVE_SPEED_MPS, planSegment } from '#shared/utils/nav'
+import { planSegment } from '#shared/utils/nav'
+import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
 import type { StopDisk } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import {
@@ -76,7 +77,7 @@ describe('previewPlan on the recorded journey', () => {
     expect({ ...result.metrics, computeMs: 0 }).toEqual({ ...server.metrics, computeMs: 0 })
     expect(result.metrics.reached).toBe(true)
     expect(result.estimatedMinutes).toBe(
-      Math.round(server.metrics.pathLengthM / EFFECTIVE_SPEED_MPS / 60),
+      Math.round(server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
     )
   })
 

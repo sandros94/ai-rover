@@ -34,13 +34,15 @@ export interface SegmentSlice {
 
 const EVENT_TYPES: Record<DriveEventType, true> = {
   start: true,
+  turning: true,
+  assessing: true,
   replan: true,
+  imaging: true,
+  slip: true,
   blocked: true,
   hazard: true,
   stuck: true,
-  slip: true,
   arrived: true,
-  pause: true,
 }
 const FAILURE_REASONS: Record<RouteFailureReason, true> = {
   'goal-unreachable': true,

@@ -13,6 +13,7 @@ import type { PlanarPose, RoverPose } from '../rover/kinematics'
 import { poseOnTerrain } from '../rover/kinematics'
 import type { RoverLimits } from '../rover/limits'
 import { checkLimits } from '../rover/limits'
+import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
 import type { StopDisk } from '../terrain/disk'
 import { TerrainError } from '../terrain/errors'
 import type { RevealedMask } from '../terrain/revealed'
@@ -25,14 +26,28 @@ import { KEYFRAME_STRIDE } from './keyframes'
 
 /** Rover speed on the ground; omitted fields take the defaults below. */
 export interface SpeedModel {
-  /** Flat-ground drive speed, m/s. Default 0.042 (Perseverance's 152 m/h). */
-  maxSpeedMps?: number
-  /** Fraction of `maxSpeedMps` lost at the slope limit, linear in tan(slope). Default 0.5. */
+  /**
+   * Flat-ground drive speed, m/s. Default `AUTONAV_EFFECTIVE_MPS` (0.033, Perseverance's 120 m/h
+   * under AutoNav): the rover thinks while driving, so this is its speed, not an average over stops.
+   */
+  cruiseSpeedMps?: number
+  /** Fraction of `cruiseSpeedMps` lost at the slope limit, linear in tan(slope). Default 0.5. */
   slopeSlowdown?: number
   /** Turn-in-place rate, rad/s. Default 3°/s. */
   turnRateRadPerS?: number
-  /** Standstill before each metre while the rover looks and decides, seconds. Default 6.5. */
-  thinkPauseS?: number
+}
+
+/**
+ * The rover stops only for a reason, and each stop is an event: turns in place (timed by the
+ * speed model's turn rate), an assessment before every replan, and periodic imaging.
+ */
+export interface StopModel {
+  /** Ground distance between imaging stops, metres; none at the goal. Default 25. */
+  imagingEveryM?: number
+  /** Length of an imaging stop, seconds. Default 30. */
+  imagingStopS?: number
+  /** Standstill while the rover assesses newly found blocking ground before replanning, seconds. Default 20. */
+  assessStopS?: number
 }
 
 /**
@@ -56,12 +71,23 @@ const DEG = Math.PI / 180
 
 /** The speed model a drive uses for omitted fields. */
 export const DEFAULT_SPEED_MODEL: Readonly<Required<SpeedModel>> = Object.freeze({
-  maxSpeedMps: 0.042,
+  cruiseSpeedMps: AUTONAV_EFFECTIVE_MPS,
   slopeSlowdown: 0.5,
   // UNVERIFIED: no published Perseverance turn-in-place rate was found; 3°/s is a judgement call.
   turnRateRadPerS: 3 * DEG,
-  // Brings 0.042 m/s cruise down to the ~0.033 m/s AutoNav reports: 1 / 0.033 − 1 / 0.042 ≈ 6.5 s per metre.
-  thinkPauseS: 6.5,
+})
+
+/**
+ * The stop model a drive uses for omitted fields. UNVERIFIED, all three: the references give no
+ * periodic imaging stop (AutoNav images while driving) and no assessment time; a stop "when it
+ * cannot quickly determine a safe path" is documented, and ENav's planning cycle takes 3–4 s,
+ * scoring every candidate path more than 3 min. The values are judgement calls that keep 100 m
+ * on flat ground near 0.032 m/s overall, inside the 0.026–0.033 m/s the record drives averaged.
+ */
+export const DEFAULT_STOP_MODEL: Readonly<Required<StopModel>> = Object.freeze({
+  imagingEveryM: 25,
+  imagingStopS: 30,
+  assessStopS: 20,
 })
 
 /** The slip model a drive uses for omitted fields. */
@@ -83,6 +109,7 @@ export interface DriveOptions {
   geometry?: ResolvedRoverGeometry
   limits?: RoverLimits
   speed?: SpeedModel
+  stops?: StopModel
   slip?: SlipModel
   /** Passed to every `planSegment` call. */
   plan?: CostMapOptions & RouteOptions & Omit<MotionOptions, 'initialHeadingRad'>
@@ -109,16 +136,22 @@ export interface DriveOptions {
   maxReplans?: number
 }
 
-/** Closed set: callers may match on it exhaustively, so adding a type is a breaking change. */
+/**
+ * Closed set: callers may match on it exhaustively, so adding a type is a breaking change. The
+ * stops carry `durationS`: `turning` also its signed `angleDeg` (positive to the left),
+ * `assessing` the `cause` of the replan it precedes.
+ */
 export type DriveEventType =
   | 'start'
+  | 'turning'
+  | 'assessing'
   | 'replan'
+  | 'imaging'
+  | 'slip'
   | 'blocked'
   | 'hazard'
   | 'stuck'
-  | 'slip'
   | 'arrived'
-  | 'pause'
 
 export type DriveEventDetail = number | string | string[] | { x: number; y: number }[]
 
@@ -185,10 +218,12 @@ const SLOPE_HALF_SPAN_M = 0.5
  * motions step by step at `simHz`, standing the rover on the ground every step, and records
  * keyframes, events, reveals and the outcome. Equal inputs give deep-equal records.
  *
- * Before each metre the rover pauses, reveals a viewshed of `revealRadiusM`, and checks the next
- * `lookaheadM` of path. It replans when seen ground blocks its route within `replanHorizonM`, or
- * when the lookahead finds a hazard; when no route is left it stops short. A limit failure under
- * the rover itself, or sustained slip, fails the segment.
+ * Driving is continuous: after each metre the rover reveals a viewshed of `revealRadiusM` and
+ * checks the next `lookaheadM` of path without stopping. It stops only for a reason (see
+ * {@link StopModel}): to turn in place, to image every `imagingEveryM`, and to assess before it
+ * replans, which it does when seen ground blocks its route within `replanHorizonM` or the
+ * lookahead finds a hazard; when no route is left it stops short. A limit failure under the rover
+ * itself, or sustained slip, fails the segment.
  */
 export function driveSegment(
   world: World,
@@ -212,10 +247,12 @@ export function driveSegment(
 interface Resolved {
   geometry: ResolvedRoverGeometry
   limits: RoverLimits | undefined
-  maxSpeed: number
+  cruiseSpeed: number
   slowdown: number
   turnRate: number
-  pauseSteps: number
+  imagingEveryM: number
+  imagingSteps: number
+  assessSteps: number
   slipGain: number
   slipMax: number
   stuckAbove: number
@@ -267,6 +304,7 @@ class Drive {
   private posed: { x: number; y: number; heading: number } | undefined
   private odometer = 0
   private nextMetre = 1
+  private nextImaging: number
   private stuckRun = 0
   private slipMetre = -1
   private speed = 0
@@ -306,6 +344,7 @@ class Drive {
     this.wheelX = [f.x, f.x, m.x, m.x, r.x, r.x]
     this.wheelY = [f.y, -f.y, m.y, -m.y, r.y, -r.y]
     this.cursor = { x: start.x, y: start.y, heading: start.headingRad, motion: 0, along: 0 }
+    this.nextImaging = this.o.imagingEveryM
   }
 
   run(): SegmentRecord {
@@ -371,14 +410,13 @@ class Drive {
     }
   }
 
-  /** The per-metre routine: look around, think, then check the way ahead. */
+  /** The per-metre routine, on the move: look around, image when due, check the way ahead. */
   private metre(): DriveOutcome | undefined {
     this.reveal(this.revealViewshed())
-    this.emit('pause', { durationS: this.o.pauseSteps / this.o.simHz })
-    this.speed = 0
-    for (let k = 0; k < this.o.pauseSteps; k++) {
-      this.step++
-      this.frameIfDue()
+    if (this.odometer >= this.nextImaging) {
+      this.nextImaging =
+        (Math.floor(this.odometer / this.o.imagingEveryM) + 1) * this.o.imagingEveryM
+      this.hold('imaging', this.o.imagingSteps)
     }
     const travelled = this.odometer - this.routeFrom
     for (const [k, at] of this.route) {
@@ -414,6 +452,7 @@ class Drive {
     cause: 'revealed' | 'lookahead',
     probe?: { x: number; y: number; reasons: string[] },
   ): DriveOutcome | undefined {
+    this.hold('assessing', this.o.assessSteps, { cause })
     if (this.replans === this.o.maxReplans) {
       return this.finish('stopped-short', ['replan-limit'], 'blocked')
     }
@@ -491,6 +530,12 @@ class Drive {
     while (remaining > 0 && c.motion < this.motions.length) {
       const motion = this.motions[c.motion]!
       if (motion.type === 'turn') {
+        if (c.along === 0) {
+          this.emit('turning', {
+            angleDeg: motion.angleRad / DEG,
+            durationS: Math.abs(motion.angleRad) / o.turnRate,
+          })
+        }
         const left = Math.abs(motion.angleRad) - c.along
         const turn = Math.min(left, o.turnRate * remaining)
         const signed = Math.sign(motion.angleRad) * turn
@@ -511,7 +556,7 @@ class Drive {
       }
       const tanSlope = this.tanSlopeAt(c.x, c.y)
       const ratio = tanSlope / this.tanLimit
-      const v = o.maxSpeed * (1 - o.slowdown * Math.min(1, ratio))
+      const v = o.cruiseSpeed * (1 - o.slowdown * Math.min(1, ratio))
       const slip = Math.min(o.slipMax, this.world.looseAt(c.x, c.y) * o.slipGain * ratio * ratio)
       const left = motion.lengthM - c.along
       let commanded = v * remaining
@@ -749,6 +794,21 @@ class Drive {
     }
   }
 
+  /** A stop for a reason: the rover stands still, wheels unturned, for `steps` sim steps. */
+  private hold(
+    type: 'imaging' | 'assessing',
+    steps: number,
+    details?: Record<string, DriveEventDetail>,
+  ): void {
+    if (steps === 0) return
+    this.emit(type, { durationS: steps / this.o.simHz, ...details })
+    this.speed = 0
+    for (let k = 0; k < steps; k++) {
+      this.step++
+      this.frameIfDue()
+    }
+  }
+
   private emit(type: DriveEventType, details?: Record<string, DriveEventDetail>): void {
     const event: DriveEvent = { t: this.time(), type, x: this.cursor.x, y: this.cursor.y }
     if (details && Object.keys(details).length > 0) event.details = details
@@ -761,6 +821,7 @@ function resolve(options: DriveOptions): Resolved {
     geometry = DEFAULT_ROVER_GEOMETRY,
     limits,
     speed = {},
+    stops = {},
     slip = {},
     simHz = 2,
     keyframeHz = 2,
@@ -772,11 +833,16 @@ function resolve(options: DriveOptions): Resolved {
   } = options
   const S = DEFAULT_SPEED_MODEL
   const {
-    maxSpeedMps = S.maxSpeedMps,
+    cruiseSpeedMps = S.cruiseSpeedMps,
     slopeSlowdown = S.slopeSlowdown,
     turnRateRadPerS = S.turnRateRadPerS,
-    thinkPauseS = S.thinkPauseS,
   } = speed
+  const P = DEFAULT_STOP_MODEL
+  const {
+    imagingEveryM = P.imagingEveryM,
+    imagingStopS = P.imagingStopS,
+    assessStopS = P.assessStopS,
+  } = stops
   const L = DEFAULT_SLIP_MODEL
   const {
     gain = L.gain,
@@ -815,15 +881,14 @@ function resolve(options: DriveOptions): Resolved {
   check(replanHorizonM >= 0, 'replanHorizonM', replanHorizonM, 'metres ≥ 0')
   check(maxDurationS > 0, 'maxDurationS', maxDurationS, 'seconds greater than 0')
   check(Number.isInteger(maxReplans) && maxReplans >= 0, 'maxReplans', maxReplans, 'an integer ≥ 0')
-  positive('speed.maxSpeedMps', maxSpeedMps)
+  positive('speed.cruiseSpeedMps', cruiseSpeedMps)
   unit('speed.slopeSlowdown', slopeSlowdown, '<')
   positive('speed.turnRateRadPerS', turnRateRadPerS)
-  check(
-    Number.isFinite(thinkPauseS) && thinkPauseS >= 0,
-    'speed.thinkPauseS',
-    thinkPauseS,
-    'finite seconds ≥ 0',
-  )
+  check(imagingEveryM > 0, 'stops.imagingEveryM', imagingEveryM, 'metres greater than 0')
+  const seconds = (name: string, value: number): void =>
+    check(Number.isFinite(value) && value >= 0, name, value, 'finite seconds ≥ 0')
+  seconds('stops.imagingStopS', imagingStopS)
+  seconds('stops.assessStopS', assessStopS)
   check(Number.isFinite(gain) && gain >= 0, 'slip.gain', gain, 'a finite number ≥ 0')
   unit('slip.max', max, '<')
   check(stuckAbove > 0 && stuckAbove <= 1, 'slip.stuckAbove', stuckAbove, 'a number in (0, 1]')
@@ -833,10 +898,12 @@ function resolve(options: DriveOptions): Resolved {
   return {
     geometry,
     limits,
-    maxSpeed: maxSpeedMps,
+    cruiseSpeed: cruiseSpeedMps,
     slowdown: slopeSlowdown,
     turnRate: turnRateRadPerS,
-    pauseSteps: Math.round(thinkPauseS * simHz),
+    imagingEveryM,
+    imagingSteps: Math.round(imagingStopS * simHz),
+    assessSteps: Math.round(assessStopS * simHz),
     slipGain: gain,
     slipMax: max,
     stuckAbove,

@@ -20,8 +20,16 @@ export type {
   SegmentRecord,
   SlipModel,
   SpeedModel,
+  StopModel,
 } from './segment'
-export { DEFAULT_SLIP_MODEL, DEFAULT_SPEED_MODEL, driveSegment } from './segment'
+export {
+  DEFAULT_SLIP_MODEL,
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  driveSegment,
+} from './segment'
+export type { DriveStatus, StatusRun } from './status'
+export { statusAt, statusRuns } from './status'
 export type { JourneyKey } from './keys'
 export {
   assertSegmentId,

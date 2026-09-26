@@ -17,8 +17,10 @@ const props = withDefaults(
 /** Icon and label per event; status colours only where the event is a state of the drive. */
 const KIND: Record<DriveEventType, { icon: string; label: string; color?: string }> = {
   start: { icon: 'i-lucide-play', label: 'Started' },
-  pause: { icon: 'i-lucide-hourglass', label: 'Paused to look' },
+  turning: { icon: 'i-lucide-rotate-cw', label: 'Turning' },
+  assessing: { icon: 'i-lucide-scan-search', label: 'Assessing' },
   replan: { icon: 'i-lucide-route', label: 'Replanned' },
+  imaging: { icon: 'i-lucide-camera', label: 'Imaging stop' },
   slip: { icon: 'i-lucide-waves', label: 'Slipping', color: 'var(--viz-warning)' },
   blocked: { icon: 'i-lucide-octagon-minus', label: 'Stopped short', color: 'var(--viz-serious)' },
   hazard: { icon: 'i-lucide-triangle-alert', label: 'Hazard', color: 'var(--viz-critical)' },
@@ -30,6 +32,12 @@ const items = computed(() => feedItems(props.events, props.t).slice(0, props.lim
 
 function detail(item: (typeof items.value)[number]): string | undefined {
   const d = item.details
+  const seconds = typeof d?.durationS === 'number' ? `${Math.round(d.durationS)} s` : undefined
+  if (item.type === 'turning' && typeof d?.angleDeg === 'number')
+    return `${Math.round(Math.abs(d.angleDeg))}° ${d.angleDeg > 0 ? 'left' : 'right'}`
+  if (item.type === 'imaging') return seconds
+  if (item.type === 'assessing')
+    return [seconds, typeof d?.cause === 'string' && `${d.cause} ground`].filter(Boolean).join(', ')
   if (item.type === 'slip' && typeof d?.slip === 'number')
     return `${Math.round(d.slip * 100)} % slip`
   if (item.type === 'replan' && typeof d?.cause === 'string') return `${d.cause} ground`
@@ -46,6 +54,8 @@ function detail(item: (typeof items.value)[number]): string | undefined {
     <ol class="relative space-y-2 border-l border-default pl-4">
       <li v-for="item in items" :key="item.key" data-test="event" class="relative">
         <span
+          data-test="event-icon"
+          :data-icon="KIND[item.type].icon"
           class="absolute top-0.5 -left-[1.6rem] flex size-5 items-center justify-center rounded-full bg-(--ui-bg) ring-2 ring-(--ui-bg)"
         >
           <UIcon
@@ -55,9 +65,7 @@ function detail(item: (typeof items.value)[number]): string | undefined {
           />
         </span>
         <div class="flex items-baseline justify-between gap-2 text-sm">
-          <span class="font-medium">{{
-            item.count > 1 ? `${item.count} pauses` : KIND[item.type].label
-          }}</span>
+          <span class="font-medium">{{ KIND[item.type].label }}</span>
           <span class="shrink-0 text-xs text-dimmed tabular-nums"
             >{{ formatDuration(item.ageS) }} ago</span
           >

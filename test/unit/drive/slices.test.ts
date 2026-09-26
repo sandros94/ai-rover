@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
-import type { SegmentSlice, StoredSegmentManifest } from '#shared/utils/drive'
+import type { DriveEvent, SegmentSlice, StoredSegmentManifest } from '#shared/utils/drive'
 import {
   DEFAULT_SLICE_SECONDS,
   decodeSlice,
@@ -210,6 +210,21 @@ describe('slice binary format v1', () => {
     const json = bytes.slice()
     json[SLICE_HEADER_BYTES + last.keyframes.length * 4] = 0x7b + 1
     expect(code(json)).toBe('INVALID_RECORD')
+  })
+
+  it('carries the stop events and refuses an event type outside the set', () => {
+    const events: DriveEvent[] = [
+      { t: 0, type: 'turning', x: 0, y: 0, details: { angleDeg: 35, durationS: 11.5 } },
+      { t: 20, type: 'imaging', x: 1, y: 0, details: { durationS: 30 } },
+      { t: 60, type: 'assessing', x: 2, y: 0, details: { durationS: 20, cause: 'revealed' } },
+    ]
+    const stops = { ...last, events }
+    expect(decodeSlice(encodeSlice(stops)).events).toEqual(stops.events)
+    const paused = {
+      ...last,
+      events: [{ t: 0, type: 'pause', x: 0, y: 0 }],
+    } as unknown as SegmentSlice
+    expect(driveErrorOf(() => encodeSlice(paused))?.code).toBe('INVALID_RECORD')
   })
 
   it('refuses to encode a slice whose keyframes are not whole frames', () => {

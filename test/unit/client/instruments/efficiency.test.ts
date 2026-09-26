@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { KeyframeBlock } from '#shared/utils/drive'
-import { DEFAULT_SPEED_MODEL, KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
-import { DEFAULT_ROVER_GEOMETRY } from '#shared/utils/rover'
+import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
+import { DEFAULT_ROVER_GEOMETRY, ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
 import {
   createOdometer,
   driveEfficiency,
@@ -54,8 +54,8 @@ describe('createOdometer', () => {
 })
 
 describe('driveEfficiency', () => {
-  it('is effective over commanded speed so far', () => {
-    expect(DEFAULT_SPEED_MODEL.maxSpeedMps).toBe(0.042)
+  it('is effective speed so far over the 4.2 cm/s commanded cap', () => {
+    expect(ROVER_MAX_SPEED_MPS).toBe(0.042)
     expect(driveEfficiency({ actualM: 3.3, elapsedS: 100 })).toBeCloseTo(0.033 / 0.042, 12)
     expect(driveEfficiency({ actualM: 1, elapsedS: 10, maxSpeedMps: 0.2 })).toBeCloseTo(0.5, 12)
   })

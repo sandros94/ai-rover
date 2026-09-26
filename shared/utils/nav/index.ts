@@ -12,7 +12,6 @@ export type { SubmissionSummary } from './summary'
 export {
   compassPoint,
   detourLabel,
-  EFFECTIVE_SPEED_MPS,
   looseGroundLabel,
   meanSlopeLabel,
   slopeLabel,

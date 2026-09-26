@@ -1,8 +1,8 @@
-import { DEFAULT_SPEED_MODEL } from '../../drive/segment'
 import type { KeyframeBlock } from '../../drive/keyframes'
 import { KEYFRAME_FIELDS } from '../../drive/keyframes'
 import type { ResolvedRoverGeometry } from '../../rover/geometry'
 import { DEFAULT_ROVER_GEOMETRY } from '../../rover/geometry'
+import { ROVER_MAX_SPEED_MPS } from '../../rover/speed'
 
 /** Distances driven by sim time `t`, metres. */
 export interface OdometerReading {
@@ -74,14 +74,15 @@ export function createOdometer(
 
 /**
  * AutoNav-style efficiency: effective speed so far (ground distance over elapsed sim time) as a
- * fraction of the commanded drive speed; undefined before any time has passed.
+ * fraction of the commanded cap, `ROVER_MAX_SPEED_MPS` unless given; undefined before any time
+ * has passed. Flat ground at the AutoNav rate with no stops reads 0.033 / 0.042 ≈ 79 %.
  */
 export function driveEfficiency(options: {
   actualM: number
   elapsedS: number
   maxSpeedMps?: number
 }): number | undefined {
-  const { actualM, elapsedS, maxSpeedMps = DEFAULT_SPEED_MODEL.maxSpeedMps } = options
+  const { actualM, elapsedS, maxSpeedMps = ROVER_MAX_SPEED_MPS } = options
   if (!(elapsedS > 0)) return undefined
   return actualM / elapsedS / maxSpeedMps
 }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { createOdometer, driveEfficiency } from '#shared/utils/client/instruments'
-import type { DriveEvent, KeyframeBlock } from '#shared/utils/drive'
-import { DEFAULT_SPEED_MODEL, KEYFRAME_FIELDS } from '#shared/utils/drive'
+import type { DriveEvent, DriveStatus, KeyframeBlock } from '#shared/utils/drive'
+import { KEYFRAME_FIELDS, statusAt } from '#shared/utils/drive'
+import { ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
 
 const props = withDefaults(
   defineProps<{
@@ -13,9 +14,10 @@ const props = withDefaults(
     keyframes: KeyframeBlock
     /** Ground distance of the journey before this segment, metres. */
     missionBeforeM?: number
+    /** The commanded cap the bars and efficiency measure against. */
     maxSpeedMps?: number
   }>(),
-  { missionBeforeM: 0, maxSpeedMps: DEFAULT_SPEED_MODEL.maxSpeedMps },
+  { missionBeforeM: 0, maxSpeedMps: ROVER_MAX_SPEED_MPS },
 )
 
 const t = computed(() => props.frame[KEYFRAME_FIELDS.indexOf('t')]!)
@@ -29,12 +31,22 @@ const efficiency = computed(() =>
     maxSpeedMps: props.maxSpeedMps,
   }),
 )
-/** Stopped inside a pause's window: the rover looks and decides before the next metre. */
-const pausing = computed(() => {
-  if (speed.value > 0) return false
-  const pause = props.events.findLast((e) => e.type === 'pause')
-  const duration = typeof pause?.details?.durationS === 'number' ? pause.details.durationS : 0
-  return pause !== undefined && t.value < pause.t + duration
+const STATUS_ICON: Record<DriveStatus, string> = {
+  driving: 'i-lucide-navigation',
+  turning: 'i-lucide-rotate-cw',
+  assessing: 'i-lucide-scan-search',
+  imaging: 'i-lucide-camera',
+  stopped: 'i-lucide-circle-pause',
+}
+/** What the rover is doing at the playback time, so a stop never reads as a fault. */
+const status = computed(() => {
+  const run = statusAt(props.events, t.value)
+  let label: string = run.status
+  if (run.status === 'turning' && run.angleDeg !== undefined)
+    label = `turning ${Math.round(Math.abs(run.angleDeg))}°`
+  if (run.status === 'imaging' && run.endsAt !== undefined)
+    label = `imaging stop ${Math.max(0, Math.ceil(run.endsAt - t.value))} s`
+  return { status: run.status, label, icon: STATUS_ICON[run.status] }
 })
 
 /** Bars in cm/s, the scale ending a fifth past the cap. */
@@ -56,13 +68,13 @@ const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
     <div class="flex items-baseline justify-between gap-2">
       <p class="text-sm text-muted">Speed</p>
       <UBadge
-        v-if="pausing"
-        data-test="think-pause"
-        icon="i-lucide-hourglass"
+        data-test="drive-status"
+        :data-status="status.status"
+        :icon="status.icon"
         color="neutral"
         variant="subtle"
         size="sm"
-        label="Thinking"
+        :label="status.label"
       />
     </div>
     <p class="text-3xl font-semibold">
@@ -99,8 +111,12 @@ const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
         <dd class="font-semibold">{{ fmt.format(missionBeforeM + reading.actualM) }} m</dd>
       </div>
       <div data-test="efficiency">
-        <UTooltip text="Effective speed so far over the commanded speed">
-          <dt class="text-xs text-muted">Efficiency</dt>
+        <UTooltip
+          :text="`Effective speed so far, stops included, over the ${(maxSpeedMps * 100).toFixed(1)} cm/s commanded cap`"
+        >
+          <dt class="text-xs text-muted">
+            Efficiency <span class="block text-[10px] leading-tight">vs commanded cap</span>
+          </dt>
         </UTooltip>
         <dd class="font-semibold">
           {{ efficiency === undefined ? '—' : `${Math.round(efficiency * 100)} %` }}

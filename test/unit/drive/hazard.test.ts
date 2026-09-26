@@ -65,6 +65,21 @@ describe('driveSegment toward a hidden wall', () => {
       expect(record.outcome.kind).toBe('arrived')
     })
 
+    it('stops 20 s to assess before each replan, wheels still', () => {
+      const replans = record.events.filter((event) => event.type === 'replan')
+      const assessing = record.events.filter((event) => event.type === 'assessing')
+      expect(assessing).toHaveLength(replans.length)
+      for (const [k, replan] of replans.entries()) {
+        const assess = assessing[k]!
+        expect(assess.details).toMatchObject({ durationS: 20, cause: replan.details!.cause })
+        expect(replan.t - assess.t).toBe(20)
+        expect(replan.x).toBe(assess.x)
+        const a = frame(record.keyframes, Math.ceil(assess.t * 2))
+        const b = frame(record.keyframes, Math.floor(replan.t * 2))
+        expect(b[F.spinML]).toBe(a[F.spinML])
+      }
+    })
+
     it('never stands in a failing pose', () => {
       expect(failingFrames(record, world.heightAt)).toBe(0)
     })

@@ -1,16 +1,11 @@
 import * as v from 'valibot'
+import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
 import type { StopDisk } from '../terrain/disk'
 import type { World } from '../terrain/world'
 import { NavError } from './errors'
 import type { SegmentPlan } from './plan'
 import type { RouteFailureReason } from './theta-star'
 import { tracePath } from './trace'
-
-/**
- * Average ground speed of a drive, m/s: 152 m/h cruise with a think pause before every metre
- * (see the drive producer's speed model), about 120 m/h.
- */
-export const EFFECTIVE_SPEED_MPS = 0.033
 
 export const STRAIGHT_LINE_LABELS = ['short', 'medium', 'long'] as const
 export const DETOUR_LABELS = ['nearly straight', 'moderate detour', 'long detour'] as const
@@ -59,6 +54,7 @@ const ReachedRouteSchema = v.strictObject({
   turns_in_place: wholeMetres,
   /** Over the seen part of the path. */
   loose_ground_label: v.picklist(LOOSE_GROUND_LABELS),
+  /** Path length at the AutoNav rate; stops and slope slowdown come on top. */
   estimated_drive_minutes: wholeMetres,
 })
 
@@ -179,7 +175,7 @@ export function summarizeSubmission(
       unseen_label: unseenLabel(metrics.unrevealedFraction),
       turns_in_place: metrics.turnCount,
       loose_ground_label: looseGroundLabel(meanLooseness),
-      estimated_drive_minutes: Math.round(metrics.pathLengthM / EFFECTIVE_SPEED_MPS / 60),
+      estimated_drive_minutes: Math.round(metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
     },
   }
 }

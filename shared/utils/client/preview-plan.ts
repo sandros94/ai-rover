@@ -6,8 +6,8 @@ import type { StopManifest } from '../terrain/manifest'
 import type { MapPoint, MissionRules, SubmissionRefusal } from '../mission'
 import { planGoal } from '../mission/plan-goal'
 import type { NavMetrics } from '../nav/plan'
-import { EFFECTIVE_SPEED_MPS } from '../nav/summary'
 import { traceSegment } from '../nav/trace'
+import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
 import type { DiskTerrain } from './terrain-sampler'
 
 /** What a preview can refuse: everything but the refusals only the server gives. Closed set. */
@@ -87,7 +87,7 @@ export function previewPlan(
     polyline: reached ? plan.polyline : [],
     segmentSlopes: reached ? segmentSlopes(disk, revealed, plan.route.waypoints) : [],
     metrics: plan.metrics,
-    estimatedMinutes: reached ? Math.round(pathLengthM / EFFECTIVE_SPEED_MPS / 60) : 0,
+    estimatedMinutes: reached ? Math.round(pathLengthM / AUTONAV_EFFECTIVE_MPS / 60) : 0,
   }
 }
 

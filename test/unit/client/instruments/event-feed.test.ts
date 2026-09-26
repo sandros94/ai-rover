@@ -13,30 +13,27 @@ describe('feedItems', () => {
     ])
   })
 
-  it('collapses a run of pauses into one item with its count', () => {
+  it('lists every event, stops included, one item each', () => {
     const items = feedItems(
       [
         at(0, 'start'),
-        at(30, 'pause'),
-        at(60, 'pause'),
-        at(70, 'slip'),
-        at(90, 'pause'),
-        at(120, 'pause'),
-        at(150, 'pause'),
+        at(0, 'turning'),
+        at(757, 'imaging'),
+        at(800, 'slip'),
+        at(900, 'assessing'),
+        at(920, 'replan'),
+        at(1000, 'arrived'),
       ],
-      160,
+      1000,
     )
-    expect(items.map((i) => [i.type, i.count, i.t])).toEqual([
-      ['pause', 3, 150],
-      ['slip', 1, 70],
-      ['pause', 2, 60],
-      ['start', 1, 0],
+    expect(items.map((i) => [i.key, i.type, i.t])).toEqual([
+      ['6', 'arrived', 1000],
+      ['5', 'replan', 920],
+      ['4', 'assessing', 900],
+      ['3', 'slip', 800],
+      ['2', 'imaging', 757],
+      ['1', 'turning', 0],
+      ['0', 'start', 0],
     ])
-    expect(items[0]!.firstT).toBe(90)
-  })
-
-  it('keeps each item keyed by its first event', () => {
-    const items = feedItems([at(0, 'start'), at(30, 'pause'), at(60, 'pause')], 60)
-    expect(items.map((i) => i.key)).toEqual(['1', '0'])
   })
 })
