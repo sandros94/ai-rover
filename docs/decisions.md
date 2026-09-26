@@ -80,7 +80,8 @@ Current, settled design decisions with their reasons. This file describes the pr
 
 ## Layout
 
-- **Full viewport, HUD on top.** The scene fills the viewport on every device; instruments are HUD elements that can be hidden, off by default on phones. 3D is the default view with a prominent 2D/3D switch. On desktop, panels are floating windows in the style of framework devtools, so the 3D scene, the 2D map and any instruments can be visible together.
+- **Full viewport, HUD on top.** The scene fills the viewport on every device with a slim top bar (2D/3D switch, playback status, instruments toggle, links). Panels are floating windows at 768 px and wider (drag, resize, minimise, close, snapping, layout kept per browser under a versioned key) and bottom sheets that leave the scene touchable below that. 3D is the default view, remembered per browser. The HUD is on by default on desktop and off on phones; keys `1`/`2` switch views, `h` toggles the HUD, `space` pauses (holding sim time in replay), `l` goes live. Only the base scene and the floating map redraw per frame; everything else updates at 10 Hz. Picking happens on the base 2D view; from 3D a button switches there and the view returns after a submission.
+- **The 2D/3D switch loads three.js on the home page by default** (about 232 KB gzip, lazily): the earlier "3D is lazy and optional" default of 2D is superseded.
 - **Naming.** Approvals are "LGTM"; the idle wait after the first submission is the "planning phase". The whole journey is the **mission** (the schema, API paths and blob keys say so); one drive from a stop to the next is a **segment** ("Segment N") in the interface and in the code alike. "Mission" is never used for a single drive.
 
 ## Dashboard and instruments
