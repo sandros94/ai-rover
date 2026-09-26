@@ -38,6 +38,7 @@ export function syntheticDisk(options: {
     grid: { heights, width: size, height: size, cellSize: 1 },
     origin: { i: -half, j: -half },
     traversable,
+    reachableFrom: { i: half, j: half },
     reachable: traversable.slice(),
     visible: new Uint8Array(size * size).fill(1),
   }

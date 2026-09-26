@@ -1,4 +1,4 @@
-import { reachableFrom } from './analysis'
+import { nearestTraversable, reachableFrom } from './analysis'
 import type { ChunkCoords } from './chunk'
 import { generateChunk, MASK_TRAVERSABLE } from './chunk'
 import { TerrainError } from './errors'
@@ -28,7 +28,12 @@ export interface StopDisk {
   origin: GridCell
   /** Per grid vertex: the chunks' traversable bit, 0 outside every listed chunk. */
   traversable: Uint8Array
-  /** Per grid vertex: 8-connected to the centre vertex over traversable vertices. */
+  /**
+   * Grid vertex the reachability flood fill starts from: the traversable vertex nearest the centre
+   * vertex within the radius (lowest (j, i) on ties), or the centre vertex itself when there is none.
+   */
+  reachableFrom: GridCell
+  /** Per grid vertex: 8-connected to {@link StopDisk.reachableFrom} over traversable vertices. */
   reachable: Uint8Array
   /** Per grid vertex: in line of sight from the world's mast height above the centre vertex. */
   visible: Uint8Array
@@ -112,13 +117,32 @@ export function computeStopDisk(
   const grid: HeightGrid = { heights, width, height, cellSize }
   const vertex = worldToVertex(world, center)
   const viewer: GridCell = { i: vertex.i - origin.i, j: vertex.j - origin.j }
-  const reachable = reachableFrom(traversable, { width, height, start: viewer })
+  // The rover stands at the centre, so the ground around it is reachable even when the centre
+  // vertex itself is too steep; the viewshed still starts from the centre vertex.
+  const seed =
+    nearestTraversable(traversable, {
+      width,
+      height,
+      start: viewer,
+      maxDistance: radius / cellSize,
+    }) ?? viewer
+  const reachable = reachableFrom(traversable, { width, height, start: seed })
   const visible = viewshed(grid, { viewer, mastHeight, radius: radius / cellSize })
-  return { center, radius, chunks, grid, origin, traversable, reachable, visible }
+  return {
+    center,
+    radius,
+    chunks,
+    grid,
+    origin,
+    traversable,
+    reachableFrom: seed,
+    reachable,
+    visible,
+  }
 }
 
 /**
- * The vertex nearest `point` that is traversable, reachable from the disk centre and within the
+ * The vertex nearest `point` that is traversable, marked reachable and within the
  * disk radius, searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point;
  * undefined when there is none. Equal distances go to the lowest (j, i).
  */

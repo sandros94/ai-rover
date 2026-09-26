@@ -1,4 +1,5 @@
 import type { GridCell, HeightGrid } from './grid'
+import { TerrainError } from './errors'
 import { assertCellInGrid, assertGridShape, assertHeightGrid } from './grid'
 
 /**
@@ -60,6 +61,50 @@ export function reachableFrom(
     }
   }
   return out
+}
+
+/**
+ * The traversable vertex nearest `start` (Euclidean, in vertices) no farther than `maxDistance`;
+ * `start` itself when traversable, undefined when there is none. Equal distances go to the
+ * lowest (j, i).
+ */
+export function nearestTraversable(
+  traversable: Uint8Array,
+  options: { width: number; height: number; start: GridCell; maxDistance: number },
+): GridCell | undefined {
+  const { width, height, start, maxDistance } = options
+  assertGridShape(width, height, traversable.length, 'nearestTraversable')
+  assertCellInGrid(start, width, height, 'nearestTraversable')
+  if (!(maxDistance >= 0)) {
+    throw new TerrainError(
+      'OUT_OF_BOUNDS',
+      `nearestTraversable: maxDistance is ${maxDistance}; pass a number of vertices of at least 0.`,
+    )
+  }
+  const limit2 = maxDistance * maxDistance
+  let best: GridCell | undefined
+  let bestDistance2 = Infinity
+  // Ring r holds the vertices at Chebyshev distance r, all at least r away; once r² exceeds the
+  // best squared distance no later ring can hold a nearer or tied vertex.
+  for (let r = 0; r * r <= Math.min(limit2, bestDistance2); r++) {
+    for (let j = Math.max(0, start.j - r); j <= Math.min(height - 1, start.j + r); j++) {
+      const edgeRow = j === start.j - r || j === start.j + r
+      const step = edgeRow ? 1 : 2 * r
+      for (let i = start.i - r; i <= start.i + r; i += step) {
+        if (i < 0 || i >= width || !traversable[j * width + i]) continue
+        const d2 = (i - start.i) ** 2 + (j - start.j) ** 2
+        if (d2 > limit2) continue
+        if (
+          d2 < bestDistance2 ||
+          (d2 === bestDistance2 && (j < best!.j || (j === best!.j && i < best!.i)))
+        ) {
+          best = { i, j }
+          bestDistance2 = d2
+        }
+      }
+    }
+  }
+  return best
 }
 
 function gradient2(grid: HeightGrid, i: number, j: number): number {

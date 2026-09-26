@@ -6,6 +6,7 @@ import {
   defineWorld,
   generateChunk,
   MASK_TRAVERSABLE,
+  reachableFrom,
   snapToPathable,
   TerrainError,
   worldToVertex,
@@ -212,6 +213,14 @@ describe('computeStopDisk', () => {
     expect(seenBeyond).toBe(0)
   })
 
+  it('seeds reachability from its traversable centre vertex, as a plain flood fill from it', () => {
+    const v = worldToVertex(world, center)
+    const start = { i: v.i - disk.origin.i, j: v.j - disk.origin.j }
+    expect(disk.reachableFrom).toEqual(start)
+    const { width, height } = disk.grid
+    expect(disk.reachable).toEqual(reachableFrom(disk.traversable, { width, height, start }))
+  })
+
   it('reaches only traversable vertices', () => {
     let stranded = 0
     for (let k = 0; k < disk.reachable.length; k++)
@@ -230,6 +239,105 @@ describe('computeStopDisk', () => {
     expect(full.chunks).toEqual(chunksCoveringDisk(world, { center: { x: 0, y: 0 }, radius: 500 }))
     expect(full.grid.width).toBe(16 * n + 1)
     expect(full.visible).toHaveLength(full.grid.width * full.grid.height)
+  })
+})
+
+describe('computeStopDisk on an untraversable centre vertex', () => {
+  const world = defineWorld({ seed: 'mars' })
+  const survey = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 100 })
+  const traversableAt = (x: number, y: number) =>
+    survey.traversable[(y - survey.origin.j) * survey.grid.width + (x - survey.origin.i)] === 1
+  // A blocked vertex with a traversable 8-neighbour, found by scanning outward from the origin.
+  let blockedCentre: { x: number; y: number } | undefined
+  for (let y = -40; y <= 40 && !blockedCentre; y++) {
+    for (let x = -40; x <= 40 && !blockedCentre; x++) {
+      if (traversableAt(x, y)) continue
+      let neighbour = false
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) if (traversableAt(x + dx, y + dy)) neighbour = true
+      if (neighbour) blockedCentre = { x, y }
+    }
+  }
+  const disk = computeStopDisk(world, { center: blockedCentre!, radius: 100 })
+  const { width, height } = disk.grid
+  const centreVertex = {
+    i: blockedCentre!.x / world.config.cellSize - disk.origin.i,
+    j: blockedCentre!.y / world.config.cellSize - disk.origin.j,
+  }
+  const k = (c: { i: number; j: number }) => c.j * width + c.i
+
+  it('finds a blocked centre with traversable neighbours to test against', () => {
+    expect(blockedCentre).toBeDefined()
+    expect(disk.traversable[k(centreVertex)]).toBe(0)
+  })
+
+  it('seeds from the traversable vertex nearest the centre, lowest (j, i) on ties', () => {
+    let best: { i: number; j: number } | undefined
+    let bestDistance = Infinity
+    for (let dj = -1; dj <= 1; dj++) {
+      for (let di = -1; di <= 1; di++) {
+        const c = { i: centreVertex.i + di, j: centreVertex.j + dj }
+        if (!disk.traversable[k(c)]) continue
+        const distance = Math.hypot(di, dj)
+        if (distance < bestDistance) {
+          best = c
+          bestDistance = distance
+        }
+      }
+    }
+    expect(disk.reachableFrom).toEqual(best)
+  })
+
+  it('reaches a non-empty region holding the seed, the same as a flood fill from the seed', () => {
+    expect(disk.reachable[k(disk.reachableFrom)]).toBe(1)
+    expect(disk.reachable.some((r) => r === 1)).toBe(true)
+    expect(disk.reachable).toEqual(
+      reachableFrom(disk.traversable, { width, height, start: disk.reachableFrom }),
+    )
+  })
+
+  it('still sees from the centre vertex itself', () => {
+    expect(disk.visible[k(centreVertex)]).toBe(1)
+  })
+
+  it('snaps a goal 30 m away on pathable ground', () => {
+    let goal: { x: number; y: number } | undefined
+    for (let a = 0; a < 360 && !goal; a++) {
+      const x = Math.round(blockedCentre!.x + 30 * Math.cos((a * Math.PI) / 180))
+      const y = Math.round(blockedCentre!.y + 30 * Math.sin((a * Math.PI) / 180))
+      const g = (y - disk.origin.j) * width + (x - disk.origin.i)
+      if (disk.traversable[g] && disk.reachable[g]) goal = { x, y }
+    }
+    expect(goal).toBeDefined()
+    expect(snapToPathable(disk, goal!)).toEqual(goal)
+  })
+})
+
+describe('computeStopDisk with nothing traversable within the radius', () => {
+  // A near-zero slope limit blocks almost every vertex; a 2 m disk then holds none traversable.
+  const world = defineWorld({ seed: 'mars', slopeLimitDeg: 0.01 })
+  const survey = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 60 })
+  const { width } = survey.grid
+  let bare: { x: number; y: number } | undefined
+  for (let y = -40; y <= 40 && !bare; y += 4) {
+    for (let x = -40; x <= 40 && !bare; x += 4) {
+      let any = false
+      for (let dy = -2; dy <= 2; dy++)
+        for (let dx = -2; dx <= 2; dx++)
+          if (survey.traversable[(y + dy - survey.origin.j) * width + (x + dx - survey.origin.i)])
+            any = true
+      if (!any) bare = { x, y }
+    }
+  }
+
+  it('reaches nothing and records the centre vertex as the seed', () => {
+    expect(bare).toBeDefined()
+    const disk = computeStopDisk(world, { center: bare!, radius: 2 })
+    expect(disk.reachable.every((r) => r === 0)).toBe(true)
+    expect(disk.reachableFrom).toEqual({
+      i: bare!.x / world.config.cellSize - disk.origin.i,
+      j: bare!.y / world.config.cellSize - disk.origin.j,
+    })
   })
 })
 
