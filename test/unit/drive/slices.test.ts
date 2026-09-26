@@ -7,6 +7,7 @@ import {
   driveSegment,
   encodeSlice,
   KEYFRAME_STRIDE,
+  MAX_SLICE_INDEX,
   parseJourneyKey,
   parseSegmentManifest,
   parseStoredSegmentManifest,
@@ -260,6 +261,11 @@ describe('journey keys', () => {
       expect(driveErrorOf(() => segmentManifestKey(id))?.code).toBe('INVALID_INPUT')
     }
     expect(driveErrorOf(() => segmentSliceKey('a', -1))?.code).toBe('INVALID_INPUT')
+    // At most seven digits: 30 s slices over nine years.
+    expect(segmentSliceKey('a', MAX_SLICE_INDEX)).toBe('segments/a/slices/9999999.bin')
+    expect(driveErrorOf(() => segmentSliceKey('a', MAX_SLICE_INDEX + 1))?.code).toBe(
+      'INVALID_INPUT',
+    )
   })
 
   it('parses only the served key shapes', () => {
@@ -271,6 +277,9 @@ describe('journey keys', () => {
     expect(parseJourneyKey('segments/smoke-1/manifest.json')).toEqual({
       kind: 'segment-manifest',
       segmentId: 'smoke-1',
+    })
+    expect(parseJourneyKey('segments/smoke-1/slices/9999999.bin')).toMatchObject({
+      index: 9_999_999,
     })
     expect(parseJourneyKey('segments/smoke-1/slices/7.bin')).toEqual({
       kind: 'segment-slice',
@@ -286,6 +295,8 @@ describe('journey keys', () => {
       'segments/a/slices/01.bin',
       'segments/a/slices/-1.bin',
       'segments/a/other.json',
+      'segments/a/slices/10000000.bin',
+      'segments/a/slices/123456789012345.bin',
       `/terrain/${hash}/stops/0.json`,
       // Stops and masks were once keyed by world; those keys are no longer served.
       `terrain/${hash}/stops/0.json`,

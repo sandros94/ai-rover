@@ -25,3 +25,4 @@ export { clampView, fitView, panBy, screenToWorld, worldToScreen, zoomAbout } fr
 export { FOG_DESATURATE, FOG_DIM, hillshade, liftSeen, LUMA, reliefPixels } from './relief'
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'
+export { serverClockOffset } from './server-clock'

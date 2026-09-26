@@ -1,6 +1,8 @@
 /** How often the mission state is refreshed while the tab is visible. */
 export const MISSION_POLL_MS = 5000
 
+import { serverClockOffset } from '#shared/utils/client'
+
 const fetchMission = () => $fetch('/api/mission')
 
 /** `/api/mission` as it arrives: dates as ISO strings. */
@@ -9,7 +11,9 @@ export type MissionStateJson = Awaited<ReturnType<typeof fetchMission>>
 /**
  * Polls the public mission state every {@link MISSION_POLL_MS} while the tab is visible, and
  * not at all while it is hidden. `serverOffsetMs` estimates server minus browser clock, for
- * playing slices against the server's release times.
+ * playing slices against the server's release times. The answer may come from the CDN, a few
+ * seconds old: every request revalidates past the browser's own cache, and the offset counts the
+ * answer's age.
  */
 export function useMissionState() {
   const state = shallowRef<MissionStateJson | null>(null)
@@ -19,10 +23,16 @@ export function useMissionState() {
   let active = false
 
   async function refresh(): Promise<void> {
-    const sent = Date.now()
+    const sentAt = Date.now()
     try {
-      const data = await fetchMission()
-      serverOffsetMs.value = Date.parse(String(data.now)) - (sent + Date.now()) / 2
+      const response = await $fetch.raw<MissionStateJson>('/api/mission', { cache: 'no-cache' })
+      const data = response._data!
+      serverOffsetMs.value = serverClockOffset({
+        serverNow: String(data.now),
+        age: response.headers.get('age'),
+        sentAt,
+        receivedAt: Date.now(),
+      })
       state.value = data
       error.value = null
     } catch (caught) {

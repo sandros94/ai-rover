@@ -10,6 +10,7 @@ import {
   RemoteDatabaseError,
   resetLocalDatabase,
 } from '../utils/migrate'
+import { isSameOrigin } from '../utils/origin'
 import { MissionExistsError, seedLocalMission } from '../utils/seed'
 import { databaseStatus } from '../utils/status'
 
@@ -61,10 +62,18 @@ const ROUTES: Record<string, Route> = {
   },
 }
 
-/** The Database tab's JSON routes. */
+/**
+ * The Database tab's JSON routes. Every POST must come from a page of the dev server itself, so
+ * another site open in the same browser cannot reset or seed the database.
+ */
 export default defineHandler(async (event) => {
   const route = ROUTES[`${event.req.method} ${event.url.pathname.slice(PREFIX.length)}`]
   if (!route) throw HTTPError.status(404)
+  if (event.req.method !== 'GET' && !isSameOrigin(event.req)) {
+    throw new HTTPError("Database actions are accepted only from the dev server's own pages.", {
+      status: 403,
+    })
+  }
   try {
     return await route(process.env.NETLIFY_DB_URL, () => readBody(event))
   } catch (error) {

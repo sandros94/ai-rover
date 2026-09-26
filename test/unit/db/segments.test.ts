@@ -45,7 +45,7 @@ async function driveOnce(
         fromStopId: seeded.stop.id,
         anchor: { x: 0, y: 0 },
       })
-  const submission = await createSubmission(db, submissionInput(round.id, seeded.user.id))
+  const submission = await createSubmission(db, submissionInput(round, seeded.user.id))
   await closeRound(db, round.id, { winnerSubmissionId: submission.id, closesAt: options.startedAt })
   return createSegment(db, {
     missionId: seeded.mission.id,

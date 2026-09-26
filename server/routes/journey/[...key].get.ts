@@ -5,13 +5,15 @@ import {
   segmentManifestKey,
   sliceGate,
 } from '#shared/utils/drive'
+import { acceptsDeflate } from '../../utils/journey/encoding'
 import { createJourneyStore } from '../../utils/journey/store'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
 /**
- * Journey blobs through the CDN, deflated as stored and cached forever. A segment slice is
- * refused, uncached, until wall-clock passes the end of its window (see `sliceReleaseAt`).
+ * Journey blobs through the CDN, deflated as stored and cached forever; a client that does not
+ * accept deflate gets them inflated, cached as its own variant. A segment slice is refused,
+ * uncached, until wall-clock passes the end of its window (see `sliceReleaseAt`).
  */
 export default defineHandler(async (event) => {
   const key = getRouterParam(event, 'key') ?? ''
@@ -30,10 +32,14 @@ export default defineHandler(async (event) => {
 
   const blob = await store.get(key)
   if (!blob) return notFound()
-  return new Response(blob.bytes, {
+  const deflated = acceptsDeflate(event.req.headers.get('accept-encoding'))
+  const body = deflated
+    ? blob.bytes
+    : new Blob([blob.bytes]).stream().pipeThrough(new DecompressionStream('deflate'))
+  return new Response(body, {
     headers: {
       'content-type': blob.metadata.contentType,
-      'content-encoding': blob.metadata.encoding,
+      ...(deflated && { 'content-encoding': blob.metadata.encoding }),
       'vary': 'accept-encoding',
       'cache-control': IMMUTABLE,
       'netlify-cdn-cache-control': `${IMMUTABLE}, durable`,

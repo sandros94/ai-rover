@@ -1,22 +1,23 @@
-import { eq } from 'drizzle-orm'
-import { defineHandler, readValidatedBody } from 'nitro/h3'
+import { defineHandler, HTTPError, readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
-import { userAccount } from '#server/database/schema'
-import { createUser } from '#server/repositories/users'
-import { useDB } from '#server/utils/db'
+import { findOrCreateDevUser } from '../../utils/login'
+import { RemoteDatabaseError } from '../../utils/migrate'
 
 const BodySchema = v.object({ handle: v.pipe(v.string(), v.regex(/^[a-z0-9-]{1,32}$/)) })
 
-/** Finds or creates `dev:<handle>` and sets the real session cookie for it, no provider involved. */
+/**
+ * Finds or creates `dev:<handle>` and sets the real session cookie for it, no provider involved.
+ * Refuses (403) while the database is not on this machine.
+ */
 export default defineHandler(async (event) => {
   const { handle } = await readValidatedBody(event, BodySchema)
-  const db = useDB()
-  const [found] = await db
-    .select({ id: userAccount.id, displayName: userAccount.displayName })
-    .from(userAccount)
-    .where(eq(userAccount.handle, `dev:${handle}`))
-    .limit(1)
-  const user = found ?? (await createUser(db, { displayName: handle, handle: `dev:${handle}` }))
+  let user: Awaited<ReturnType<typeof findOrCreateDevUser>>
+  try {
+    user = await findOrCreateDevUser(process.env.NETLIFY_DB_URL, handle)
+  } catch (error) {
+    if (error instanceof RemoteDatabaseError) throw new HTTPError(error.message, { status: 403 })
+    throw error
+  }
   await setUserSession(event, {
     user: { id: user.id, displayName: user.displayName, handle: `dev:${handle}`, providers: [] },
   })

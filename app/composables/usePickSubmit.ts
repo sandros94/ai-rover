@@ -5,13 +5,16 @@ import type { usePlanPreview } from './usePlanPreview'
 /**
  * The pick-and-confirm flow over a route preview: hovering previews unless a point is picked or
  * a submission is highlighted, a tap picks, confirming submits the picked point and keeps the
- * server's refusal (its reason or error code) to show. A new highlight drops the pick.
+ * server's refusal (its reason or error code) to show. A new highlight drops the pick. A
+ * `round-changed` refusal keeps the pick and reports the state stale, so the preview plans again
+ * from the round as it now is before the user confirms again.
  */
 export function usePickSubmit(
   preview: ReturnType<typeof usePlanPreview>,
   options: {
     highlight: MaybeRefOrGetter<{ id: string; goal: MapPoint } | null>
     onSubmitted: () => void
+    onStale: () => void
   },
 ) {
   const picked = ref<MapPoint | null>(null)
@@ -62,6 +65,7 @@ export function usePickSubmit(
         reason: data?.reason ?? data?.code ?? 'error',
         message: data?.message ?? (caught instanceof Error ? caught.message : String(caught)),
       }
+      if (data?.reason === 'round-changed') options.onStale()
     } finally {
       submitting.value = false
     }

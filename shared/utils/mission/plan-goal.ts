@@ -1,22 +1,30 @@
 import type { SegmentPlan } from '../nav/plan'
 import { planSegment } from '../nav/plan'
-import type { StopDisk } from '../terrain/disk'
+import type { SnapRefusal, StopDisk } from '../terrain/disk'
 import type { GoalRefusal, MapPoint, MissionRules } from './rules'
 import { checkPathClearOfDeaths, checkSubmissionGoal } from './rules'
 
 /**
  * Why a goal was not accepted. Closed set.
  *
- * - `unpathable`: no traversable vertex reachable from the stop lies near the goal.
+ * - `unpathable`: no seen vertex near the goal is traversable and reachable from the stop.
+ * - `unrevealed`: the rover has seen nothing near the goal.
  * - `too-near`, `too-far`, `near-death-zone`: the snapped goal breaks a mission rule.
  * - `path-near-death-zone`: the planned route passes too close to a death.
- * - `judged-infeasible`: Jev's verdict is reject; only the server, which asks Jev, gives it.
+ * - `judged-infeasible`: Jev's verdict is reject.
+ * - `too-many-attempts`: the user has used every judged attempt the round allows.
+ * - `round-changed`: the round moved to another stop or anchor while the goal was being judged;
+ *   plan again from the round as it is now.
+ *
+ * The last three are given only by the server, which counts attempts and asks Jev.
  */
 export type SubmissionRefusal =
-  | 'unpathable'
+  | SnapRefusal
   | GoalRefusal
   | 'path-near-death-zone'
   | 'judged-infeasible'
+  | 'too-many-attempts'
+  | 'round-changed'
 
 /**
  * A snapped goal checked against the rules and the deaths from `start`, then planned over the

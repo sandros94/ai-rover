@@ -2,12 +2,16 @@ import type { DriveOutcome } from '#shared/utils/drive'
 
 /**
  * Outcomes forced onto the next drives, in order: the rover still drives the real terrain, but
- * the record ends as given. Hidden hazards severe enough to fail or stop a drive are rare on the
+ * the record ends as given; or errors the next drives throw instead. Hidden hazards severe enough to fail or stop a drive are rare on the
  * default terrain, so tests inject them. A test file opts in with
  * `vi.mock('#shared/utils/drive/segment', async (original) => (await import('./forced')).forcedDriveSegment(original))`,
  * importing the module inside the factory since `vi.mock` is hoisted above the imports.
  */
-export const forced = { outcomes: [] as ((real: DriveOutcome) => DriveOutcome)[] }
+export const forced = {
+  outcomes: [] as ((real: DriveOutcome) => DriveOutcome)[],
+  /** Thrown by the next drives instead of driving, in order, before `outcomes` apply. */
+  errors: [] as Error[],
+}
 
 export async function forcedDriveSegment(
   importOriginal: <T>() => Promise<T>,
@@ -16,6 +20,8 @@ export async function forcedDriveSegment(
   return {
     ...actual,
     driveSegment: (...args: Parameters<typeof actual.driveSegment>) => {
+      const error = forced.errors.shift()
+      if (error) throw error
       const driven = actual.driveSegment(...args)
       const force = forced.outcomes.shift()
       return force

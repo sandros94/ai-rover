@@ -57,3 +57,13 @@ export async function setCurrentStop(db: DB, missionId: string, stopId: string):
     return row!
   })
 }
+
+/** Records when a tick next has something to do; null while nothing is pending. */
+export async function setNextDueAt(db: DB, missionId: string, at: Date | null): Promise<void> {
+  const [row] = await db
+    .update(mission)
+    .set({ nextDueAt: at })
+    .where(eq(mission.id, missionId))
+    .returning({ id: mission.id })
+  if (!row) throw new DbError('NOT_FOUND', `Mission ${missionId} does not exist.`)
+}

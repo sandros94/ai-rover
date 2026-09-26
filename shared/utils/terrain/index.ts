@@ -21,7 +21,7 @@ export { generateChunk, MASK_SEEN, MASK_TRAVERSABLE } from './chunk'
 export { nearestTraversable, reachableFrom, slopeAt, traversableMask } from './analysis'
 export { viewshed } from './viewshed'
 export { CHUNK_FORMAT_VERSION, CHUNK_HEADER_BYTES, decodeChunk, encodeChunk } from './encode'
-export type { StopDisk } from './disk'
+export type { SnapRefusal, StopDisk } from './disk'
 export {
   chunksCoveringDisk,
   completeStopDisk,

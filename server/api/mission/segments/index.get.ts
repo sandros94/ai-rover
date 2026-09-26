@@ -4,6 +4,6 @@ import { defineMissionHandler } from '../../../utils/mission/http'
 import { journeyPage, parseJourneyPage } from '../../../utils/mission/journey'
 
 /** The journey log: settled drives, newest first, `?page=` of fifty. */
-export default defineMissionHandler((event, { missionId }) =>
+export default defineMissionHandler({ access: 'read', cache: 'none' }, (event, { missionId }) =>
   journeyPage(useDB(), { missionId, page: parseJourneyPage(getQuery(event).page) }),
 )

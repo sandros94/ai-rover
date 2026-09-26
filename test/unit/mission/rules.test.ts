@@ -19,6 +19,7 @@ describe('DEFAULT_MISSION_RULES', () => {
       segmentDistanceBand: { minM: 50, maxM: 250 },
       failureZone: { destinationRadiusM: 30, pathRadiusM: 15, clusterRadiusM: 50, strikes: 3 },
       graceWindowMs: 300_000,
+      maxJudgedPerRound: 5,
       tieBreak: 'risk',
     })
     expect(Object.isFrozen(rules)).toBe(true)

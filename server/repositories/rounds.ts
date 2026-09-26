@@ -1,8 +1,8 @@
-import { and, asc, eq, isNull, ne } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import type { DB } from '../database/db'
 import { DbError, isUniqueViolation } from '../database/errors'
 import type { Round } from '../database/schema'
-import { round, segment, stop, submission } from '../database/schema'
+import { round, stop, submission } from '../database/schema'
 
 export interface NewRound {
   missionId: string
@@ -49,18 +49,6 @@ export async function getOpenRound(db: DB, missionId: string): Promise<Round | u
     .from(round)
     .where(and(eq(round.missionId, missionId), eq(round.status, 'open')))
   return row
-}
-
-/** The oldest closed round of the mission whose winner has no segment yet. */
-export async function findUnresolvedRound(db: DB, missionId: string): Promise<Round | undefined> {
-  const [row] = await db
-    .select({ round })
-    .from(round)
-    .leftJoin(segment, eq(segment.roundId, round.id))
-    .where(and(eq(round.missionId, missionId), eq(round.status, 'closed'), isNull(segment.id)))
-    .orderBy(asc(round.closesAt), asc(round.id))
-    .limit(1)
-  return row?.round
 }
 
 /**
@@ -154,7 +142,11 @@ export async function reanchorRound(
   })
 }
 
-async function lockOpenRound(tx: DB, roundId: string): Promise<Round> {
+/**
+ * The open round, locked for update until the transaction ends: submissions and likes, which
+ * share-lock it, wait. Refuses a round that is not open.
+ */
+export async function lockOpenRound(tx: DB, roundId: string): Promise<Round> {
   const [current] = await tx.select().from(round).where(eq(round.id, roundId)).for('update')
   if (!current) throw new DbError('NOT_FOUND', `Round ${roundId} does not exist.`)
   if (current.status !== 'open') {

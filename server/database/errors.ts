@@ -5,10 +5,11 @@
  * - `NOT_FOUND`: the referenced record does not exist.
  * - `INVALID_STATE`: the record exists but its state forbids the operation (a closed round, a
  *   settled submission, a stop of another mission, an identity linked elsewhere).
+ * - `ROUND_CHANGED`: the round moved to another stop or anchor after the caller planned from it.
  *
  * Closed set: callers may match on it exhaustively, so adding a code is a breaking change.
  */
-export type DbErrorCode = 'ALREADY_SUBMITTED' | 'NOT_FOUND' | 'INVALID_STATE'
+export type DbErrorCode = 'ALREADY_SUBMITTED' | 'NOT_FOUND' | 'INVALID_STATE' | 'ROUND_CHANGED'
 
 export class DbError extends Error {
   override name = 'DbError'

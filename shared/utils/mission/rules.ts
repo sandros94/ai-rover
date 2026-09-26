@@ -20,6 +20,11 @@ export interface MissionRules {
   /** Time the first submission after an idle drive end waits for competitors. */
   graceWindowMs: number
   /**
+   * Submissions one user may make in one round, whatever became of them (withdrawn and rejected
+   * ones included): each was planned and judged by Jev, so this bounds what one user can spend.
+   */
+  maxJudgedPerRound: number
+  /**
    * How submissions with equal likes are ordered. `'risk'`: lower Jev risk score, then higher
    * confidence sum, then earlier. `'confidence'`: higher confidence sum, then earlier.
    * Closed set.
@@ -36,6 +41,7 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
     strikes: 3,
   }),
   graceWindowMs: 5 * 60_000,
+  maxJudgedPerRound: 5,
   tieBreak: 'risk',
 })
 

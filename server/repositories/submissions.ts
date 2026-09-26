@@ -21,6 +21,8 @@ export interface SubmissionAssessment {
 export type NewSubmission = SubmissionAssessment & {
   roundId: string
   userId: string
+  /** Where the round stood when the goal was planned; the round must still stand there. */
+  plannedFrom: { fromStopId: string; anchor: { x: number; y: number } }
   /** The goal after snapping to a pathable cell, world metres. */
   goal: { x: number; y: number }
   /** Default: the database's clock. */
@@ -36,12 +38,22 @@ export interface ListedSubmission extends Submission {
   submitter: { id: string; displayName: string; avatarUrl: string | null }
 }
 
-/** Refuses a closed round, and a second open submission by the same user in it. */
+/**
+ * Refuses a closed round, a round that has left the stop or anchor the goal was planned from
+ * (`ROUND_CHANGED`: plan again), and a second open submission by the same user in it. The round
+ * row stays share-locked until the insert commits, so a settlement moving it waits for the insert
+ * or is waited on.
+ */
 export async function createSubmission(db: DB, input: NewSubmission): Promise<Submission> {
-  const { goal, ...rest } = input
+  const { goal, plannedFrom, ...rest } = input
   return db.transaction(async (tx) => {
     const [target] = await tx
-      .select({ status: round.status })
+      .select({
+        status: round.status,
+        fromStopId: round.fromStopId,
+        anchorX: round.anchorX,
+        anchorY: round.anchorY,
+      })
       .from(round)
       .where(eq(round.id, input.roundId))
       .for('share')
@@ -50,6 +62,16 @@ export async function createSubmission(db: DB, input: NewSubmission): Promise<Su
       throw new DbError(
         'INVALID_STATE',
         `Round ${input.roundId} is closed; submit to the mission's open round.`,
+      )
+    }
+    if (
+      target.fromStopId !== plannedFrom.fromStopId ||
+      target.anchorX !== plannedFrom.anchor.x ||
+      target.anchorY !== plannedFrom.anchor.y
+    ) {
+      throw new DbError(
+        'ROUND_CHANGED',
+        `Round ${input.roundId} now leaves from stop ${target.fromStopId} anchored at (${target.anchorX}, ${target.anchorY}); plan the goal again from there.`,
       )
     }
     try {
@@ -75,6 +97,18 @@ export async function getSubmission(db: DB, submissionId: string): Promise<Submi
   const [row] = await db.select().from(submission).where(eq(submission.id, submissionId))
   if (!row) throw new DbError('NOT_FOUND', `Submission ${submissionId} does not exist.`)
   return row
+}
+
+/** Submissions `userId` made in the round, whatever their status. */
+export async function countUserRoundSubmissions(
+  db: DB,
+  options: { roundId: string; userId: string },
+): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(submission)
+    .where(and(eq(submission.roundId, options.roundId), eq(submission.userId, options.userId)))
+  return row?.n ?? 0
 }
 
 /** Every submission of the round in creation order, whatever its status. */
@@ -104,6 +138,19 @@ export async function listRoundSubmissions(db: DB, roundId: string): Promise<Lis
     likes: row.likes ?? 0,
     submitter: row.submitter,
   }))
+}
+
+/**
+ * The round's open submissions in creation order, locked for update until the transaction ends,
+ * so none is withdrawn or liked while the caller settles them.
+ */
+export async function lockOpenSubmissions(tx: DB, roundId: string): Promise<Submission[]> {
+  return tx
+    .select()
+    .from(submission)
+    .where(and(eq(submission.roundId, roundId), eq(submission.status, 'open')))
+    .orderBy(asc(submission.createdAt), asc(submission.id))
+    .for('update')
 }
 
 /** Settles an open submission; settled ones never change again. Rejecting takes a reason. */

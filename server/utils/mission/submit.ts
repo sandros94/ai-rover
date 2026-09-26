@@ -7,6 +7,7 @@ import { getDrivingSegment, listDeaths } from '../../repositories/segments'
 import { getStop } from '../../repositories/stops'
 import type { SubmissionAssessment } from '../../repositories/submissions'
 import {
+  countUserRoundSubmissions,
   createSubmission,
   getSubmission,
   listRoundSubmissions,
@@ -19,6 +20,7 @@ import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
+import { recordNextDue } from './round'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
 export type SubmitResult =
@@ -64,13 +66,15 @@ export async function assessGoal(
 }
 
 /**
- * Submits a goal to the mission's open round: the goal snapped to the nearest pathable vertex,
+ * Submits a goal to the mission's open round: the goal snapped to the nearest seen pathable vertex,
  * checked against the rules and the settled deaths, planned from the round's anchor over the
  * disk of its stop and what the rover had seen there, then judged by Jev. During a drive that is
  * the stop the rover left and its mask from before the drive, so nothing the drive discovers is
  * used. Throws `ALREADY_SUBMITTED` (before any planning or Jev request) while the user has an
  * open submission in the round, and `AUTHOR_DRIVING` while the rover drives the user's own
- * segment.
+ * segment; refuses `too-many-attempts`, also before planning, once the user has made
+ * `rules.maxJudgedPerRound` submissions in the round, and `round-changed`, storing nothing, when
+ * the round moved to another stop or anchor while the goal was planned and judged.
  */
 export async function submitGoal(
   db: DB,
@@ -110,15 +114,22 @@ export async function submitGoal(
     )
   }
 
+  const attempts = await countUserRoundSubmissions(db, { roundId: round.id, userId })
+  if (attempts >= mission.config.rules.maxJudgedPerRound) {
+    return { accepted: false, reason: 'too-many-attempts', submission: null }
+  }
+
   const world = missionWorld(mission)
   const from = await getStop(db, round.fromStopId)
   const disk = stopDisk(world, from)
-  const goal = snapToPathable(disk, options.goal)
-  if (!goal) return { accepted: false, reason: 'unpathable', submission: null }
+  const revealed = revealedOverDisk(await loadRevealedMask(store, from), disk)
+  const snapped = snapToPathable(disk, options.goal, { revealed })
+  if (!snapped.ok) return { accepted: false, reason: snapped.reason, submission: null }
+  const goal = snapped.point
   const ground: PlanningGround = {
     world,
     disk,
-    revealed: revealedOverDisk(await loadRevealedMask(store, from), disk),
+    revealed,
     start: { x: round.anchorX, y: round.anchorY },
   }
   const assessed = await assessGoal(ground, {
@@ -130,16 +141,28 @@ export async function submitGoal(
   if (!assessed.ok) return { accepted: false, reason: assessed.reason, submission: null }
 
   const rejected = assessed.assessment.judgment.verdict === 'reject'
-  const submission = await createSubmission(db, {
-    roundId: round.id,
-    userId,
-    goal,
-    ...assessed.assessment,
-    ...(rejected
-      ? { status: 'rejected' as const, rejectionReason: 'judged-infeasible' as const }
-      : { status: 'open' as const }),
-    createdAt: now,
-  })
+  let submission: Submission
+  try {
+    submission = await createSubmission(db, {
+      roundId: round.id,
+      userId,
+      goal,
+      plannedFrom: { fromStopId: round.fromStopId, anchor: ground.start },
+      ...assessed.assessment,
+      ...(rejected
+        ? { status: 'rejected' as const, rejectionReason: 'judged-infeasible' as const }
+        : { status: 'open' as const }),
+      createdAt: now,
+    })
+  } catch (error) {
+    // A settlement moved the round while the goal was planned and judged.
+    if (error instanceof DbError && error.code === 'ROUND_CHANGED') {
+      return { accepted: false, reason: 'round-changed', submission: null }
+    }
+    throw error
+  }
+  // The first open submission of an idle round starts its grace window.
+  if (!rejected) await recordNextDue(db, mission, now)
   return rejected
     ? { accepted: false, reason: 'judged-infeasible', submission }
     : { accepted: true, submission }

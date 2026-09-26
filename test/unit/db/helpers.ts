@@ -16,7 +16,7 @@ import type { NewSubmission } from '#server/repositories/submissions'
 import { createSubmission } from '#server/repositories/submissions'
 import { closeRound } from '#server/repositories/rounds'
 import { createSegment, settleSegment } from '#server/repositories/segments'
-import type { Stop } from '#server/database/schema'
+import type { Round, Stop } from '#server/database/schema'
 import type { DriveOutcome } from '#shared/utils/drive'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 
@@ -26,12 +26,20 @@ export const MIGRATIONS_DIR = fileURLToPath(
 
 /**
  * A fresh in-memory platform database with every generated migration applied by the platform's
- * applier, reached through the same connector and driver as `useDB()`.
+ * applier, reached through the same connector and driver as `useDB()`. `onQuery` sees the SQL of
+ * every query the returned database runs.
  */
-export async function createTestDb(): Promise<{ db: DB; close: () => Promise<void> }> {
+export async function createTestDb(
+  options: { onQuery?: (sql: string) => void } = {},
+): Promise<{ db: DB; close: () => Promise<void> }> {
   const server = new NetlifyDB({ logger: () => {} })
   const connection = getDatabase({ connectionString: await server.start() })
-  const db = drizzle({ client: connection, relations })
+  const { onQuery } = options
+  const db = drizzle({
+    client: connection,
+    relations,
+    ...(onQuery && { logger: { logQuery: (query: string) => onQuery(query) } }),
+  })
   await applyMigrations(executorOver(db), MIGRATIONS_DIR)
   return {
     db,
@@ -112,12 +120,21 @@ export async function seedMission(db: DB) {
   return { mission, stop, round, user }
 }
 
+/** A submission to `round`, planned from where the round stands now. */
 export function submissionInput(
-  roundId: string,
+  round: Pick<Round, 'id' | 'fromStopId' | 'anchorX' | 'anchorY'>,
   userId: string,
   goal = { x: 0, y: 80 },
 ): NewSubmission {
-  return { roundId, userId, goal, judgment: JUDGMENT, metrics: METRICS, summary: SUMMARY }
+  return {
+    roundId: round.id,
+    userId,
+    goal,
+    plannedFrom: { fromStopId: round.fromStopId, anchor: { x: round.anchorX, y: round.anchorY } },
+    judgment: JUDGMENT,
+    metrics: METRICS,
+    summary: SUMMARY,
+  }
 }
 
 /** Start of the first drive of {@link seedJourney}; each drive starts two hours after the last. */
@@ -142,12 +159,12 @@ function journeyOutcome(kind: DriveOutcome['kind'], distanceM: number, at = { x:
 export async function seedJourney(db: DB) {
   const seeded = await seedMission(db)
   const { mission, user } = seeded
-  async function drive(from: Stop, k: number, result: DriveOutcome, round?: { id: string }) {
+  async function drive(from: Stop, k: number, result: DriveOutcome, round?: Round) {
     const r =
       round ?? (await openRound(db, { missionId: mission.id, fromStopId: from.id, anchor: from }))
     const submission = await createSubmission(
       db,
-      submissionInput(r.id, user.id, { x: result.endPose.x, y: result.endPose.y }),
+      submissionInput(r, user.id, { x: result.endPose.x, y: result.endPose.y }),
     )
     await closeRound(db, r.id, { winnerSubmissionId: submission.id, closesAt: plus(k * 2 * HOUR) })
     return createSegment(db, {

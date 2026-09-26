@@ -1,7 +1,7 @@
 import { and, count, eq } from 'drizzle-orm'
 import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
-import { submission, submissionLike } from '../database/schema'
+import { round, submission, submissionLike } from '../database/schema'
 
 /** Idempotent. Likes change only while the submission is open, which implies an open round. */
 export async function like(
@@ -45,11 +45,15 @@ export async function countLikes(db: DB, submissionId: string): Promise<number> 
   return row?.likes ?? 0
 }
 
-/** Holds the submission's status steady until the transaction ends. */
+/**
+ * Holds the submission's status and its round steady until the transaction ends: a round being
+ * closed, locked for update, is waited for, and a close waits for the like.
+ */
 async function lockOpenSubmission(tx: DB, submissionId: string): Promise<void> {
   const [row] = await tx
     .select({ status: submission.status })
     .from(submission)
+    .innerJoin(round, eq(round.id, submission.roundId))
     .where(eq(submission.id, submissionId))
     .for('share')
   if (!row) throw new DbError('NOT_FOUND', `Submission ${submissionId} does not exist.`)

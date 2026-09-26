@@ -170,39 +170,65 @@ export function completeStopDisk(
 }
 
 /**
- * The vertex nearest `point` that is traversable, marked reachable and within the
- * disk radius, searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point;
- * undefined when there is none. Equal distances go to the lowest (j, i).
+ * Why {@link snapToPathable} found no vertex. Closed set.
+ *
+ * - `unrevealed`: no vertex within the search radius has been seen, so nothing there may be picked.
+ * - `unpathable`: seen vertices lie within the search radius but none is traversable and
+ *   reachable, or no vertex of the disk lies there at all.
+ */
+export type SnapRefusal = 'unpathable' | 'unrevealed'
+
+/**
+ * The vertex nearest `point` that is seen, traversable, marked reachable and within the disk
+ * radius, searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point. Equal
+ * distances go to the lowest (j, i). The refusal is decided from seen vertices only, so it never
+ * tells what unseen ground holds.
  */
 export function snapToPathable(
   disk: StopDisk,
   point: { x: number; y: number },
-  options: { radiusM?: number } = {},
-): { x: number; y: number } | undefined {
+  options: {
+    /** One byte per disk-grid vertex, as `revealedOverDisk` gives it. */
+    revealed: Uint8Array
+    radiusM?: number
+  },
+): { ok: true; point: { x: number; y: number } } | { ok: false; reason: SnapRefusal } {
   assertPoint(point, 'snapToPathable')
+  const { revealed } = options
   const radiusM = options.radiusM ?? DEFAULT_SNAP_RADIUS
   assertRadius(radiusM, 'snapToPathable')
   const { center, radius, origin, grid, traversable, reachable } = disk
   const { width, height, cellSize } = grid
+  if (revealed.length !== width * height) {
+    throw new TerrainError(
+      'INVALID_GRID',
+      `snapToPathable: revealed holds ${revealed.length} values; the ${width}×${height} disk grid needs ${width * height}. Pass revealedOverDisk of this disk.`,
+    )
+  }
   const reach = Math.ceil(radiusM / cellSize)
   const ci = Math.round(point.x / cellSize) - origin.i
   const cj = Math.round(point.y / cellSize) - origin.j
   let best: { x: number; y: number } | undefined
   let bestDistance = Infinity
+  let candidates = false
+  let seen = false
   for (let j = Math.max(0, cj - reach); j <= Math.min(height - 1, cj + reach); j++) {
     for (let i = Math.max(0, ci - reach); i <= Math.min(width - 1, ci + reach); i++) {
-      const k = j * width + i
-      if (!traversable[k] || !reachable[k]) continue
       const x = (origin.i + i) * cellSize
       const y = (origin.j + j) * cellSize
       const distance = Math.hypot(x - point.x, y - point.y)
-      if (distance > radiusM || distance >= bestDistance) continue
-      if (Math.hypot(x - center.x, y - center.y) > radius) continue
+      if (distance > radiusM || Math.hypot(x - center.x, y - center.y) > radius) continue
+      candidates = true
+      const k = j * width + i
+      if (!revealed[k]) continue
+      seen = true
+      if (!traversable[k] || !reachable[k] || distance >= bestDistance) continue
       best = { x, y }
       bestDistance = distance
     }
   }
-  return best
+  if (best) return { ok: true, point: best }
+  return { ok: false, reason: candidates && !seen ? 'unrevealed' : 'unpathable' }
 }
 
 /** Distance from `value` to the closed interval [lo, hi]. */

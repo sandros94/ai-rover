@@ -4,7 +4,7 @@ import * as v from 'valibot'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
 import { SubmissionSummarySchema } from '#shared/utils/nav/summary'
 import { canonicalJson } from '#shared/utils/terrain/manifest'
-import { JudgeError } from './errors'
+import { JUDGE_UNAVAILABLE, JudgeError } from './errors'
 import { JUDGE_QUESTIONS } from './questions'
 
 /** Pinned model: answers are reproducible only within one model version. */
@@ -44,18 +44,21 @@ export interface SubmissionJudgment extends JudgedAnswers {
   usage?: { inputTokens: number }
 }
 
-/** Where judged answers are memoised; a `Map` works, as does an async store. */
+/**
+ * Where judged answers are kept, by request hash ({@link jevRequestKey}). The server keeps them in
+ * the database so an identical submission is never paid for twice, across instances and deploys.
+ */
 export interface JevCache {
-  get(key: string): JudgedAnswers | undefined | Promise<JudgedAnswers | undefined>
-  set(key: string, value: JudgedAnswers): unknown
+  get(hash: string): Promise<JudgedAnswers | undefined>
+  /** Keeps the first answers stored under `hash`; a later write of the same hash changes nothing. */
+  set(hash: string, value: JudgedAnswers): Promise<void>
 }
 
 export interface JevClientOptions {
   /** TypeSafe API key; empty or missing throws `NOT_CONFIGURED`. */
   apiKey: string | undefined
   fetch?: Fetch
-  /** Default: a `Map` private to this client. */
-  cache?: JevCache
+  cache: JevCache
   /** Per attempt. Default: the SDK's 10 s. */
   timeoutMs?: number
   /** Retries after the first attempt on 408, 429, 5xx and connection failures. Default: the SDK's 2. */
@@ -106,7 +109,7 @@ export function createJevClient(options: JevClientOptions): JevClient {
     )
   }
   const { rejectBelow = 0.2, acceptAbove = 0.8 } = options.verdict ?? {}
-  const cache = options.cache ?? new Map<string, JudgedAnswers>()
+  const { cache } = options
   const client = new TypeSafeClient({
     apiKey,
     defaultModel: JEV_MODEL,
@@ -146,19 +149,16 @@ export function createJevClient(options: JevClientOptions): JevClient {
       try {
         result = await client.systemOne(request, { signal: callOptions.signal })
       } catch (error) {
-        throw new JudgeError(
-          'UPSTREAM',
-          `Jev request failed: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        )
+        throw new JudgeError('UPSTREAM', JUDGE_UNAVAILABLE, { cause: error })
       }
       const parsed = v.safeParse(ResultSchema, result)
       if (!parsed.success) {
-        throw new JudgeError(
-          'UPSTREAM',
-          `Jev answered outside the questions asked: ${describeIssue(parsed.issues)}.`,
-          { cause: new v.ValiError(parsed.issues) },
-        )
+        throw new JudgeError('UPSTREAM', JUDGE_UNAVAILABLE, {
+          cause: new Error(
+            `Jev answered outside the questions asked: ${describeIssue(parsed.issues)}.`,
+            { cause: new v.ValiError(parsed.issues) },
+          ),
+        })
       }
       const { answers, usage } = parsed.output
       const judged: JudgedAnswers = {

@@ -100,8 +100,8 @@ describe('rounds', () => {
   it('closes with a winner, settles the other open submissions, and allows a new round', async () => {
     const { mission, stop, round, user } = await seedMission(db)
     const rival = await createUser(db, { displayName: 'Rival' })
-    const winner = await createSubmission(db, submissionInput(round.id, user.id))
-    const loser = await createSubmission(db, submissionInput(round.id, rival.id))
+    const winner = await createSubmission(db, submissionInput(round, user.id))
+    const loser = await createSubmission(db, submissionInput(round, rival.id))
     const closesAt = new Date('2026-09-25T13:00:00Z')
     const closed = await closeRound(db, round.id, { winnerSubmissionId: winner.id, closesAt })
     expect(closed).toMatchObject({ status: 'closed', winnerSubmissionId: winner.id, closesAt })
@@ -123,7 +123,7 @@ describe('rounds', () => {
   it('refuses to close with a winner from another round or twice', async () => {
     const a = await seedMission(db)
     const b = await seedMission(db)
-    const foreign = await createSubmission(db, submissionInput(b.round.id, b.user.id))
+    const foreign = await createSubmission(db, submissionInput(b.round, b.user.id))
     const closesAt = new Date()
     expect(
       (await dbErrorOf(closeRound(db, a.round.id, { winnerSubmissionId: foreign.id, closesAt })))
@@ -144,7 +144,7 @@ describe('rounds', () => {
     const a = await seedMission(db)
     const b = await seedMission(db)
     await closeRound(db, a.round.id, {
-      winnerSubmissionId: (await createSubmission(db, submissionInput(a.round.id, a.user.id))).id,
+      winnerSubmissionId: (await createSubmission(db, submissionInput(a.round, a.user.id))).id,
       closesAt: new Date(),
     })
     const error = await dbErrorOf(
@@ -155,7 +155,7 @@ describe('rounds', () => {
 
   it('voids an open round: no winner, its open submissions lost, and allows a new round', async () => {
     const { mission, stop, round, user } = await seedMission(db)
-    const waiting = await createSubmission(db, submissionInput(round.id, user.id))
+    const waiting = await createSubmission(db, submissionInput(round, user.id))
     const closesAt = new Date('2026-09-25T13:00:00Z')
     const voided = await voidRound(db, round.id, { closesAt })
     expect(voided).toMatchObject({ status: 'void', winnerSubmissionId: null, closesAt })

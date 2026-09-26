@@ -176,6 +176,7 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
           :keyframes="snapshot.keyframes"
           :t="snapshot.t"
           @submitted="emit('changed')"
+          @stale="emit('changed')"
           @ground="ground = $event"
         >
           <template #controls>

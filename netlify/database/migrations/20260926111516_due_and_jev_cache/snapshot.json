@@ -1,0 +1,1623 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "eb18085e-ea43-4c8d-a4e5-5353c2885626",
+  "prevIds": [
+    "67e99ae2-cf56-47fd-b10c-d53ef3e522a1"
+  ],
+  "ddl": [
+    {
+      "isRlsEnabled": false,
+      "name": "jev_judgment",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "mission",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "round",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "segment",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "stop",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "submission",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "submission_like",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "user_account",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "user_identity",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "hash",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "jev_judgment"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "model",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "jev_judgment"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "answers",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "jev_judgment"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "jev_judgment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "seed",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "world_hash",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "config",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'active'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "current_stop_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "sols_epoch",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "next_due_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "from_stop_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "anchor_x",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "anchor_y",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "opens_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "closes_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'open'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "winner_submission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "round_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "submission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "from_stop_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "to_stop_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'driving'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "ends_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "manifest_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "outcome",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "death_x",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "death_y",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "attempt",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "mission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "index",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "x",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "y",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "heading_rad",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "manifest_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "revealed_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "from_segment_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "round_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "goal_x",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "goal_y",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'open'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "rejection_reason",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "judgment",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "metrics",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "summary",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "submission_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_account"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_account"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "display_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_account"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "avatar_url",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_account"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "handle",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_account"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "subject",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "mission_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"status\" = 'open'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "round_open_per_mission_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "mission_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "round_mission_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "mission_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "from_stop_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "segment_mission_from_stop_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "round_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "user_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"status\" = 'open'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "submission_open_per_user_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "round_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "submission_round_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "user_identity_user_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "current_stop_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "stop",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "mission_current_stop_id_stop_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "mission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "mission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "round_mission_id_mission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "from_stop_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "stop",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "round_from_stop_id_stop_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "winner_submission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "submission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "round_winner_submission_id_submission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "mission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "mission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "segment_mission_id_mission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "round_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "round",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "segment_round_id_round_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "submission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "submission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "segment_submission_id_submission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "from_stop_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "stop",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "segment_from_stop_id_stop_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "to_stop_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "stop",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "segment_to_stop_id_stop_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "mission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "mission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "stop_mission_id_mission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "from_segment_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "segment",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "stop_from_segment_id_segment_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "round_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "round",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "submission_round_id_round_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "user_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user_account",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "submission_user_id_user_account_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "submission_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "submission",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "submission_like_submission_id_submission_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "user_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user_account",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "submission_like_user_id_user_account_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "user_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user_account",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "user_identity_user_id_user_account_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "columns": [
+        "submission_id",
+        "user_id"
+      ],
+      "nameExplicit": false,
+      "name": "submission_like_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "submission_like"
+    },
+    {
+      "columns": [
+        "provider",
+        "subject"
+      ],
+      "nameExplicit": false,
+      "name": "user_identity_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "user_identity"
+    },
+    {
+      "columns": [
+        "hash"
+      ],
+      "nameExplicit": false,
+      "name": "jev_judgment_pkey",
+      "schema": "public",
+      "table": "jev_judgment",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "mission_pkey",
+      "schema": "public",
+      "table": "mission",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "round_pkey",
+      "schema": "public",
+      "table": "round",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "segment_pkey",
+      "schema": "public",
+      "table": "segment",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "stop_pkey",
+      "schema": "public",
+      "table": "stop",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "submission_pkey",
+      "schema": "public",
+      "table": "submission",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "user_account_pkey",
+      "schema": "public",
+      "table": "user_account",
+      "entityType": "pks"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "round_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "segment_round_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "submission_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "segment_submission_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "mission_id",
+        "index"
+      ],
+      "nullsNotDistinct": false,
+      "name": "stop_mission_index_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "value": "\"status\" in ('active', 'ended')",
+      "name": "mission_status_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "value": "\"world_hash\" ~ '^[0-9a-f]{16}$'",
+      "name": "mission_world_hash_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "mission"
+    },
+    {
+      "value": "\"status\" in ('open', 'closed', 'void')",
+      "name": "round_status_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "value": "(\"status\" in ('open', 'void') and \"winner_submission_id\" is null) or (\"status\" = 'closed' and \"winner_submission_id\" is not null)",
+      "name": "round_winner_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "round"
+    },
+    {
+      "value": "\"status\" in ('driving', 'arrived', 'stopped-short', 'failed')",
+      "name": "segment_status_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "value": "\"attempt\" >= 1",
+      "name": "segment_attempt_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "value": "\"ends_at\" >= \"started_at\"",
+      "name": "segment_window_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "value": "case \"status\"\n        when 'driving' then \"to_stop_id\" is null and \"death_x\" is null and \"death_y\" is null\n        when 'failed' then \"to_stop_id\" is null and \"death_x\" is not null and \"death_y\" is not null\n        else \"to_stop_id\" is not null and \"death_x\" is null and \"death_y\" is null\n      end",
+      "name": "segment_settled_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "segment"
+    },
+    {
+      "value": "\"index\" >= 0",
+      "name": "stop_index_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "stop"
+    },
+    {
+      "value": "\"status\" in ('open', 'rejected', 'won', 'lost', 'withdrawn')",
+      "name": "submission_status_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "value": "(\"status\" = 'rejected' and \"rejection_reason\" is not null and \"rejection_reason\" in ('judged-infeasible', 'invalidated-by-stop')) or (\"status\" <> 'rejected' and \"rejection_reason\" is null)",
+      "name": "submission_rejection_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "value": "\"provider\" in ('github', 'atproto')",
+      "name": "user_identity_provider_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "user_identity"
+    }
+  ],
+  "renames": []
+}

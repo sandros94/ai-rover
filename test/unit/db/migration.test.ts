@@ -6,6 +6,7 @@ import { sql as raw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import { describe, expect, it } from 'vitest'
 import { relations } from '#server/database/schema'
+import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 import { JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
 
@@ -30,6 +31,7 @@ describe('generated migrations', () => {
       'submission',
       'submission_like',
       'segment',
+      'jev_judgment',
     ]) {
       expect(sql).toContain(`CREATE TABLE "${table}"`)
     }
@@ -98,6 +100,42 @@ describe('the round_anchor migration', () => {
       expect(submissions.rows).toEqual([
         { status: 'rejected', rejection_reason: 'judged-infeasible' },
         { status: 'open', rejection_reason: null },
+      ])
+    } finally {
+      await connection.pool.end()
+      await server.stop()
+    }
+  })
+})
+
+describe('the due_and_jev_cache migration', () => {
+  it('makes existing active missions due and gives their rules the attempt cap', async () => {
+    const server = new NetlifyDB({ logger: () => {} })
+    const connection = getDatabase({ connectionString: await server.start() })
+    const db = drizzle({ client: connection, relations })
+    try {
+      const names = readdirSync(MIGRATIONS_DIR).toSorted()
+      const at = names.findIndex((name) => name.endsWith('_due_and_jev_cache'))
+      expect(at).toBeGreaterThan(0)
+      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+
+      const { maxJudgedPerRound: _cap, ...older } = DEFAULT_MISSION_RULES
+      const config = JSON.stringify({ world: {}, rules: older })
+      const capped = JSON.stringify({ world: {}, rules: { ...older, maxJudgedPerRound: 2 } })
+      await db.execute(raw`
+        insert into mission (id, seed, world_hash, config, status) values
+          ('01900000-0000-7000-8000-000000000001', 'mars', '0123456789abcdef', ${config}, 'active'),
+          ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${config}, 'ended'),
+          ('01900000-0000-7000-8000-000000000003', 'mars', '0123456789abcdef', ${capped}, 'ended')`)
+
+      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      const missions = await db.execute<{ due: boolean; cap: number }>(raw`
+        select next_due_at is not null as due, (config -> 'rules' -> 'maxJudgedPerRound')::int as cap
+        from mission order by id`)
+      expect(missions.rows).toEqual([
+        { due: true, cap: 5 },
+        { due: false, cap: 5 },
+        { due: false, cap: 2 },
       ])
     } finally {
       await connection.pool.end()

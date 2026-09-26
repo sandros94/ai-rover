@@ -1,6 +1,9 @@
+import { purgeCache } from '@netlify/functions'
 import type { H3Event } from 'nitro/h3'
 import { defineHandler, HTTPError } from 'nitro/h3'
+import type { DB } from '../../database/db'
 import { DbError } from '../../database/errors'
+import type { Mission } from '../../database/schema'
 import { getActiveMission } from '../../repositories/missions'
 import { useDB } from '../db'
 import { useJevClient } from '../jev'
@@ -17,7 +20,7 @@ import { tickMission } from './tick'
 
 /** Status per typed error code; codes absent here are server faults and answer 500. */
 const STATUS: Record<string, Record<string, number>> = {
-  DbError: { NOT_FOUND: 404, ALREADY_SUBMITTED: 409, INVALID_STATE: 409 },
+  DbError: { NOT_FOUND: 404, ALREADY_SUBMITTED: 409, INVALID_STATE: 409, ROUND_CHANGED: 409 },
   LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, AUTHOR_DRIVING: 403 },
   MissionError: { INVALID_INPUT: 400 },
   NavError: { INVALID_INPUT: 422, OUT_OF_DISK: 422 },
@@ -27,7 +30,8 @@ const STATUS: Record<string, Record<string, number>> = {
 
 /**
  * The HTTP answer for anything a mission route throws: typed errors carry their `code` and
- * message; anything else is logged and answered as a bare 500 so no internals leak.
+ * message; anything else is logged and answered as a bare 500 so no internals leak. An upstream
+ * Jev failure answers its fixed message and logs its cause.
  */
 export function httpErrorOf(error: unknown): HTTPError {
   if (HTTPError.isError(error)) return error
@@ -40,6 +44,9 @@ export function httpErrorOf(error: unknown): HTTPError {
     error instanceof JudgeError
   const status = typed ? STATUS[error.name]?.[error.code] : undefined
   if (typed && status) {
+    if (error instanceof JudgeError && error.code === 'UPSTREAM') {
+      console.error('[jev] judgment service failed:', error.cause)
+    }
     return new HTTPError({
       status,
       message: error.message,
@@ -60,18 +67,91 @@ const LAZY_JEV: JevClient = {
 }
 
 /**
- * A mission route: never cached, errors mapped by {@link httpErrorOf}, and the mission brought up
- * to date before the handler runs, so every read and write sees the state the lazy trigger
- * implies at `now`.
+ * What a mission route does to the mission. `read`: brings it up to date only when something is
+ * due, so a poll takes no lock while nothing happens. `write`: always brings it up to date first,
+ * under the lock, and purges the cached public state afterwards.
  */
-export function defineMissionHandler<T>(
+export type MissionAccess = 'read' | 'write'
+
+/** `public`: the same answer for everyone, cached briefly by browsers and the CDN. */
+export type MissionCache = 'public' | 'none'
+
+const PUBLIC_CACHE = 'public, max-age=5, stale-while-revalidate=30'
+
+/** Response headers for a mission route's answer. */
+export function missionCacheHeaders(
+  missionId: string,
+  cache: MissionCache,
+): Record<string, string> {
+  if (cache === 'none') {
+    return { 'cache-control': 'no-store', 'netlify-cdn-cache-control': 'no-store' }
+  }
+  return {
+    'cache-control': PUBLIC_CACHE,
+    'netlify-cdn-cache-control': `${PUBLIC_CACHE}, durable`,
+    'netlify-cache-tag': `mission-${missionId}`,
+  }
+}
+
+/**
+ * Drops the CDN's copies of the mission's public state. Only Netlify has that cache; a failed
+ * purge is logged and leaves the copies to expire within their short lifetime.
+ */
+export async function purgeMissionCache(missionId: string): Promise<void> {
+  if (!process.env.NETLIFY) return
+  try {
+    await purgeCache({ tags: [`mission-${missionId}`] })
+  } catch (error) {
+    console.error(`[mission] purging the cache of mission ${missionId} failed:`, error)
+  }
+}
+
+/**
+ * Brings the mission up to `now` as a route of `access` needs; null when a read found nothing
+ * due and did not tick. A read reads the recorded next due instant without any lock.
+ */
+export async function syncMission(
+  db: DB,
+  options: {
+    mission: Pick<Mission, 'id' | 'nextDueAt'>
+    access: MissionAccess
+    store: JourneyStore
+    jev: JevClient
+    now: Date
+  },
+): Promise<TickResult | null> {
+  const { mission, access, store, jev, now } = options
+  const due = mission.nextDueAt !== null && mission.nextDueAt.getTime() <= now.getTime()
+  if (access === 'read' && !due) return null
+  return tickMission(db, { missionId: mission.id, store, jev, now })
+}
+
+function changed(tick: TickResult | null): boolean {
+  return tick !== null && Object.values(tick).some((step) => step !== null)
+}
+
+/**
+ * A mission route: errors mapped by {@link httpErrorOf}, and the mission brought up to date
+ * before the handler runs per `access`, so every read and write sees the state the lazy trigger
+ * implies at `now`. A write, or a read whose tick changed something, purges the cached public
+ * state once done. Only a successful answer of a `public` route is cacheable.
+ */
+export function defineMissionHandler<T, A extends MissionAccess>(
+  options: { access: A; cache: MissionCache },
   handler: (
     event: H3Event,
-    context: { missionId: string; store: JourneyStore; now: Date; tick: TickResult },
+    context: {
+      missionId: string
+      store: JourneyStore
+      now: Date
+      tick: A extends 'write' ? TickResult : TickResult | null
+    },
   ) => Promise<T>,
 ) {
   return defineHandler(async (event) => {
-    event.res.headers.set('cache-control', 'no-store')
+    const noStore = missionCacheHeaders('', 'none')
+    for (const [name, value] of Object.entries(noStore)) event.res.headers.set(name, value)
+    let purge: string | undefined
     try {
       const mission = await getActiveMission(useDB())
       if (!mission) {
@@ -79,10 +159,28 @@ export function defineMissionHandler<T>(
       }
       const store = createJourneyStore()
       const now = requestNow(event)
-      const tick = await tickMission(useDB(), { missionId: mission.id, store, jev: LAZY_JEV, now })
-      return await handler(event, { missionId: mission.id, store, now, tick })
+      const tick = await syncMission(useDB(), {
+        mission,
+        access: options.access,
+        store,
+        jev: LAZY_JEV,
+        now,
+      })
+      if (options.access === 'write' || changed(tick)) purge = mission.id
+      const result = await handler(event, {
+        missionId: mission.id,
+        store,
+        now,
+        tick: tick as A extends 'write' ? TickResult : TickResult | null,
+      })
+      for (const [name, value] of Object.entries(missionCacheHeaders(mission.id, options.cache))) {
+        event.res.headers.set(name, value)
+      }
+      return result
     } catch (error) {
       throw httpErrorOf(error)
+    } finally {
+      if (purge) await purgeMissionCache(purge)
     }
   })
 }

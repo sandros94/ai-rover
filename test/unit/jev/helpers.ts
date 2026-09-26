@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { SubmissionSummary } from '#shared/utils/nav'
+import type { JevCache, JudgedAnswers } from '#server/utils/jev/client'
 import { jevRequestKey } from '#server/utils/jev/client'
 
 export const FIXTURE_DIR = fileURLToPath(new URL('../../fixtures/jev/', import.meta.url))
@@ -87,4 +88,18 @@ export function answersFetch(feasible: number) {
 function bodyText(init: RequestInit | undefined): string {
   if (typeof init?.body !== 'string') throw new Error('Expected a JSON string request body.')
   return init.body
+}
+
+/** An in-memory Jev cache; `entries` shows what it holds. */
+export function memoryJevCache(): { cache: JevCache; entries: Map<string, JudgedAnswers> } {
+  const entries = new Map<string, JudgedAnswers>()
+  return {
+    entries,
+    cache: {
+      get: async (hash) => entries.get(hash),
+      set: async (hash, value) => {
+        entries.set(hash, value)
+      },
+    },
+  }
 }

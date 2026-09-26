@@ -10,15 +10,18 @@ import { EFFECTIVE_SPEED_MPS } from '../nav/summary'
 import { traceSegment } from '../nav/trace'
 import type { DiskTerrain } from './terrain-sampler'
 
-/** What a preview can refuse; only the server asks Jev, so never `judged-infeasible`. Closed set. */
-export type PreviewRefusal = Exclude<SubmissionRefusal, 'judged-infeasible'>
+/** What a preview can refuse: everything but the refusals only the server gives. Closed set. */
+export type PreviewRefusal = Exclude<
+  SubmissionRefusal,
+  'judged-infeasible' | 'too-many-attempts' | 'round-changed'
+>
 
 /** Closed set, discriminated by `ok`. */
 export type PreviewResult =
   | {
       ok: false
       reason: PreviewRefusal
-      /** The snapped goal; absent when nothing pathable was near the point. */
+      /** The snapped goal; absent when nothing seen and pathable was near the point. */
       goal?: MapPoint
     }
   | {
@@ -54,7 +57,7 @@ export function diskFromTerrain(
 }
 
 /**
- * The route a submission at `point` would get: snapped to the nearest pathable vertex, checked
+ * The route a submission at `point` would get: snapped to the nearest seen pathable vertex, checked
  * and planned from `anchor` exactly as the server does, with a slope per polyline segment for
  * drawing. Pure and synchronous; meant to run off the main thread.
  */
@@ -71,8 +74,9 @@ export function previewPlan(
   },
 ): PreviewResult {
   const { revealed, anchor, point, deaths, rules, slopeLimitDeg } = options
-  const goal = snapToPathable(disk, point)
-  if (!goal) return { ok: false, reason: 'unpathable' }
+  const snapped = snapToPathable(disk, point, { revealed })
+  if (!snapped.ok) return { ok: false, reason: snapped.reason }
+  const goal = snapped.point
   const planned = planGoal(disk, { revealed, start: anchor, goal, deaths, rules, slopeLimitDeg })
   if (!planned.ok) return { ok: false, reason: planned.reason, goal }
   const { plan } = planned

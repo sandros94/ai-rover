@@ -264,7 +264,7 @@ describe('settlement', () => {
     const beside = (await getOpenRound(db, m.missionId))!
     const during = at(T0, 10 * MINUTE)
     // Against the anchor (0, 80) all three are in the band; from (0, 40) only Cy's still is.
-    const tooFar = await m.submit(m.bob.id, { x: 0, y: 330 }, during)
+    const tooFar = await m.submit(m.bob.id, { x: 10, y: 320 }, during)
     const valid = await m.submit(m.cy.id, { x: 80, y: 80 }, during)
     const tooNear = await m.submit(m.dee.id, { x: 0, y: -5 }, during)
     for (const result of [tooFar, valid, tooNear]) expect(result.accepted).toBe(true)
@@ -323,7 +323,7 @@ describe('likes and ranking', () => {
   it('lets likes decide the winner', async () => {
     const m = await landed()
     const a = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const b = await m.submit(m.bob.id, { x: 80, y: 0 }, at(T0, 2 * MINUTE))
+    const b = await m.submit(m.bob.id, { x: 60, y: 0 }, at(T0, 2 * MINUTE))
     await like(db, b.submission!.id, { userId: m.cy.id })
     await like(db, b.submission!.id, { userId: m.bob.id })
     await like(db, a.submission!.id, { userId: m.ada.id })
@@ -349,7 +349,7 @@ describe('likes and ranking', () => {
       },
     }))
     await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const east = await m.submit(m.bob.id, { x: 80, y: 0 }, at(T0, 2 * MINUTE))
+    const east = await m.submit(m.bob.id, { x: 60, y: 0 }, at(T0, 2 * MINUTE))
     const tick = await m.tick(at(T0, 6 * MINUTE))
     expect(tick.closed?.winnerSubmissionId).toBe(east.submission!.id)
   })

@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { APIError } from '@typesafe-ai/sdk'
 import type { SubmissionSummary } from '#shared/utils/nav'
+import type { JevClientOptions } from '#server/utils/jev/client'
 import { createJevClient, JEV_MODEL } from '#server/utils/jev/client'
+import { JUDGE_UNAVAILABLE } from '#server/utils/jev/errors'
 import { JudgeError } from '#server/utils/jev/errors'
 import { JUDGE_QUESTIONS } from '#server/utils/jev/questions'
-import { answersFetch, fixtureFetch, jsonResponse, loadSubmissionFixtures } from './helpers'
+import {
+  answersFetch,
+  fixtureFetch,
+  jsonResponse,
+  loadSubmissionFixtures,
+  memoryJevCache,
+} from './helpers'
 
 const fixtures = loadSubmissionFixtures()
+
+/** A client over its own in-memory cache unless one is given. */
+function jevClient(
+  options: Omit<JevClientOptions, 'cache'> & Partial<Pick<JevClientOptions, 'cache'>>,
+) {
+  return createJevClient({ cache: memoryJevCache().cache, ...options })
+}
 
 const SUMMARY: SubmissionSummary = fixtures[0]?.request.state ?? {
   rover: { class: 'rover', speed: 'slow', limits: 'none' },
@@ -34,7 +49,7 @@ describe('judgeSubmission over recorded fixtures', () => {
 
   it('sends exactly the recorded request and returns its typed judgment', async () => {
     const { fetch, bodies } = await fixtureFetch(fixtures)
-    const jev = createJevClient({ apiKey: 'test-key', fetch })
+    const jev = jevClient({ apiKey: 'test-key', fetch })
     for (const fixture of fixtures) {
       const judgment = await jev.judgeSubmission(fixture.request.state)
       expect(bodies.at(-1)).toEqual(fixture.request)
@@ -76,7 +91,7 @@ describe('judgeSubmission over recorded fixtures', () => {
 describe('judgeSubmission cache', () => {
   it('answers an identical submission from the cache without a second request', async () => {
     const { fetch, calls } = answersFetch(0.9)
-    const jev = createJevClient({ apiKey: 'test-key', fetch })
+    const jev = jevClient({ apiKey: 'test-key', fetch })
     const first = await jev.judgeSubmission(SUMMARY)
     const second = await jev.judgeSubmission(structuredClone(SUMMARY))
     expect(calls).toHaveLength(1)
@@ -87,19 +102,43 @@ describe('judgeSubmission cache', () => {
   })
 
   it('shares an injected store between clients and misses on a different submission', async () => {
-    const cache = new Map()
+    const { cache, entries } = memoryJevCache()
     const a = answersFetch(0.5)
     const b = answersFetch(0.5)
-    await createJevClient({ apiKey: 'k', fetch: a.fetch, cache }).judgeSubmission(SUMMARY)
-    const again = await createJevClient({ apiKey: 'k', fetch: b.fetch, cache }).judgeSubmission(
-      SUMMARY,
-    )
+    await jevClient({ apiKey: 'k', fetch: a.fetch, cache }).judgeSubmission(SUMMARY)
+    const again = await jevClient({ apiKey: 'k', fetch: b.fetch, cache }).judgeSubmission(SUMMARY)
     expect(again.cached).toBe(true)
     expect(b.calls).toHaveLength(0)
     const other = { ...SUMMARY, mission_rules: `${SUMMARY.mission_rules} ` }
-    await createJevClient({ apiKey: 'k', fetch: b.fetch, cache }).judgeSubmission(other)
+    await jevClient({ apiKey: 'k', fetch: b.fetch, cache }).judgeSubmission(other)
     expect(b.calls).toHaveLength(1)
-    expect(cache.size).toBe(2)
+    expect(entries.size).toBe(2)
+  })
+
+  it('reads and writes through an async store, keyed by the request hash', async () => {
+    const log: string[] = []
+    const { cache: memory, entries } = memoryJevCache()
+    const cache = {
+      async get(hash: string) {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        log.push(`get ${hash}`)
+        return memory.get(hash)
+      },
+      async set(hash: string, value: Parameters<typeof memory.set>[1]) {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        log.push(`set ${hash}`)
+        await memory.set(hash, value)
+      },
+    }
+    const { fetch, calls } = answersFetch(0.9)
+    const jev = jevClient({ apiKey: 'k', fetch, cache })
+    await jev.judgeSubmission(SUMMARY)
+    const [hash] = [...entries.keys()]
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(log).toEqual([`get ${hash}`, `set ${hash}`])
+    expect((await jev.judgeSubmission(SUMMARY)).cached).toBe(true)
+    expect(log).toEqual([`get ${hash}`, `set ${hash}`, `get ${hash}`])
+    expect(calls).toHaveLength(1)
   })
 })
 
@@ -109,7 +148,7 @@ describe('judgeSubmission verdict', () => {
     verdict?: { rejectBelow?: number; acceptAbove?: number },
   ) =>
     (
-      await createJevClient({
+      await jevClient({
         apiKey: 'k',
         fetch: answersFetch(noul).fetch,
         verdict,
@@ -129,7 +168,7 @@ describe('judgeSubmission verdict', () => {
   })
 
   it('derives the weights from the expected scores', async () => {
-    const judgment = await createJevClient({
+    const judgment = await jevClient({
       apiKey: 'k',
       fetch: answersFetch(0.5).fetch,
     }).judgeSubmission(SUMMARY)
@@ -145,7 +184,7 @@ describe('judgeSubmission errors', () => {
     for (const apiKey of [undefined, '', '   ']) {
       let error: unknown
       try {
-        createJevClient({ apiKey, fetch: answersFetch(0.5).fetch })
+        jevClient({ apiKey, fetch: answersFetch(0.5).fetch })
       } catch (caught) {
         error = caught
       }
@@ -161,15 +200,17 @@ describe('judgeSubmission errors', () => {
       calls++
       return jsonResponse({ detail: 'boom' }, 500)
     }
-    const cache = new Map()
-    const jev = createJevClient({ apiKey: 'k', fetch, cache, maxRetries: 0 })
+    const { cache, entries } = memoryJevCache()
+    const jev = jevClient({ apiKey: 'k', fetch, cache, maxRetries: 0 })
     const error = await judgeErrorOf(jev.judgeSubmission(SUMMARY))
     expect(error?.code).toBe('UPSTREAM')
     expect(error?.cause).toBeInstanceOf(APIError)
     expect((error!.cause as APIError).status).toBe(500)
-    expect(error?.message).toContain('500')
+    // The public message is fixed; what the service said stays in the cause.
+    expect(error?.message).toBe(JUDGE_UNAVAILABLE)
+    expect(error?.message).not.toMatch(/500|boom/)
     expect(calls).toBe(1)
-    expect(cache.size).toBe(0)
+    expect(entries.size).toBe(0)
   })
 
   it('is UPSTREAM on a timeout', async () => {
@@ -177,24 +218,25 @@ describe('judgeSubmission errors', () => {
       new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
       })
-    const jev = createJevClient({ apiKey: 'k', fetch, timeoutMs: 20, maxRetries: 0 })
+    const jev = jevClient({ apiKey: 'k', fetch, timeoutMs: 20, maxRetries: 0 })
     const error = await judgeErrorOf(jev.judgeSubmission(SUMMARY))
     expect(error?.code).toBe('UPSTREAM')
     expect(error?.cause).toBeDefined()
+    expect(error?.message).toBe(JUDGE_UNAVAILABLE)
   })
 
   it('is UPSTREAM when the answers do not match the questions', async () => {
     const fetch = async () =>
       jsonResponse({ model: JEV_MODEL, answers: {}, usage: { input_tokens: 1, output_tokens: 0 } })
-    const error = await judgeErrorOf(
-      createJevClient({ apiKey: 'k', fetch }).judgeSubmission(SUMMARY),
-    )
+    const error = await judgeErrorOf(jevClient({ apiKey: 'k', fetch }).judgeSubmission(SUMMARY))
     expect(error?.code).toBe('UPSTREAM')
+    expect(error?.message).toBe(JUDGE_UNAVAILABLE)
+    expect((error!.cause as Error).message).toMatch(/answers/)
   })
 
   it('is INVALID_SUMMARY for a malformed or oversized summary, before any request', async () => {
     const { fetch, calls } = answersFetch(0.5)
-    const jev = createJevClient({ apiKey: 'k', fetch })
+    const jev = jevClient({ apiKey: 'k', fetch })
     const missing = { ...SUMMARY, destination: undefined } as unknown as SubmissionSummary
     const huge = { ...SUMMARY, mission_rules: 'x'.repeat(1500) }
     const reachedWithReason = {

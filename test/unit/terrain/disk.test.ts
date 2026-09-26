@@ -309,7 +309,9 @@ describe('computeStopDisk on an untraversable centre vertex', () => {
       if (disk.traversable[g] && disk.reachable[g]) goal = { x, y }
     }
     expect(goal).toBeDefined()
-    expect(snapToPathable(disk, goal!)).toEqual(goal)
+    expect(
+      snapToPathable(disk, goal!, { revealed: new Uint8Array(disk.traversable.length).fill(1) }),
+    ).toEqual({ ok: true, point: goal })
   })
 })
 
@@ -346,6 +348,8 @@ describe('snapToPathable', () => {
   const base = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 100 })
   const { width } = base.grid
   const at = (x: number, y: number) => (y - base.origin.j) * width + (x - base.origin.i)
+  /** Every vertex seen, so only traversability and reachability decide. */
+  const seen = new Uint8Array(base.traversable.length).fill(1)
   /** The disk with the given world vertices made untraversable and unreachable. */
   function blocked(vertices: [number, number][]) {
     const traversable = base.traversable.slice()
@@ -353,10 +357,24 @@ describe('snapToPathable', () => {
     for (const [x, y] of vertices) traversable[at(x, y)] = reachable[at(x, y)] = 0
     return { ...base, traversable, reachable }
   }
+  /** `seen` with the given world vertices unseen. */
+  function fogged(vertices: [number, number][]) {
+    const revealed = seen.slice()
+    for (const [x, y] of vertices) revealed[at(x, y)] = 0
+    return revealed
+  }
+  const square = (x0: number, y0: number, x1: number, y1: number) => {
+    const out: [number, number][] = []
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) out.push([x, y])
+    return out
+  }
 
   it('keeps a point on a pathable vertex at that vertex', () => {
     expect(base.reachable[at(30, 40)]).toBe(1)
-    expect(snapToPathable(base, { x: 30.4, y: 39.6 })).toEqual({ x: 30, y: 40 })
+    expect(snapToPathable(base, { x: 30.4, y: 39.6 }, { revealed: seen })).toEqual({
+      ok: true,
+      point: { x: 30, y: 40 },
+    })
   })
 
   it('moves a point off a blocked vertex to the nearest pathable one', () => {
@@ -367,23 +385,77 @@ describe('snapToPathable', () => {
       [30, 39],
     ])
     // (29, 40) is 1.2 m away; the diagonal (31, 39) and (31, 41) are 1.28 m away.
-    expect(snapToPathable(disk, { x: 30.2, y: 40 })).toEqual({ x: 29, y: 40 })
+    expect(snapToPathable(disk, { x: 30.2, y: 40 }, { revealed: seen })).toEqual({
+      ok: true,
+      point: { x: 29, y: 40 },
+    })
   })
 
   it('refuses when nothing pathable lies within the search radius', () => {
-    const square: [number, number][] = []
-    for (let y = 30; y <= 50; y++) for (let x = 20; x <= 40; x++) square.push([x, y])
-    expect(snapToPathable(blocked(square), { x: 30, y: 40 })).toBeUndefined()
+    const disk = blocked(square(20, 30, 40, 50))
+    expect(snapToPathable(disk, { x: 30, y: 40 }, { revealed: seen })).toEqual({
+      ok: false,
+      reason: 'unpathable',
+    })
     // A larger radius reaches past the blocked square.
-    expect(snapToPathable(blocked(square), { x: 30, y: 40 }, { radiusM: 12 })).toBeDefined()
+    expect(snapToPathable(disk, { x: 30, y: 40 }, { revealed: seen, radiusM: 12 }).ok).toBe(true)
   })
 
   it('refuses a point outside the disk', () => {
-    expect(snapToPathable(base, { x: 0, y: 400 })).toBeUndefined()
+    const out = { ok: false, reason: 'unpathable' }
+    expect(snapToPathable(base, { x: 0, y: 400 }, { revealed: seen })).toEqual(out)
     // Vertices beyond the disk radius are never candidates, even within the search radius.
-    expect(snapToPathable(base, { x: 0, y: 106 })).toBeUndefined()
-    expect(terrainErrorOf(() => snapToPathable(base, { x: Number.NaN, y: 0 }))?.code).toBe(
-      'OUT_OF_BOUNDS',
+    expect(snapToPathable(base, { x: 0, y: 106 }, { revealed: seen })).toEqual(out)
+    expect(
+      terrainErrorOf(() => snapToPathable(base, { x: Number.NaN, y: 0 }, { revealed: seen }))?.code,
+    ).toBe('OUT_OF_BOUNDS')
+  })
+
+  it('never snaps to an unseen vertex, however pathable', () => {
+    // (30, 40) and its four neighbours are pathable but unseen: the nearest seen one wins.
+    const revealed = fogged([
+      [30, 40],
+      [31, 40],
+      [29, 40],
+      [30, 41],
+      [30, 39],
+    ])
+    const snapped = snapToPathable(base, { x: 30, y: 40 }, { revealed })
+    expect(snapped.ok).toBe(true)
+    if (!snapped.ok) return
+    const { x, y } = snapped.point
+    expect(revealed[at(x, y)]).toBe(1)
+    expect(Math.hypot(x - 30, y - 40)).toBeCloseTo(Math.SQRT2, 9)
+  })
+
+  it('refuses a point with only unseen ground within the search radius as unrevealed', () => {
+    const revealed = fogged(square(20, 30, 40, 50))
+    expect(snapToPathable(base, { x: 30, y: 40 }, { revealed })).toEqual({
+      ok: false,
+      reason: 'unrevealed',
+    })
+    // Unseen ground is refused whatever it holds: blocked and unseen is still unrevealed.
+    expect(snapToPathable(blocked(square(20, 30, 40, 50)), { x: 30, y: 40 }, { revealed })).toEqual(
+      { ok: false, reason: 'unrevealed' },
     )
+  })
+
+  it('refuses seen blocked ground as unpathable even beside unseen pathable ground', () => {
+    // Seen vertices within reach are all blocked; the pathable ones there are unseen.
+    const disk = blocked(square(28, 38, 32, 42))
+    const revealed = fogged(
+      square(20, 30, 40, 50).filter(([x, y]) => x < 28 || x > 32 || y < 38 || y > 42),
+    )
+    expect(snapToPathable(disk, { x: 30, y: 40 }, { revealed })).toEqual({
+      ok: false,
+      reason: 'unpathable',
+    })
+  })
+
+  it('refuses a revealed mask of another size', () => {
+    expect(
+      terrainErrorOf(() => snapToPathable(base, { x: 0, y: 0 }, { revealed: new Uint8Array(4) }))
+        ?.code,
+    ).toBe('INVALID_GRID')
   })
 })

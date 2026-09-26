@@ -24,7 +24,13 @@ const CASES = [
 const START = { x: 0, y: 0 }
 
 const recorder = recordingFetch()
-const jev = createJevClient({ apiKey: apiKeyFromEnv(), fetch: recorder.fetch, maxRetries: 0 })
+// Every case is a live request, so nothing is ever answered from a cache.
+const jev = createJevClient({
+  apiKey: apiKeyFromEnv(),
+  fetch: recorder.fetch,
+  maxRetries: 0,
+  cache: { get: async () => undefined, set: async () => {} },
+})
 let inputTokens = 0
 const rows: string[][] = []
 for (const { name, seed, goal } of CASES) {

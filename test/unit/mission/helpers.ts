@@ -28,10 +28,12 @@ export function memoryStore(): { store: JourneyStore; blobs: MemoryBlobs } {
 
 /**
  * A Jev client answering from `judge` (default: the accepting fixture judgment), recording every
- * summary it was asked about.
+ * summary it was asked about. `judge` may be async, to act while a judgment is in flight.
  */
 export function fakeJev(
-  judge: (summary: SubmissionSummary) => Partial<StoredJudgment> = () => ({}),
+  judge: (
+    summary: SubmissionSummary,
+  ) => Partial<StoredJudgment> | Promise<Partial<StoredJudgment>> = () => ({}),
 ) {
   const summaries: SubmissionSummary[] = []
   const client: JevClient = {
@@ -39,7 +41,7 @@ export function fakeJev(
       summaries.push(summary)
       const judgment: SubmissionJudgment = {
         ...structuredClone(JUDGMENT),
-        ...judge(summary),
+        ...(await judge(summary)),
         cached: false,
       }
       return judgment

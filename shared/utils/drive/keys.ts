@@ -8,12 +8,15 @@ export function segmentManifestKey(segmentId: string): string {
   return `segments/${segmentId}/manifest.json`
 }
 
+/** Largest slice index, seven digits: 30 s slices over more than nine years of driving. */
+export const MAX_SLICE_INDEX = 9_999_999
+
 export function segmentSliceKey(segmentId: string, sliceIndex: number): string {
   assertSegmentId(segmentId)
-  if (!Number.isSafeInteger(sliceIndex) || sliceIndex < 0) {
+  if (!Number.isSafeInteger(sliceIndex) || sliceIndex < 0 || sliceIndex > MAX_SLICE_INDEX) {
     throw new DriveError(
       'INVALID_INPUT',
-      `Slice index is ${sliceIndex}; pass a non-negative integer.`,
+      `Slice index is ${sliceIndex}; pass an integer from 0 to ${MAX_SLICE_INDEX}.`,
     )
   }
   return `segments/${segmentId}/slices/${sliceIndex}.bin`
@@ -32,7 +35,7 @@ const TERRAIN_KEY = /^terrain\/[0-9a-f]{16}\/chunks\/-?\d{1,10}_-?\d{1,10}\.bin$
 const STOP_KEY =
   /^missions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:revealed\/(?:0|[1-9]\d{0,14})\.bin|stops\/(?:0|[1-9]\d{0,14})\.json)$/
 const SEGMENT_KEY =
-  /^segments\/([A-Za-z0-9_-]{1,64})\/(?:(manifest\.json)|slices\/(0|[1-9]\d{0,14})\.bin)$/
+  /^segments\/([A-Za-z0-9_-]{1,64})\/(?:(manifest\.json)|slices\/(0|[1-9]\d{0,6})\.bin)$/
 
 /**
  * Classifies a key built by `chunkKey`, `revealedKey`, `stopManifestKey`, `segmentManifestKey`

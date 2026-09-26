@@ -123,6 +123,13 @@ export function usePlanPreview(
     worker = new Worker(new URL('../workers/plan.worker.ts', import.meta.url), { type: 'module' })
     worker.addEventListener('message', onMessage)
     watch(() => toValue(ground), loadGround, { immediate: true })
+    // A new anchor, death or rule (the round moved) makes the shown plan stale: plan it again.
+    watch(
+      () => JSON.stringify(toValue(context) ?? null),
+      () => {
+        if (point.value && !waiting && !inFlight) requestNow(point.value)
+      },
+    )
   })
   onBeforeUnmount(() => {
     clearTimeout(timer)

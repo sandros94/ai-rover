@@ -29,11 +29,15 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 
 const REASONS: Record<SubmissionRefusal, string> = {
   'unpathable': 'No reachable ground there: pick a spot the rover can get to.',
+  'unrevealed': 'The rover has not seen that ground yet: pick a spot on the revealed map.',
   'too-near': 'Too near: a segment is at least 50 m.',
   'too-far': 'Too far: a segment is at most 250 m.',
   'near-death-zone': 'Too close to where the rover was lost before.',
   'path-near-death-zone': 'The route passes too close to where the rover was lost before.',
   'judged-infeasible': 'Jev judged this route infeasible.',
+  'too-many-attempts': 'You have used every attempt this round allows.',
+  'round-changed':
+    'The round moved while your goal was judged: check the new route and confirm again.',
 }
 
 /** Error codes the submit route answers besides a refusal. */

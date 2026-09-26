@@ -20,7 +20,7 @@ import type { MissionRules } from '#shared/utils/mission/rules'
 import type { NavMetrics } from '#shared/utils/nav/plan'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
 import type { WorldConfig } from '#shared/utils/terrain/world'
-import type { SubmissionJudgment } from '../utils/jev/client'
+import type { JudgedAnswers, SubmissionJudgment } from '../utils/jev/client'
 
 // Ids are UUIDv7 made in code, so rows sort by creation without a database default.
 const id = () =>
@@ -94,6 +94,12 @@ export const mission = snakeCase.table(
     currentStopId: uuid().references((): AnyPgColumn => stop.id),
     /** Mission start, the zero of the sol clock. */
     solsEpoch: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * When a tick next has something to do (a drive to settle, a round to close); null while
+     * nothing is pending. Kept by every tick and submission so a read can skip the tick's lock.
+     * An early value only costs a tick that finds nothing to do.
+     */
+    nextDueAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     check('mission_status_check', sql`${t.status} in (${oneOf(MISSION_STATUSES)})`),
@@ -266,6 +272,17 @@ export const segment = snakeCase.table(
   ],
 )
 
+/**
+ * Jev's answers by request hash (SHA-256 of model, state and questions), so an identical
+ * submission is never paid for twice. Rows never change once written.
+ */
+export const jevJudgment = snakeCase.table('jev_judgment', {
+  hash: text().primaryKey(),
+  model: text().notNull(),
+  answers: jsonb().$type<JudgedAnswers>().notNull(),
+  createdAt: createdAt(),
+})
+
 export const schema = {
   userAccount,
   userIdentity,
@@ -275,6 +292,7 @@ export const schema = {
   submission,
   submissionLike,
   segment,
+  jevJudgment,
 }
 
 export const relations = defineRelations(schema, (r) => ({
@@ -374,3 +392,4 @@ export type SubmissionLike = typeof submissionLike.$inferSelect
 export type Segment = typeof segment.$inferSelect
 export type NewSegment = typeof segment.$inferInsert
 export type SegmentStatus = (typeof SEGMENT_STATUSES)[number]
+export type JevJudgment = typeof jevJudgment.$inferSelect

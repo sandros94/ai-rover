@@ -66,7 +66,8 @@ describe('journeyDrive', () => {
       journeyDrive(db, { missionId: j.mission.id, segmentId: j.driving.id }),
     )
     expect(error?.code).toBe('NOT_FOUND')
-    expect(error?.message).not.toMatch(/failed|stuck|85/)
+    // The id itself is random hex and may hold "85" by chance.
+    expect(error?.message.replace(j.driving.id, '')).not.toMatch(/failed|stuck|85/)
   })
 })
 

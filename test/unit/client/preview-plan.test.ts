@@ -35,6 +35,12 @@ const rules = DEFAULT_MISSION_RULES
 const slopeLimitDeg = fixture.world.config.slopeLimitDeg
 const base = { revealed: ground.revealed, anchor, deaths: [], rules, slopeLimitDeg }
 
+/** Where the server snaps `point`, or undefined when it refuses it. */
+function serverSnap(point: { x: number; y: number }) {
+  const snapped = snapToPathable(fixture.disk, point, { revealed: serverRevealed })
+  return snapped.ok ? snapped.point : undefined
+}
+
 describe('diskFromTerrain', () => {
   it('rebuilds the server stop disk exactly from the served chunks', () => {
     const { disk } = ground
@@ -58,7 +64,7 @@ describe('previewPlan on the recorded journey', () => {
     const result = previewPlan(ground.disk, { ...base, point })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    const goal = snapToPathable(fixture.disk, point)!
+    const goal = serverSnap(point)!
     expect(result.goal).toEqual(goal)
     const server = planSegment(fixture.disk, {
       revealed: serverRevealed,
@@ -93,7 +99,7 @@ describe('previewPlan on the recorded journey', () => {
     expect(far).toMatchObject({
       ok: false,
       reason: 'too-far',
-      goal: snapToPathable(fixture.disk, point),
+      goal: serverSnap(point),
     })
   })
 
@@ -101,6 +107,40 @@ describe('previewPlan on the recorded journey', () => {
     expect(previewPlan(ground.disk, { ...base, point: { x: 200, y: 200 } })).toEqual({
       ok: false,
       reason: 'unpathable',
+    })
+  })
+
+  it('refuses a point on unseen ground as unrevealed, as the server does', () => {
+    const { disk } = ground
+    const { width } = disk.grid
+    const vertex = (x: number, y: number) => (y - disk.origin.j) * width + (x - disk.origin.i)
+    // A point inside the ring whose whole snap neighbourhood is unseen yet pathable ground.
+    let fogged: { x: number; y: number } | undefined
+    for (let r = 60; r <= 240 && !fogged; r += 5) {
+      for (let a = 0; a < 360 && !fogged; a += 5) {
+        const x = Math.round(r * Math.cos((a * Math.PI) / 180))
+        const y = Math.round(r * Math.sin((a * Math.PI) / 180))
+        let seen = false
+        let pathable = false
+        for (let dy = -5; dy <= 5; dy++) {
+          for (let dx = -5; dx <= 5; dx++) {
+            if (Math.hypot(dx, dy) > 5) continue
+            const k = vertex(x + dx, y + dy)
+            if (ground.revealed[k]) seen = true
+            if (disk.traversable[k] && disk.reachable[k]) pathable = true
+          }
+        }
+        if (!seen && pathable) fogged = { x, y }
+      }
+    }
+    expect(fogged).toBeDefined()
+    expect(previewPlan(disk, { ...base, point: fogged! })).toEqual({
+      ok: false,
+      reason: 'unrevealed',
+    })
+    expect(snapToPathable(fixture.disk, fogged!, { revealed: serverRevealed })).toEqual({
+      ok: false,
+      reason: 'unrevealed',
     })
   })
 

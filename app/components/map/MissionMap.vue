@@ -48,6 +48,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   submitted: []
+  /** The server refused a pick because the round moved: the mission state is out of date. */
+  stale: []
   /** The stop's ground once loaded, and the area the journey has revealed so far. */
   ground: [
     ground: {
@@ -124,6 +126,7 @@ const preview = usePlanPreview(ground, context)
 const { picked, submitting, refusal, onHover, onPick, cancel, confirm } = usePickSubmit(preview, {
   highlight: () => props.highlight,
   onSubmitted: () => emit('submitted'),
+  onStale: () => emit('stale'),
 })
 
 const rover = computed(() => props.rover ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad })

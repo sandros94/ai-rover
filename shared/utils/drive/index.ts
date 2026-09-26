@@ -25,6 +25,7 @@ export { DEFAULT_SLIP_MODEL, DEFAULT_SPEED_MODEL, driveSegment } from './segment
 export type { JourneyKey } from './keys'
 export {
   assertSegmentId,
+  MAX_SLICE_INDEX,
   parseJourneyKey,
   SEGMENT_ID,
   segmentManifestKey,
