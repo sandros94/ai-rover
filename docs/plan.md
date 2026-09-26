@@ -61,7 +61,8 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Drive realism: no per-metre stops, imaging stops, AutoNav status events and HUD element.
 - Fog that hides on both views; relief with contours; full-viewport HUD layout with floating panels; 3D default.
 - JPL URDF hero rover.
-- Multi-leg replay: replay a range of legs back to back, disk switching at each stop.
+- Multi-segment replay: replay a range of segments back to back, disk switching at each stop.
+- Inspectable map objects: hover cards and focus for checkpoints, ghosts and submissions on both views; low-poly ghosts with a full model only while focused; recentre returns to the rover.
 
 ## Later — Biomes
 
