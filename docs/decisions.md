@@ -80,7 +80,7 @@ Current, settled design decisions with their reasons. This file describes the pr
 ## Layout
 
 - **Full viewport, HUD on top.** The scene fills the viewport on every device; instruments are HUD elements that can be hidden, off by default on phones. 3D is the default view with a prominent 2D/3D switch. On desktop, panels are floating windows in the style of framework devtools, so the 3D scene, the 2D map and any instruments can be visible together.
-- **Naming.** Approvals are "LGTM"; the idle wait after the first submission is the "planning phase". One drive from a stop to the next is a **mission** ("Mission N"), the term people understand; the whole journey is the **expedition**. The code, schema, API paths and blob keys use the same two words, so nothing is called "segment" or "leg" and "mission" never means the whole journey.
+- **Naming.** Approvals are "LGTM"; the idle wait after the first submission is the "planning phase". The whole journey is the **mission** (the schema, API paths and blob keys say so); one drive from a stop to the next is a **leg** in the interface ("Leg N") and a `segment` in the code. "Mission" is never used for a single drive.
 
 ## Dashboard and instruments
 
