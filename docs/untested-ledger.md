@@ -33,3 +33,4 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 29. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
 30. The reachability flood fill crosses unseen ground, so whether a seen vertex is pathable can depend on hidden terrain.
 31. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
+32. The slice stream requests a batch past the outcome (404s in the console after the last slice); harmless, unfixed.
