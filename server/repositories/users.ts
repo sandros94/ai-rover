@@ -17,6 +17,11 @@ export async function createUser(
   return row!
 }
 
+export async function findUser(db: DB, id: string): Promise<UserAccount | undefined> {
+  const [row] = await db.select().from(userAccount).where(eq(userAccount.id, id))
+  return row
+}
+
 export async function findUserByIdentity(
   db: DB,
   identity: Identity,

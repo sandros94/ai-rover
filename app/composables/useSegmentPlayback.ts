@@ -17,11 +17,15 @@ import { useJourneyClient } from './useJourneyClient'
  * so far, and the outcome only once playback reaches it. A new `segmentId` starts over; none
  * stops playback and clears everything.
  * `serverOffsetMs` (server minus browser clock, see `useMissionState`) keeps release times on
- * the server's clock.
+ * the server's clock. `endsAt`, the end of a drive already settled when it is started, keeps the
+ * slice requests from going past its last slice.
  */
 export function useSegmentPlayback(
   segmentId: MaybeRefOrGetter<string | null | undefined>,
-  options: { serverOffsetMs?: MaybeRefOrGetter<number> } = {},
+  options: {
+    serverOffsetMs?: MaybeRefOrGetter<number>
+    endsAt?: MaybeRefOrGetter<string | Date | null | undefined>
+  } = {},
 ) {
   const client = useJourneyClient()
   const manifest = shallowRef<StoredSegmentManifest>()
@@ -106,7 +110,12 @@ export function useSegmentPlayback(
         sliceSeconds: loaded.sliceSeconds,
       })
       clock.setRate(rate.value)
-      stream = createSegmentStream({ client, manifest: loaded })
+      const endsAt = toValue(options.endsAt)
+      stream = createSegmentStream({
+        client,
+        manifest: loaded,
+        endsAt: endsAt ? new Date(endsAt).getTime() : undefined,
+      })
       frameLoop()
     } catch (caught) {
       if (current === generation) error.value = caught

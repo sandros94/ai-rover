@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
+import { mapObjects, replayedStopsAndDeaths, ROVER_ID, roverObject } from '#shared/utils/client'
 import { slopeProfile } from '#shared/utils/client/instruments'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { PanelId } from '#shared/utils/client/hud'
@@ -8,6 +9,8 @@ import Instrument from '~/components/dashboard/Instrument.vue'
 import PlaybackControls from '~/components/dashboard/PlaybackControls.vue'
 import SceneHud from '~/components/hud/SceneHud.vue'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
+import { objectTitle } from '~/components/inspect/ObjectCard.vue'
+import ObjectDetails from '~/components/inspect/ObjectDetails.vue'
 import type { StageProps } from '~/components/map/LiveStage.vue'
 import LiveStage from '~/components/map/LiveStage.vue'
 import type { DriveJson, PlaylistJson } from '~/composables/useJourney'
@@ -20,7 +23,8 @@ import DriveRow from './DriveRow.vue'
  * mask as stored: the fog is what the rover knew then, lifted by the drive's own reveals as it
  * plays. The disk, the judgment and the instruments switch at each stop; with more than one
  * drive an indicator names which of how many plays, and `n` and `p` jump between them. A
- * replay played to its end marks this browser as having seen up to its last drive.
+ * replay played to its end marks this browser as having seen up to its last drive. The stops and
+ * deaths shown are inspectable as on the live map: a card on hover, and focus with its details.
  */
 const props = withDefaults(
   defineProps<{
@@ -29,10 +33,12 @@ const props = withDefaults(
     mission: PlaylistJson['mission']
     /** The stops reached up to the one the first drive left. */
     trail: PlaylistJson['trail']
+    /** The deaths public when the first drive started. */
+    deaths?: PlaylistJson['deaths']
     /** Where to continue once these are watched, if anywhere. */
     next?: { to: string; number: number } | null
   }>(),
-  { next: null },
+  { next: null, deaths: () => [] },
 )
 
 /** Replays start from the beginning at this speed, times real time. */
@@ -48,7 +54,7 @@ const playback = useSegmentPlaylist(props.drives, {
   rate: START_RATE,
 })
 const drive = playback.segment
-const { snapshot, rover, plan, driven } = usePlaybackTrack(playback)
+const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 /** Playlist time at the instruments' rate: the controls and the status need no more. */
 const time = useThrottled(() => playback.time.value, INSTRUMENT_HZ)
 
@@ -57,19 +63,34 @@ const view = useMapView()
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 const cellSize = computed(() => terrain.value?.grid.cellSize ?? 1)
-/** The stops reached before the drive playing, those the earlier drives left included. */
-const trail = computed(() => {
-  const stops = new Map(props.trail.map((s) => [s.index, s]))
-  for (const d of props.drives.slice(1, playback.index.value + 1)) {
-    const { index, x, y } = d.from
-    stops.set(index, { index, x, y })
-  }
-  return [...stops.values()].sort((a, b) => a.index - b.index)
-})
-/** Where the drives played so far failed, the one playing included. */
-const deaths = computed(() =>
-  props.drives.slice(0, playback.index.value + 1).flatMap((d) => (d.death ? [d.death] : [])),
+/**
+ * The stops reached before the drive playing, those the earlier drives reached included, and
+ * where the drives played so far failed, the one playing included.
+ */
+const shown = computed(() =>
+  replayedStopsAndDeaths(
+    { trail: props.trail, deaths: props.deaths },
+    props.drives,
+    playback.index.value,
+  ),
 )
+/** What can be inspected: the stops and deaths shown; the rover is added where it moves. */
+const objects = computed(() =>
+  mapObjects({
+    mission: props.mission,
+    currentStop: { index: drive.value.from.index },
+    ...shown.value,
+    departing: {
+      segmentId: drive.value.id,
+      number: drive.value.number,
+      fromIndex: drive.value.from.index,
+      toIndex: drive.value.to?.index ?? null,
+    },
+    round: null,
+  }),
+)
+/** The deaths as objects: the 3D view knows each ghost by its id. */
+const deathObjects = computed(() => objects.value.filter((o) => o.kind === 'death'))
 
 const instruments = computed(() => {
   const s = snapshot.value
@@ -113,16 +134,40 @@ const stage = computed((): StageProps => ({
   center: manifest.value ? manifest.value.stop : drive.value.from,
   radius: manifest.value?.radius ?? 500,
   rover: rover.value ?? { ...drive.value.from, headingRad: 0 },
-  trail: trail.value,
+  trail: shown.value.trail,
   plan: plan.value,
   driven: driven.value,
-  deaths: deaths.value,
+  deaths: deathObjects.value,
   deathRadiusM: rules.value.failureZone.destinationRadiusM,
   frame: playback.frame.value,
   keyframes: snapshot.value.keyframes,
   t: snapshot.value.t,
+  objects: objects.value,
+  roverObject: roverObject(rover.value ?? { ...drive.value.from, headingRad: 0 }, {
+    status: 'driving',
+    speedMps: motion.value?.speedMps ?? null,
+    progress: motion.value?.progress ?? null,
+  }),
 }))
 const readStage = () => stage.value
+
+/* Inspecting: what the map shows can be focused, and the focused object's details open. */
+
+const mapFocus = useMapFocus()
+onBeforeUnmount(mapFocus.clear)
+const focused = computed(() => {
+  const id = mapFocus.focused.value
+  const object = id && id !== ROVER_ID ? objects.value.find((o) => o.id === id) : undefined
+  return object && (object.kind === 'stop' || object.kind === 'death') ? object : undefined
+})
+// A focus whose object is not shown (a stop or death of a segment not reached yet) is dropped.
+watch(objects, () => {
+  const id = mapFocus.focused.value
+  if (id && id !== ROVER_ID && !focused.value) mapFocus.clear()
+})
+const detail = computed(() =>
+  focused.value ? { key: focused.value.id, title: objectTitle(focused.value) } : null,
+)
 
 const hudPlayback = computed(() => {
   const { rate, paused } = snapshot.value
@@ -144,14 +189,15 @@ watch(playback.ended, (ended) => {
   if (ended) replayed.mark(props.drives.at(-1)!.endedAt)
 })
 
-const shortcuts = computed(() =>
-  multi.value
+const shortcuts = computed(() => [
+  ...(multi.value
     ? [
         { key: 'n', label: 'Next segment', run: playback.next },
         { key: 'p', label: 'Previous segment', run: playback.previous },
       ]
-    : [],
-)
+    : []),
+  { key: 'escape', label: 'Clear the focus', run: mapFocus.clear },
+])
 
 /** A replay has no vote and no live tally. */
 const PANELS: PanelId[] = ['map2d', 'segment', 'clock', ...DRIVE_GROUPS]
@@ -172,7 +218,9 @@ const instrumentProps = computed(() => ({
     :panels="PANELS"
     :playback="hudPlayback"
     :shortcuts="shortcuts"
+    :detail="detail"
     @toggle="playback.togglePlay"
+    @close-detail="mapFocus.clear"
   >
     <template #title>
       <UButton
@@ -268,6 +316,15 @@ const instrumentProps = computed(() => ({
         </p>
         <JudgmentCard :judgment="drive.judgment" />
       </section>
+    </template>
+    <template #panel-details>
+      <ObjectDetails
+        v-if="focused"
+        :key="focused.id"
+        :object="focused"
+        :mission-id="mission.id"
+        :rules="rules"
+      />
     </template>
     <template v-for="group in instrumentGroups" #[`panel-${group}`]>
       <Instrument :group="group" v-bind="instrumentProps" />

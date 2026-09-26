@@ -1,10 +1,13 @@
 import { purgeCache } from '@netlify/functions'
 import type { H3Event } from 'nitro/h3'
 import { defineHandler, HTTPError } from 'nitro/h3'
+import type { UserSessions } from '../../../modules/auth/runtime/server/lib/session'
+import { useAuthContext } from '../../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../../database/db'
-import { DbError } from '../../database/errors'
-import type { Mission } from '../../database/schema'
+import { DbError, isMissingUserViolation } from '../../database/errors'
+import type { Mission, UserAccount } from '../../database/schema'
 import { getActiveMission } from '../../repositories/missions'
+import { findUser } from '../../repositories/users'
 import { useDB } from '../db'
 import { useJevClient } from '../jev'
 import type { JevClient } from '../jev/client'
@@ -20,7 +23,13 @@ import { tickMission } from './tick'
 
 /** Status per typed error code; codes absent here are server faults and answer 500. */
 const STATUS: Record<string, Record<string, number>> = {
-  DbError: { NOT_FOUND: 404, ALREADY_SUBMITTED: 409, INVALID_STATE: 409, ROUND_CHANGED: 409 },
+  DbError: {
+    NOT_FOUND: 404,
+    ALREADY_SUBMITTED: 409,
+    INVALID_STATE: 409,
+    ROUND_CHANGED: 409,
+    USER_GONE: 401,
+  },
   LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, MISSION_PAUSED: 423 },
   MissionError: { INVALID_INPUT: 400 },
   NavError: { INVALID_INPUT: 422, OUT_OF_DISK: 422 },
@@ -28,13 +37,20 @@ const STATUS: Record<string, Record<string, number>> = {
   JudgeError: { NOT_CONFIGURED: 503, UPSTREAM: 502 },
 }
 
+/** What a signed-in visitor whose account was deleted is told. */
+export const USER_GONE_MESSAGE = 'Your account no longer exists; sign in again.'
+
 /**
  * The HTTP answer for anything a mission route throws: typed errors carry their `code` and
  * message; anything else is logged and answered as a bare 500 so no internals leak. An upstream
- * Jev failure answers its fixed message and logs its cause.
+ * Jev failure answers its fixed message and logs its cause. A write refused because its user's
+ * account is gone answers as {@link DbError} `USER_GONE`.
  */
-export function httpErrorOf(error: unknown): HTTPError {
-  if (HTTPError.isError(error)) return error
+export function httpErrorOf(thrown: unknown): HTTPError {
+  if (HTTPError.isError(thrown)) return thrown
+  const error = isMissingUserViolation(thrown)
+    ? new DbError('USER_GONE', USER_GONE_MESSAGE, { cause: thrown })
+    : thrown
   const typed =
     error instanceof DbError ||
     error instanceof LifecycleError ||
@@ -133,38 +149,83 @@ function changed(tick: TickResult | null): boolean {
   return tick !== null && Object.values(tick).some((step) => step !== null)
 }
 
+/** What mission routes reach beyond the request; tests pass their own. */
+export interface MissionRouteContext {
+  db: () => DB
+  sessions: () => Pick<UserSessions, 'require' | 'clear'>
+  store: () => JourneyStore
+}
+
+const PLATFORM: MissionRouteContext = {
+  db: useDB,
+  sessions: () => useAuthContext().sessions,
+  store: () => createJourneyStore(),
+}
+
+/**
+ * The signed-in user's account, read once per request: 401 when signed out, and `USER_GONE`
+ * when the session names an account that no longer exists.
+ */
+export async function requireSessionUser(
+  db: DB,
+  event: H3Event,
+  sessions: Pick<UserSessions, 'require'>,
+): Promise<UserAccount> {
+  const { user } = await sessions.require(event)
+  const account = await findUser(db, user.id)
+  if (!account) throw new DbError('USER_GONE', USER_GONE_MESSAGE)
+  return account
+}
+
 /**
  * A mission route: errors mapped by {@link httpErrorOf}, and the mission brought up to date
  * before the handler runs per `access`, so every read and write sees the state the lazy trigger
  * implies at `now`. A write, or a read whose tick changed something, purges the cached public
- * state once done. Only a successful answer of a `public` route is cacheable.
+ * state once done. Only a successful answer of a `public` route is cacheable. With `user`, the
+ * signed-in account is resolved before anything else and handed over; an answer of `USER_GONE`,
+ * from there or from a write, also clears the session so the browser signs in afresh.
  */
-export function defineMissionHandler<T, A extends MissionAccess>(
-  options: { access: A; cache: MissionCache; maxAgeS?: number },
-  handler: (
-    event: H3Event,
-    context: {
-      missionId: string
-      store: JourneyStore
-      /** Created only when a judgment is needed, so routes work without a key until then. */
-      jev: JevClient
-      now: Date
-      tick: A extends 'write' ? TickResult : TickResult | null
-    },
-  ) => Promise<T>,
+export function defineMissionHandler<T, A extends MissionAccess, U extends boolean = false>(
+  options: { access: A; cache: MissionCache; maxAgeS?: number; user?: U },
+  handler: MissionRouteHandler<T, A, U>,
+) {
+  return defineMissionHandlerWith(PLATFORM, options, handler)
+}
+
+export type MissionRouteHandler<T, A extends MissionAccess, U extends boolean> = (
+  event: H3Event,
+  context: {
+    missionId: string
+    store: JourneyStore
+    /** Created only when a judgment is needed, so routes work without a key until then. */
+    jev: JevClient
+    now: Date
+    tick: A extends 'write' ? TickResult : TickResult | null
+    /** The signed-in account, for a route defined with `user`. */
+    user: U extends true ? UserAccount : null
+  },
+) => Promise<T>
+
+/** {@link defineMissionHandler} over `platform` instead of the platform's database and blobs. */
+export function defineMissionHandlerWith<T, A extends MissionAccess, U extends boolean = false>(
+  platform: MissionRouteContext,
+  options: { access: A; cache: MissionCache; maxAgeS?: number; user?: U },
+  handler: MissionRouteHandler<T, A, U>,
 ) {
   return defineHandler(async (event) => {
     const noStore = missionCacheHeaders('', 'none')
     for (const [name, value] of Object.entries(noStore)) event.res.headers.set(name, value)
     let purge: string | undefined
     try {
-      const mission = await getActiveMission(useDB())
+      const db = platform.db()
+      const user = options.user ? await requireSessionUser(db, event, platform.sessions()) : null
+      const mission = await getActiveMission(db)
       if (!mission) {
         throw new LifecycleError('NO_ACTIVE_MISSION', 'No mission is active; land one first.')
       }
-      const store = createJourneyStore()
+      const store = platform.store()
       const now = requestNow(event)
-      const tick = await syncMission(useDB(), {
+      const tick = await syncMission(db, {
         mission,
         access: options.access,
         store,
@@ -178,12 +239,24 @@ export function defineMissionHandler<T, A extends MissionAccess>(
         jev: LAZY_JEV,
         now,
         tick: tick as A extends 'write' ? TickResult : TickResult | null,
+        user: user as U extends true ? UserAccount : null,
       })
       const headers = missionCacheHeaders(mission.id, options.cache, options)
       for (const [name, value] of Object.entries(headers)) event.res.headers.set(name, value)
       return result
     } catch (error) {
-      throw httpErrorOf(error)
+      const answer = httpErrorOf(error)
+      if ((answer.body as { code?: unknown } | undefined)?.code !== 'USER_GONE') throw answer
+      await platform.sessions().clear(event)
+      // An error answer carries its own headers, not the event's: the cleared cookie rides on it.
+      const cleared = event.res.headers.getSetCookie().map((cookie) => ['set-cookie', cookie])
+      throw new HTTPError({
+        status: answer.status,
+        message: answer.message,
+        body: answer.body,
+        headers: cleared as [string, string][],
+        cause: answer.cause,
+      })
     } finally {
       if (purge) await purgeMissionCache(purge)
     }

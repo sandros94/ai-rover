@@ -7,6 +7,7 @@ import {
   hitMapObject,
   HIT_TOLERANCE_PX,
   mapObjects,
+  replayedStopsAndDeaths,
   roverObject,
   roverStatus,
   sameMapObject,
@@ -145,6 +146,104 @@ describe('mapObjects', () => {
       'death',
     )
     expect(death).toMatchObject({ at: { iso: SOL_1_0600, sol: 1, lmst: '06:00:00' } })
+  })
+})
+
+describe('replayedStopsAndDeaths', () => {
+  const BEFORE: Pick<MapObjectsSource, 'trail' | 'deaths'> = {
+    trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+    deaths: [],
+  }
+  const DRIVES = [
+    {
+      id: 'd1',
+      number: 1,
+      endedAt: '2026-09-02T00:00:00.000Z',
+      distanceM: 80,
+      reasons: [],
+      from: { index: 0 },
+      to: { index: 1, x: 0, y: 80 },
+      death: null,
+    },
+    {
+      id: 'd2',
+      number: 2,
+      endedAt: '2026-09-03T00:00:00.000Z',
+      distanceM: 41.6,
+      reasons: ['stuck'],
+      from: { index: 1 },
+      to: null,
+      death: { x: 30, y: 100 },
+    },
+  ]
+
+  it('adds a stop once the drive that reached it has played, with who reached it and when', () => {
+    expect(replayedStopsAndDeaths(BEFORE, DRIVES, 0)).toEqual(BEFORE)
+    const second = replayedStopsAndDeaths(BEFORE, DRIVES, 1)
+    expect(second.trail).toEqual([
+      { index: 0, x: 0, y: 0, reachedBy: null },
+      {
+        index: 1,
+        x: 0,
+        y: 80,
+        reachedBy: { segmentId: 'd1', number: 1, fromIndex: 0, at: '2026-09-02T00:00:00.000Z' },
+      },
+    ])
+  })
+
+  it('shows the death of every drive up to the one playing, as the live map describes it', () => {
+    const [death] = replayedStopsAndDeaths(BEFORE, DRIVES, 1).deaths
+    expect(death).toEqual({
+      x: 30,
+      y: 100,
+      segmentId: 'd2',
+      number: 2,
+      fromIndex: 1,
+      reasons: ['stuck'],
+      at: '2026-09-03T00:00:00.000Z',
+      distanceM: 41.6,
+    })
+    const [object] = byKind(
+      mapObjects({
+        mission: { solsEpoch: EPOCH },
+        currentStop: { index: 1 },
+        ...replayedStopsAndDeaths(BEFORE, DRIVES, 1),
+        round: null,
+      }),
+      'death',
+    )
+    expect(object).toMatchObject({ id: 'death:d2', number: 2, fromIndex: 1, distanceM: 41.6 })
+  })
+})
+
+describe('mapObjects with a departing drive', () => {
+  it("lists a replay's playing drive among its stop's departures, once", () => {
+    const base = {
+      mission: { solsEpoch: EPOCH },
+      currentStop: { index: 0 },
+      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+      deaths: [],
+      round: null,
+    }
+    const departing = { segmentId: 'd1', number: 1, fromIndex: 0, toIndex: 1 }
+    const [stop] = byKind(mapObjects({ ...base, departing }), 'stop')
+    expect(stop).toMatchObject({ departures: [{ segmentId: 'd1', number: 1, toIndex: 1 }] })
+    // A failed one is already listed through its death.
+    const death = {
+      x: 5,
+      y: 5,
+      segmentId: 'd1',
+      number: 1,
+      fromIndex: 0,
+      reasons: ['stuck'],
+      at: EPOCH,
+      distanceM: 3,
+    }
+    const [lost] = byKind(
+      mapObjects({ ...base, deaths: [death], departing: { ...departing, toIndex: null } }),
+      'stop',
+    )
+    expect(lost).toMatchObject({ departures: [{ segmentId: 'd1', number: 1, toIndex: null }] })
   })
 })
 

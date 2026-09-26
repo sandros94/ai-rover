@@ -7,6 +7,7 @@ import {
   parseJourneyRange,
 } from '#server/utils/mission/journey'
 import { MissionError } from '#shared/utils/mission'
+import { settleSegment } from '#server/repositories/segments'
 import { createTestDb, dbErrorOf, JOURNEY_T0, seedJourney } from '../db/helpers'
 
 const HOUR = 3_600_000
@@ -134,12 +135,42 @@ describe('journeyDrive', () => {
     })
     expect(one.mission).toMatchObject({ id: j.mission.id, solsEpoch: j.mission.solsEpoch })
     expect(one.mission.rules).toEqual(j.mission.config.rules)
+    // The public facts of the live map: which drive reached each stop, and when.
     expect(one.trail).toEqual([
-      { index: 0, x: 0, y: 0 },
-      { index: 1, x: 0, y: 80 },
+      { index: 0, x: 0, y: 0, reachedBy: null },
+      {
+        index: 1,
+        x: 0,
+        y: 80,
+        reachedBy: { segmentId: j.arrival.id, number: 1, fromIndex: 0, at: j.arrival.endsAt },
+      },
     ])
+    // A drive's own death is its replay's to show; none came before it.
+    expect(one.deaths).toEqual([])
     const first = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.arrival.id })
-    expect(first.trail).toEqual([{ index: 0, x: 0, y: 0 }])
+    expect(first.trail).toEqual([{ index: 0, x: 0, y: 0, reachedBy: null }])
+  })
+
+  it('gives the deaths public when the drive started, with the facts the live map shows', async () => {
+    const j = await seedJourney(db)
+    await settleSegment(db, j.driving.id, {
+      now: j.driving.endsAt,
+      status: 'failed',
+      death: { x: 5, y: 85 },
+    })
+    const third = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.driving.id })
+    expect(third.deaths).toEqual([
+      {
+        x: 30,
+        y: 100,
+        segmentId: j.failure.id,
+        number: 2,
+        fromIndex: 1,
+        reasons: j.failure.outcome!.reasons,
+        at: j.failure.endsAt,
+        distanceM: j.failure.outcome!.distanceM,
+      },
+    ])
   })
 
   it('names the settled drive after it, if any, to continue with', async () => {
@@ -157,8 +188,9 @@ describe('journeyDrive', () => {
       journeyDrive(db, { missionId: j.mission.id, segmentId: j.driving.id }),
     )
     expect(error?.code).toBe('NOT_FOUND')
-    // The id itself is random hex and may hold "85" by chance.
-    expect(error?.message.replace(j.driving.id, '')).not.toMatch(/failed|stuck|85/)
+    // The ids are random hex and may hold "85" by chance.
+    const text = error?.message.replace(j.driving.id, '').replace(j.mission.id, '')
+    expect(text).not.toMatch(/failed|stuck|85/)
   })
 })
 

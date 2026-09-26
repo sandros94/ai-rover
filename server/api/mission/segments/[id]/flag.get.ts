@@ -10,14 +10,13 @@ import { BAD_INPUT, SegmentParams } from '../../../../utils/mission/validation'
  * from the public mission state, which carries the count and quorum and is the same for everyone.
  */
 export default defineMissionHandler(
-  { access: 'read', cache: 'none' },
-  async (event, { missionId, now }) => {
-    const userId = (await requireUserSession(event)).user.id
+  { access: 'read', cache: 'none', user: true },
+  async (event, { missionId, now, user }) => {
     const { id } = await getValidatedRouterParams(event, SegmentParams, BAD_INPUT)
     const { config } = await getMission(useDB(), missionId)
     const mine = await hasNotMovingFlag(useDB(), {
       segmentId: id,
-      userId,
+      userId: user.id,
       rules: config.rules,
       now,
     })

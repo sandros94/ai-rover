@@ -56,20 +56,28 @@ export interface SegmentStream {
   revealsUntil(simSeconds: number): SegmentSlice['reveals']
   /**
    * Fetches, in order, every slice released at `wallMs` and not yet held; nothing before the
-   * next release time. Overlapping calls share one pass. Rejects with the client's error, or
-   * NOT_FOUND when a released slice is missing before the outcome; either way the next attempt
-   * waits {@link ERROR_RETRY_MS}.
+   * next release time, and with a known `endsAt` nothing released after it. Overlapping calls
+   * share one pass. Rejects with the client's error, or NOT_FOUND when a released slice is
+   * missing before the outcome or none up to `endsAt` held it; either way the next attempt waits
+   * {@link ERROR_RETRY_MS}.
    */
   poll(wallMs: number): Promise<void>
 }
 
-/** The slices of one published segment, fetched as they are released. */
+/**
+ * The slices of one published segment, fetched as they are released, up to `concurrency` at a
+ * time. Only the last slice says it is the last, so a drive whose end is public (a settled one)
+ * passes `endsAt`, the release of its last slice, and no request goes past it.
+ */
 export function createSegmentStream(options: {
   client: JourneyClient
   manifest: StoredSegmentManifest
   concurrency?: number
+  /** Epoch milliseconds the drive ended, once public; undefined while it plays. */
+  endsAt?: number
 }): SegmentStream {
   const { client, manifest, concurrency = DEFAULT_SLICE_CONCURRENCY } = options
+  const endsAt = options.endsAt ?? Infinity
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new ClientError(
       'INVALID_INPUT',
@@ -112,8 +120,16 @@ export function createSegmentStream(options: {
     while (!outcome) {
       const due = nextFetchAt()!
       if (wallMs < due) return
+      if (releaseAt(loaded) > endsAt) {
+        retryAt = wallMs + ERROR_RETRY_MS
+        throw new ClientError(
+          'NOT_FOUND',
+          `Segment ${segmentId} ended with slice ${loaded - 1}, which held no outcome; the store is inconsistent.`,
+        )
+      }
+      const until = Math.min(wallMs, endsAt)
       const batch: number[] = []
-      for (let k = loaded; batch.length < concurrency && releaseAt(k) <= wallMs; k++) batch.push(k)
+      for (let k = loaded; batch.length < concurrency && releaseAt(k) <= until; k++) batch.push(k)
       // A retry may be due before the clock reaches the slice's own release time.
       if (batch.length === 0) batch.push(loaded)
       retryAt = undefined

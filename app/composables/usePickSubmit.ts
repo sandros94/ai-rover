@@ -7,7 +7,8 @@ import type { usePlanPreview } from './usePlanPreview'
  * a submission is highlighted, a tap picks, confirming submits the picked point and keeps the
  * server's refusal (its reason or error code) to show. A new highlight drops the pick. A
  * `round-changed` refusal keeps the pick and reports the state stale, so the preview plans again
- * from the round as it now is before the user confirms again.
+ * from the round as it now is before the user confirms again. A `USER_GONE` answer also reads the
+ * session again, so the page shows the visitor signed out.
  */
 export function usePickSubmit(
   preview: ReturnType<typeof usePlanPreview>,
@@ -17,6 +18,7 @@ export function usePickSubmit(
     onStale: () => void
   },
 ) {
+  const readError = useRequestError()
   const picked = ref<MapPoint | null>(null)
   const submitting = ref(false)
   const refusal = ref<{ reason: string; message: string } | null>(null)
@@ -60,12 +62,9 @@ export function usePickSubmit(
       cancel()
       options.onSubmitted()
     } catch (caught) {
-      const data = (caught as { data?: { reason?: string; code?: string; message?: string } }).data
-      refusal.value = {
-        reason: data?.reason ?? data?.code ?? 'error',
-        message: data?.message ?? (caught instanceof Error ? caught.message : String(caught)),
-      }
-      if (data?.reason === 'round-changed') options.onStale()
+      const error = await readError(caught)
+      refusal.value = { reason: error.reason ?? error.code, message: error.message }
+      if (error.reason === 'round-changed') options.onStale()
     } finally {
       submitting.value = false
     }

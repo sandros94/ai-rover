@@ -16,6 +16,8 @@ export interface PlaylistSegment {
   id: string
   /** Sim seconds of the whole drive, from the settled drive: the public manifest omits it. */
   durationS: number
+  /** When its last slice was released. */
+  endedAt: string | Date
   from: { index: number }
 }
 
@@ -91,7 +93,11 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
       .getSegmentManifest(segments[k]!.id)
       .then((loaded) => {
         entry.manifest = loaded
-        entry.stream = createSegmentStream({ client, manifest: loaded })
+        entry.stream = createSegmentStream({
+          client,
+          manifest: loaded,
+          endsAt: new Date(segments[k]!.endedAt).getTime(),
+        })
       })
       .catch((caught: unknown) => {
         if (entries.get(k) === entry) entries.delete(k)

@@ -1,12 +1,16 @@
 import type { DB } from '../../database/db'
 import { getMission } from '../../repositories/missions'
 import type { JourneyRange, JourneySegment } from '../../repositories/segments'
-import { getJourneySegment, listJourneySegments } from '../../repositories/segments'
+import {
+  getJourneySegment,
+  listJourneySegments,
+  listSettledSegments,
+} from '../../repositories/segments'
 import { listStops } from '../../repositories/stops'
 import type { MissionRules } from '#shared/utils/mission'
 import { MissionError } from '#shared/utils/mission'
-import type { PublicSubmission } from './state'
-import { publicJudgment } from './state'
+import type { PublicDeath, PublicStop, PublicSubmission } from './state'
+import { publicJudgment, publicStopsAndDeaths } from './state'
 
 /** Settled drives per page of the journey log. */
 export const JOURNEY_PAGE_SIZE = 50
@@ -102,7 +106,8 @@ export async function journeyPage(
 
 /**
  * One settled drive to replay, with what the replay needs beside it: the mission clock and
- * rules, the stops reached up to the one it left, and the settled drive after it, if any.
+ * rules, the stops reached up to the one it left and the deaths public when it started, both as
+ * the live map shows them, and the settled drive after it, if any.
  */
 export async function journeyDrive(
   db: DB,
@@ -110,13 +115,15 @@ export async function journeyDrive(
 ): Promise<{
   drive: PublicDrive
   mission: { id: string; solsEpoch: Date; rules: MissionRules }
-  trail: { index: number; x: number; y: number }[]
+  trail: PublicStop[]
+  deaths: PublicDeath[]
   next: { id: string; number: number } | null
 }> {
   const { missionId, segmentId } = options
   const drive = publicDrive(await getJourneySegment(db, segmentId, { missionId }))
   const mission = await getMission(db, missionId)
   const stops = await listStops(db, missionId)
+  const { trail, deaths } = publicStopsAndDeaths(stops, await listSettledSegments(db, missionId))
   const after = drive.number + 1
   const {
     segments: [next],
@@ -129,8 +136,7 @@ export async function journeyDrive(
     next: next ? { id: next.id, number: next.number } : null,
     drive,
     mission: { id: mission.id, solsEpoch: mission.solsEpoch, rules: mission.config.rules },
-    trail: stops
-      .filter((s) => s.index <= drive.from.index)
-      .map(({ index, x, y }) => ({ index, x, y })),
+    trail: trail.filter((s) => s.index <= drive.from.index),
+    deaths: deaths.filter((d) => d.number < drive.number),
   }
 }

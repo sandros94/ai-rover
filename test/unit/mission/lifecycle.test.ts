@@ -219,6 +219,7 @@ describe('settlement', () => {
       id: driving.id,
       status: 'arrived',
       startedAt: driving.startedAt,
+      endsAt: driving.endsAt,
       fromStopId: m.stop.id,
       distanceM: driving.outcome!.distanceM,
     })

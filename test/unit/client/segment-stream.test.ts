@@ -12,13 +12,14 @@ function setup(
   options: {
     override?: (key: string) => Response | undefined
     server?: (wall: number) => number
+    endsAt?: number
   } = {},
 ) {
   let wall = startedAt
   const { server = (w) => w } = options
   const records = recordsFetch({ now: () => server(wall), override: options.override })
   const client = createJourneyClient({ fetch: records.fetch })
-  const stream = createSegmentStream({ client, manifest })
+  const stream = createSegmentStream({ client, manifest, endsAt: options.endsAt })
   return {
     stream,
     calls: records.calls,
@@ -157,6 +158,21 @@ describe('createSegmentStream over the recorded drive', () => {
     const before = calls.length
     await poll(releaseAt(last + 50))
     expect(calls.length).toBe(before)
+  })
+
+  it('asks for no slice past the outcome of a drive whose end is known, however late it polls', async () => {
+    const { stream, calls, poll } = setup({ endsAt: releaseAt(last) })
+    await poll(releaseAt(last) + 60 * 60_000)
+    expect(calls).toEqual(Array.from({ length: last + 1 }, (_, k) => sliceUrl(k)))
+    expect(stream.outcome).toEqual(record.outcome)
+    expect(stream.done).toBe(true)
+  })
+
+  it('rejects with NOT_FOUND when no slice up to the known end holds the outcome', async () => {
+    const { stream, calls, poll } = setup({ endsAt: releaseAt(last - 1) })
+    await expect(poll(releaseAt(last) + 60_000)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(stream.loadedSlices).toBe(last)
+    expect(calls.map((url) => url)).not.toContain(sliceUrl(last))
   })
 
   it('gates the outcome on sim time: undefined before the record ends, defined from its end', async () => {

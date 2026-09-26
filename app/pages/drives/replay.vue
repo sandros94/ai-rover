@@ -86,6 +86,7 @@ useSeoMeta({
         :drives="data.drives"
         :mission="data.mission"
         :trail="data.trail"
+        :deaths="data.deaths"
         :next="next"
       />
       <template #fallback>

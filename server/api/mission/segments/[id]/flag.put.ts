@@ -13,11 +13,10 @@ import { BAD_INPUT, SegmentParams } from '../../../../utils/mission/validation'
  * takes effect at once.
  */
 export default defineMissionHandler(
-  { access: 'write', cache: 'none' },
-  async (event, { missionId, store, jev, now }) => {
-    const userId = (await requireUserSession(event)).user.id
+  { access: 'write', cache: 'none', user: true },
+  async (event, { missionId, store, jev, now, user }) => {
     const { id } = await getValidatedRouterParams(event, SegmentParams, BAD_INPUT)
-    await flagNotMoving(useDB(), { missionId, segmentId: id, userId, now })
+    await flagNotMoving(useDB(), { missionId, segmentId: id, userId: user.id, now })
     await tickMission(useDB(), { store, jev, missionId, now })
     const { config } = await getMission(useDB(), missionId)
     const round = await getOpenRound(useDB(), missionId)

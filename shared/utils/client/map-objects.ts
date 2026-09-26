@@ -108,6 +108,11 @@ export interface MapObjectsSource {
     at: Instant
     distanceM: number
   }[]
+  /**
+   * A drive that left the current stop and has not reached anything shown yet, listed among the
+   * stop's departures when where it ended is already public (a replay's playing drive).
+   */
+  departing?: { segmentId: string; number: number; fromIndex: number; toIndex: number | null }
   round: {
     anchor: { x: number; y: number }
     submissions: readonly {
@@ -144,6 +149,11 @@ export function mapObjects(source: MapObjectsSource): MapObject[] {
   }
   for (const death of source.deaths) {
     depart(death.fromIndex, { segmentId: death.segmentId, number: death.number, toIndex: null })
+  }
+  const leaving = source.departing
+  if (leaving && !source.deaths.some((death) => death.segmentId === leaving.segmentId)) {
+    const { segmentId, number, toIndex } = leaving
+    depart(leaving.fromIndex, { segmentId, number, toIndex })
   }
 
   const stops = source.trail.map((stop): StopObject => {
@@ -191,6 +201,49 @@ export function mapObjects(source: MapObjectsSource): MapObject[] {
     }
   })
   return [...stops, ...deaths, ...submissions]
+}
+
+/** A settled drive as a replay plays it: enough to name the stop it reached or its death. */
+export interface PlayedDrive {
+  id: string
+  number: number
+  endedAt: Instant
+  distanceM: number
+  reasons: readonly string[]
+  from: { index: number }
+  to: { index: number; x: number; y: number } | null
+  death: { x: number; y: number } | null
+}
+
+/**
+ * The stops and deaths a replay shows while `drives[playing]` plays: those public when the first
+ * drive started (`before`), then the stop each earlier drive reached, and the death of every
+ * drive up to the one playing, all with the facts the live map gives them.
+ */
+export function replayedStopsAndDeaths(
+  before: Pick<MapObjectsSource, 'trail' | 'deaths'>,
+  drives: readonly PlayedDrive[],
+  playing: number,
+): { trail: MapObjectsSource['trail'][number][]; deaths: MapObjectsSource['deaths'][number][] } {
+  const stops = new Map(before.trail.map((stop) => [stop.index, stop]))
+  const deaths = [...before.deaths]
+  for (const [k, drive] of drives.slice(0, playing + 1).entries()) {
+    const ref = { segmentId: drive.id, number: drive.number, fromIndex: drive.from.index }
+    if (drive.to && k < playing) {
+      const { index, x, y } = drive.to
+      stops.set(index, { index, x, y, reachedBy: { ...ref, at: drive.endedAt } })
+    }
+    if (drive.death) {
+      deaths.push({
+        ...drive.death,
+        ...ref,
+        reasons: drive.reasons,
+        at: drive.endedAt,
+        distanceM: drive.distanceM,
+      })
+    }
+  }
+  return { trail: [...stops.values()].sort((a, b) => a.index - b.index), deaths }
 }
 
 /** The rover at `pose`, as its card and focus read it. */

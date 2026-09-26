@@ -8,14 +8,13 @@ import { defineMissionHandler } from '../../utils/mission/http'
  * state, which is the same for everyone.
  */
 export default defineMissionHandler(
-  { access: 'read', cache: 'none' },
-  async (event, { missionId }) => {
-    const userId = (await requireUserSession(event)).user.id
+  { access: 'read', cache: 'none', user: true },
+  async (event, { missionId, user }) => {
     const round = await getOpenRound(useDB(), missionId)
     return {
       roundId: round?.id ?? null,
       submissionIds: round
-        ? await listLikedSubmissionIds(useDB(), { roundId: round.id, userId })
+        ? await listLikedSubmissionIds(useDB(), { roundId: round.id, userId: user.id })
         : [],
     }
   },

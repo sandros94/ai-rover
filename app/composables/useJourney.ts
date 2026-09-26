@@ -25,6 +25,8 @@ export interface PlaylistJson {
   mission: DriveReplayJson['mission']
   /** The stops reached up to the one the first drive left. */
   trail: DriveReplayJson['trail']
+  /** The deaths public when the first drive started. */
+  deaths: DriveReplayJson['deaths']
 }
 
 /** "Stop 3 → stop 4", or "Stop 3 → lost" for a failure. */
@@ -46,7 +48,7 @@ export function useDriveReplay(segmentId: MaybeRefOrGetter<string>) {
 
 /**
  * The settled drives of `range` for a replay, oldest first, at most a page of them; null when
- * the range holds none. The first drive's own record brings the mission and the trail.
+ * the range holds none. The first drive's own record brings the mission, the trail and deaths.
  */
 export function useDriveRange(range: MaybeRefOrGetter<JourneyRangeQuery>) {
   return useAsyncData(
@@ -55,7 +57,7 @@ export function useDriveRange(range: MaybeRefOrGetter<JourneyRangeQuery>) {
       const { drives, total } = await fetchJourneyRange(toValue(range))
       if (drives.length === 0) return null
       const first = await fetchDrive(drives[0]!.id)
-      return { drives, total, mission: first.mission, trail: first.trail }
+      return { drives, total, mission: first.mission, trail: first.trail, deaths: first.deaths }
     },
   )
 }

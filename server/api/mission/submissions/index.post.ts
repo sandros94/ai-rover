@@ -14,15 +14,14 @@ const BodySchema = v.object({ goal: v.object({ x: finite, y: finite }) })
  * or 409 when the round moved while the goal was judged, so the client plans again.
  */
 export default defineMissionHandler(
-  { access: 'write', cache: 'none' },
-  async (event, { missionId, store, now }) => {
-    const userId = (await requireUserSession(event)).user.id
+  { access: 'write', cache: 'none', user: true },
+  async (event, { missionId, store, now, user }) => {
     const { goal } = await readValidatedBody(event, BodySchema, BAD_INPUT)
     const result = await submitGoal(useDB(), {
       store,
       jev: useJevClient(),
       missionId,
-      userId,
+      userId: user.id,
       goal,
       now,
     })

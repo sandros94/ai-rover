@@ -6,10 +6,16 @@
  * - `INVALID_STATE`: the record exists but its state forbids the operation (a closed round, a
  *   settled submission, a stop of another mission, an identity linked elsewhere).
  * - `ROUND_CHANGED`: the round moved to another stop or anchor after the caller planned from it.
+ * - `USER_GONE`: the signed-in user's account no longer exists, so nothing can be written for it.
  *
  * Closed set: callers may match on it exhaustively, so adding a code is a breaking change.
  */
-export type DbErrorCode = 'ALREADY_SUBMITTED' | 'NOT_FOUND' | 'INVALID_STATE' | 'ROUND_CHANGED'
+export type DbErrorCode =
+  | 'ALREADY_SUBMITTED'
+  | 'NOT_FOUND'
+  | 'INVALID_STATE'
+  | 'ROUND_CHANGED'
+  | 'USER_GONE'
 
 export class DbError extends Error {
   override name = 'DbError'
@@ -26,6 +32,24 @@ export function isUniqueViolation(error: unknown, constraint: string): boolean {
   for (let current = error; current instanceof Error; current = current.cause) {
     const fields = current as Error & { code?: unknown; constraint?: unknown }
     if (fields.code === '23505' && fields.constraint === constraint) return true
+  }
+  return false
+}
+
+/**
+ * Postgres foreign-key violation on a `user_id` column referencing `user_account`, found anywhere
+ * along the `cause` chain: a write for a user whose account no longer exists.
+ */
+export function isMissingUserViolation(error: unknown): boolean {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    const fields = current as Error & { code?: unknown; constraint?: unknown }
+    if (
+      fields.code === '23503' &&
+      typeof fields.constraint === 'string' &&
+      fields.constraint.endsWith('_user_id_user_account_id_fkey')
+    ) {
+      return true
+    }
   }
   return false
 }

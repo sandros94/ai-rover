@@ -7,12 +7,11 @@ import { BAD_INPUT, SubmissionParams } from '../../../../utils/mission/validatio
 
 /** LGTMs an open submission; idempotent. Refused while the mission is paused. */
 export default defineMissionHandler(
-  { access: 'write', cache: 'none' },
-  async (event, { missionId }) => {
-    const userId = (await requireUserSession(event)).user.id
+  { access: 'write', cache: 'none', user: true },
+  async (event, { missionId, user }) => {
     const { id } = await getValidatedRouterParams(event, SubmissionParams, BAD_INPUT)
     await assertNotPaused(useDB(), missionId)
-    await like(useDB(), id, { userId })
+    await like(useDB(), id, { userId: user.id })
     return { submissionId: id, likes: await countLikes(useDB(), id) }
   },
 )

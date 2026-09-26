@@ -239,7 +239,7 @@ export interface PublicMissionState {
   /** The most recently started settled segment, for replay; null before the first settles. */
   lastSegment: Pick<
     SettledSegment,
-    'id' | 'status' | 'startedAt' | 'fromStopId' | 'distanceM'
+    'id' | 'status' | 'startedAt' | 'endsAt' | 'fromStopId' | 'distanceM'
   > | null
   tally: JourneyTally
 }
@@ -348,6 +348,7 @@ export async function publicMissionState(
           id: last.id,
           status: last.status,
           startedAt: last.startedAt,
+          endsAt: last.endsAt,
           fromStopId: last.fromStopId,
           distanceM: last.distanceM,
         }

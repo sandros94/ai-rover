@@ -6,6 +6,7 @@ import { useState } from '#imports'
 import { UApp } from '#components'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { DriveJson } from '~/composables/useJourney'
+import { MAP_VIEW_KEY } from '~/composables/useMapView'
 import { REPLAYED_UNTIL_KEY, useReplayedUntil } from '~/composables/useReplayedUntil'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import ReplayPage from '~/pages/drives/replay.vue'
@@ -84,9 +85,16 @@ registerEndpoint('/api/mission/segments', (event: { path?: string; url?: URL }) 
 registerEndpoint(`/api/mission/segments/${DRIVES[0]!.id}`, () => ({
   drive: DRIVES[0],
   mission: MISSION,
-  trail: [{ index: 0, x: 0, y: 0 }],
+  trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+  deaths: [],
   next: { id: DRIVES[1]!.id, number: 2 },
 }))
+
+// The scene needs WebGL; the inspection test hovers the 2D map.
+vi.mock('~/components/scene/DiskScene.vue', async () => {
+  const vue = await import('vue')
+  return { default: vue.defineComponent({ name: 'DiskScene', setup: () => () => null }) }
+})
 
 /** The stage needs WebGL or a canvas; the layout around it is what matters here. */
 const StageStub = defineComponent({
@@ -145,7 +153,11 @@ describe('DriveReplay', () => {
   }
 
   it('jumps between segments with n and p, swapping the indicator', async () => {
-    await mountReplay({ drives: DRIVES, mission: MISSION, trail: [{ index: 0, x: 0, y: 0 }] })
+    await mountReplay({
+      drives: DRIVES,
+      mission: MISSION,
+      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+    })
     expect(indicator()!.textContent).toContain('1 of 2')
     await press('n')
     expect(indicator()!.textContent).toContain('2 of 2')
@@ -162,7 +174,7 @@ describe('DriveReplay', () => {
     const wrapper = await mountReplay({
       drives: [DRIVES[0]!],
       mission: MISSION,
-      trail: [{ index: 0, x: 0, y: 0 }],
+      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
       next: { to: `/drives/${DRIVES[1]!.id}`, number: 2 },
     })
     expect(indicator()).toBeNull()
@@ -170,6 +182,96 @@ describe('DriveReplay', () => {
     const next = wrapper.find('[data-test=next-segment]')
     expect(next.attributes('href')).toBe(`/drives/${DRIVES[1]!.id}`)
     expect(next.text()).toMatch(/segment 2/i)
+  })
+})
+
+describe('inspecting the replay', () => {
+  /** The map lays itself out in a 400 × 400 px box whose corner sits at client (10, 20). */
+  const BOX = { left: 10, top: 20, width: 400, height: 400 }
+  const TRAIL = [
+    { index: 0, x: 0, y: 0, reachedBy: null },
+    {
+      index: 1,
+      x: 0,
+      y: 80,
+      reachedBy: {
+        segmentId: DRIVES[0]!.id,
+        number: 1,
+        fromIndex: 0,
+        at: '2026-09-25T13:00:00.000Z',
+      },
+    },
+  ]
+
+  beforeEach(() => {
+    localStorage.setItem(MAP_VIEW_KEY, '2d')
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      ...BOX,
+      x: BOX.left,
+      y: BOX.top,
+      right: BOX.left + BOX.width,
+      bottom: BOX.top + BOX.height,
+      toJSON: () => ({}),
+    })
+  })
+  afterEach(() => useMapFocus().clear())
+
+  async function mountFailure() {
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(DriveReplay, { drives: [DRIVES[1]!], mission: MISSION, trail: TRAIL }),
+          }),
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    await flushPromises()
+    return wrapper
+  }
+
+  const map = () =>
+    document.body.querySelector<HTMLElement>('[data-test=scene-layer] [data-test=map]')
+  const card = () => document.body.querySelector<HTMLElement>('[data-test=object-card]')
+  const pointer = (type: string, at: { x: number; y: number }) =>
+    new PointerEvent(type, {
+      bubbles: true,
+      clientX: BOX.left + at.x,
+      clientY: BOX.top + at.y,
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+    })
+  const markerAt = (selector: string) => {
+    const [x, y] = map()!.querySelector(selector)!.getAttribute('data-at')!.split(',').map(Number)
+    return { x: x!, y: y! }
+  }
+
+  it('shows the card of the death on hover, as the live map does', async () => {
+    await mountFailure()
+    await vi.waitFor(() => expect(map()?.querySelector('[data-test=death-marker]')).not.toBeNull())
+    map()!.dispatchEvent(pointer('pointermove', markerAt('[data-test=death-marker]')))
+    await flushPromises()
+    expect(card()?.dataset.kind).toBe('death')
+    expect(card()!.textContent).toMatch(/segment 2/i)
+  })
+
+  it('focuses a death on click and opens its details, which Escape closes', async () => {
+    await mountFailure()
+    await vi.waitFor(() => expect(map()?.querySelector('[data-test=death-marker]')).not.toBeNull())
+    const at = markerAt('[data-test=death-marker]')
+    map()!.dispatchEvent(pointer('pointermove', at))
+    map()!.dispatchEvent(pointer('pointerdown', at))
+    map()!.dispatchEvent(pointer('pointerup', at))
+    await flushPromises()
+    expect(useMapFocus().focused.value).toBe(`death:${DRIVES[1]!.id}`)
+    const details = document.body.querySelector<HTMLElement>('[data-test=object-details]')
+    expect(details?.dataset.kind).toBe('death')
+    expect(details!.textContent).toContain('stuck')
+    await press('Escape')
+    expect(useMapFocus().focused.value).toBeNull()
+    expect(document.body.querySelector('[data-test=object-details]')).toBeNull()
   })
 })
 

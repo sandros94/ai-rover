@@ -22,21 +22,31 @@ function toggleHighlight(id: string): void {
   highlightId.value = highlightId.value === id ? null : id
 }
 
+const readError = useRequestError()
+/** Why the last LGTM or its retraction failed; cleared by the next. */
+const likeError = ref<string | null>(null)
+
 const likedIds = ref<string[]>([])
 async function loadLikes(): Promise<void> {
   if (!loggedIn.value || !round.value) {
     likedIds.value = []
     return
   }
-  const liked = await $fetch('/api/mission/likes').catch(() => null)
+  const liked = await $fetch('/api/mission/likes').catch(async (caught: unknown) => {
+    await readError(caught)
+    return null
+  })
   likedIds.value = liked?.submissionIds ?? []
 }
 watch([loggedIn, () => round.value?.id], loadLikes, { immediate: true })
 
 async function like(id: string, on: boolean): Promise<void> {
-  await $fetch(`/api/mission/submissions/${id}/like`, { method: on ? 'PUT' : 'DELETE' }).catch(
-    () => undefined,
-  )
+  likeError.value = null
+  try {
+    await $fetch(`/api/mission/submissions/${id}/like`, { method: on ? 'PUT' : 'DELETE' })
+  } catch (caught) {
+    likeError.value = (await readError(caught)).message
+  }
   emit('changed')
   await loadLikes()
 }
@@ -50,6 +60,9 @@ async function like(id: string, on: boolean): Promise<void> {
         {{ state.segment ? 'Vote closes when the drive ends' : `Stop ${state.currentStop.index}` }}
       </span>
     </div>
+    <p v-if="likeError" data-test="like-error" role="alert" class="text-xs text-error">
+      {{ likeError }}
+    </p>
     <p v-if="!loggedIn" class="text-xs text-muted">
       <ULink to="/login" class="underline">Sign in</ULink> to LGTM or submit a destination.
     </p>

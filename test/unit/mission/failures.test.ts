@@ -150,6 +150,7 @@ describe('failures', () => {
       id: last.id,
       status: 'failed',
       startedAt: last.startedAt,
+      endsAt: last.endsAt,
       fromStopId: stop1.id,
       distanceM: last.outcome!.distanceM,
     })

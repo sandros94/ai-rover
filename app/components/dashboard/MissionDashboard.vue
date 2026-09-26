@@ -55,17 +55,18 @@ const playing = computed(() => {
   if (!s) return null
   if (s.segment) {
     const { id, startedAt, fromStopId } = s.segment
-    return { id, startedAt, fromStopId, driving: true, distanceM: 0 }
+    return { id, startedAt, fromStopId, driving: true, distanceM: 0, endsAt: null }
   }
   if (s.lastSegment) {
-    const { id, startedAt, fromStopId, status, distanceM } = s.lastSegment
-    return { id, startedAt, fromStopId, driving: false, status, distanceM }
+    const { id, startedAt, endsAt, fromStopId, status, distanceM } = s.lastSegment
+    return { id, startedAt, fromStopId, driving: false, status, distanceM, endsAt }
   }
   return null
 })
 
 const playback = useSegmentPlayback(() => playing.value?.id, {
   serverOffsetMs: () => props.serverOffsetMs,
+  endsAt: () => playing.value?.endsAt,
 })
 
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)

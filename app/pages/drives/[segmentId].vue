@@ -44,6 +44,7 @@ useSeoMeta({
         :drives="[data.drive]"
         :mission="data.mission"
         :trail="data.trail"
+        :deaths="data.deaths"
         :next="data.next ? { to: `/drives/${data.next.id}`, number: data.next.number } : null"
       />
       <template #fallback>

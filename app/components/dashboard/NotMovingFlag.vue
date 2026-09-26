@@ -11,8 +11,11 @@ const props = defineProps<{
 /** A flag changed the mission state. */
 const emit = defineEmits<{ changed: [] }>()
 
+const readError = useRequestError()
 const mine = ref(false)
 const sending = ref(false)
+/** Why the last flag failed, when it says more than a drive that ended meanwhile. */
+const flagError = ref<string | null>(null)
 
 async function loadMine(): Promise<void> {
   if (!props.signedIn) {
@@ -21,19 +24,25 @@ async function loadMine(): Promise<void> {
   }
   const answer = await $fetch<{ mine: boolean }>(
     `/api/mission/segments/${props.segmentId}/flag`,
-  ).catch(() => null)
+  ).catch(async (caught: unknown) => {
+    await readError(caught)
+    return null
+  })
   mine.value = answer?.mine ?? false
 }
 watch(() => [props.segmentId, props.signedIn], loadMine, { immediate: true })
 
 async function flag(): Promise<void> {
   sending.value = true
+  flagError.value = null
   try {
     await $fetch(`/api/mission/segments/${props.segmentId}/flag`, { method: 'PUT' })
     mine.value = true
     emit('changed')
-  } catch {
-    // The drive may have ended meanwhile; the next state poll shows where it stands.
+  } catch (caught) {
+    const error = await readError(caught)
+    // Otherwise the drive may have ended meanwhile; the next state poll shows where it stands.
+    if (error.code === 'USER_GONE') flagError.value = error.message
   } finally {
     sending.value = false
   }
@@ -41,7 +50,7 @@ async function flag(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex items-center gap-2 text-xs">
+  <div class="flex flex-wrap items-center gap-2 text-xs">
     <UButton
       v-if="signedIn"
       data-test="flag"
@@ -72,5 +81,8 @@ async function flag(): Promise<void> {
       >
       flags
     </span>
+    <p v-if="flagError" data-test="flag-error" role="alert" class="w-full text-error">
+      {{ flagError }}
+    </p>
   </div>
 </template>
