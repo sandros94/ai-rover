@@ -49,7 +49,9 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 ## Phase 6 — Live delivery + UI — data layer done (journey client, chunk cache, sampler, playback clock, slice stream, composables); development module and playground exist
 
 - Keyframe playback against wall-clock + polled CDN-cached mission-state endpoint (see `docs/decisions.md`).
-- Nuxt UI shell, Tres/Three terrain with chunk LOD, rover playback from keyframes, trail + failed ghosts, replay scrubber, mission clock.
+- Ten instruments built in the playground (attitude, speed and efficiency, sol clock, event feed, slip, reveals, planner telemetry, judgment card, round countdown, journey stats). Done.
+- Nuxt UI shell, Tres/Three terrain with chunk LOD, rover playback from keyframes, trail + failed ghosts, replay scrubber.
+- Dashboard assembly from the instruments, last.
 - 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment. Done.
 
 ## Phase 7 — Failure voting, resets, moderation
