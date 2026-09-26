@@ -9,6 +9,7 @@ import {
   isRevealed,
   revealDisk,
   revealedOverDisk,
+  revealedVertexCount,
   revealVertices,
   TerrainError,
 } from '#shared/utils/terrain'
@@ -141,6 +142,20 @@ describe('revealedOverDisk', () => {
     expect(terrainErrorOf(() => revealedOverDisk(createRevealedMask(world), disk))?.code).toBe(
       'INVALID_GRID',
     )
+  })
+})
+
+describe('revealedVertexCount', () => {
+  it('is zero for an empty mask', () => {
+    expect(revealedVertexCount(createRevealedMask(world))).toBe(0)
+  })
+
+  it('counts each seen world vertex once, shared chunk edges included', () => {
+    const mask = revealDisk(revealDisk(createRevealedMask(world), first), second)
+    const seen = new Set(
+      [...visiblePoints(world, first), ...visiblePoints(world, second)].map((p) => `${p.x},${p.y}`),
+    )
+    expect(revealedVertexCount(mask)).toBe(seen.size)
   })
 })
 

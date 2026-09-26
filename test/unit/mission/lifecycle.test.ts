@@ -136,6 +136,9 @@ describe('an idle rover and the grace window', () => {
       attempt: 1,
     })
     expect(state.release).toEqual({ startedAt: now, sliceSeconds: DEFAULT_SLICE_SECONDS })
+    // Unsettled, the drive counts nowhere yet: neither as the last segment nor in the tally.
+    expect(state.lastSegment).toBeNull()
+    expect(state.tally).toMatchObject({ distanceM: 0, stops: 1, arrived: 0, failed: 0 })
     expect(state.segment).not.toHaveProperty('outcome')
     expect(state.segment).not.toHaveProperty('endsAt')
     const next = (await getOpenRound(db, m.missionId))!
@@ -211,6 +214,18 @@ describe('settlement', () => {
     expect(state.currentStop.id).toBe(stop1!.id)
     expect(state.segment).toBeNull()
     expect(state.round!.closesAt).toBeNull()
+    expect(state.lastSegment).toEqual({
+      id: driving.id,
+      status: 'arrived',
+      startedAt: driving.startedAt,
+      fromStopId: m.stop.id,
+      distanceM: driving.outcome!.distanceM,
+    })
+    expect(state.tally).toMatchObject({
+      stops: 2,
+      arrived: 1,
+      distanceM: driving.outcome!.distanceM,
+    })
   })
 
   it('closes the next round when the drive ends if a submission was waiting', async () => {
@@ -360,11 +375,26 @@ describe('the public state', () => {
           risk: 1,
           distanceWeight: 1,
           timeWeight: 2 / 3,
+          probabilities: {
+            risk: [0.2, 0.7, 0.1, 0],
+            distanceConfidence: [0, 0.1, 0.2, 0.7],
+            timeConfidence: [0.1, 0.2, 0.6, 0.1],
+          },
         },
         summary: a.submission!.summary,
       },
     ])
     expect(state.round).toMatchObject({ fromStopId: m.stop.id, anchor: { x: 0, y: 0 } })
+    expect(state.tally).toEqual({
+      distanceM: 0,
+      stops: 1,
+      arrived: 0,
+      stoppedShort: 0,
+      failed: 0,
+      resets: 0,
+      longestM: 0,
+    })
+    expect(state.lastSegment).toBeNull()
     expect(await listStops(db, m.missionId)).toHaveLength(1)
   })
 })

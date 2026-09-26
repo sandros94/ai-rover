@@ -88,6 +88,42 @@ describe('createSegmentStream over the recorded drive', () => {
     expect(stream.frameAt(500)).toEqual(held)
   })
 
+  it('blocks the loaded frames up to a time as the concatenated slices hold them', async () => {
+    const { stream, poll } = setup()
+    expect(stream.keyframesUntil(1e9)).toMatchObject({ count: 0, hz: manifest.keyframeHz })
+    for (const k of [0, 3, last]) {
+      await poll(releaseAt(k))
+      const loaded = new Float32Array(
+        slices.slice(0, k + 1).flatMap((s) => Array.from(s.keyframes)),
+      )
+      for (const t of [-1, 0, 0.4, 0.5, 17.25, 29.5, 30, 61, (k + 1) * sliceSeconds, 1e9]) {
+        let count = 0
+        while (count * KEYFRAME_STRIDE < loaded.length && loaded[count * KEYFRAME_STRIDE]! <= t)
+          count++
+        const block = stream.keyframesUntil(t)
+        expect(block, `slice ${k}, t = ${t}`).toMatchObject({
+          hz: manifest.keyframeHz,
+          stride: KEYFRAME_STRIDE,
+          count,
+        })
+        expect(Array.from(block.data)).toEqual(
+          Array.from(loaded.subarray(0, count * KEYFRAME_STRIDE)),
+        )
+      }
+    }
+  })
+
+  it('returns the same block while the frames reached stay the same', async () => {
+    const { stream, poll } = setup()
+    await poll(releaseAt(1))
+    const block = stream.keyframesUntil(20)
+    expect(stream.keyframesUntil(20.1)).toBe(block)
+    await poll(releaseAt(2))
+    expect(stream.keyframesUntil(20.2)).toBe(block)
+    expect(stream.keyframesUntil(40)).not.toBe(block)
+    expect(stream.keyframesUntil(40).count).toBeGreaterThan(block.count)
+  })
+
   it('accumulates events and reveals monotonically, as the record lists them', async () => {
     const { stream, poll } = setup()
     let events = 0

@@ -138,6 +138,25 @@ export function revealedOverDisk(
   return out
 }
 
+/** World vertices the mask holds as seen, each counted once however many chunks store it. */
+export function revealedVertexCount(mask: RevealedMask): number {
+  const cells = mask.vertexCount - 1
+  let inner = 0
+  // Edge vertices are stored by up to four chunks; world keys deduplicate them.
+  const edges = new Set<string>()
+  for (const [key, bits] of mask.chunks) {
+    const [cx, cy] = key.split(',').map(Number) as [number, number]
+    for (let b = 0; b <= cells; b++) {
+      for (let a = 0; a <= cells; a++) {
+        if (!bits[b * mask.vertexCount + a]) continue
+        if (a > 0 && a < cells && b > 0 && b < cells) inner++
+        else edges.add(`${cx * cells + a},${cy * cells + b}`)
+      }
+    }
+  }
+  return inner + edges.size
+}
+
 /** Whether the vertex nearest `point` has been seen. */
 export function isRevealed(
   mask: RevealedMask,

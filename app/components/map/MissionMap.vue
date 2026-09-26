@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { MapPoint } from '#shared/utils/mission'
-import { revealedOverDisk } from '#shared/utils/terrain'
+import type { GridCell, HeightGrid } from '#shared/utils/terrain'
+import { revealedOverDisk, revealedVertexCount } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { PlanGround } from '~/workers/plan-protocol'
 import PickPreview from './PickPreview.vue'
-import SegmentRover from './SegmentRover.vue'
 import StopMap from './StopMap.vue'
 
 type State = MissionStateJson
@@ -13,15 +13,45 @@ const props = withDefaults(
   defineProps<{
     /** Mount one per stop (key on mission and stop index): the terrain loads once, at setup. */
     state: State
-    serverOffsetMs?: number
     signedIn?: boolean
     /** A submission whose route to show, in place of hover previews. */
     highlight?: { id: string; goal: MapPoint } | null
+    /** The rover as playback shows it; at the current stop without one. */
+    rover?: { x: number; y: number; headingRad: number }
+    /** The route the playing segment follows at the playback time. */
+    plan?: MapPoint[]
+    /** Where the playing segment has driven so far. */
+    driven?: MapPoint[]
+    /**
+     * Vertices the playing drive has seen so far, as disk-grid indices of this stop's disk: shown
+     * lifted from the fog, never given to the planner, which knows only the stop's mask.
+     */
+    reveals?: readonly { vertices: ArrayLike<number> }[]
   }>(),
-  { serverOffsetMs: 0, signedIn: false, highlight: null },
+  {
+    signedIn: false,
+    highlight: null,
+    rover: undefined,
+    plan: () => [],
+    driven: () => [],
+    reveals: () => [],
+  },
 )
 
-const emit = defineEmits<{ submitted: [] }>()
+const emit = defineEmits<{
+  submitted: []
+  /** The stop's ground once loaded, and the area the journey has revealed so far. */
+  ground: [
+    ground: {
+      grid: HeightGrid
+      origin: GridCell
+      revealed: Uint8Array
+      cellSize: number
+      slopeLimitDeg: number
+      revealedM2: number
+    },
+  ]
+}>()
 
 const stop = props.state.currentStop
 const anchor = computed<MapPoint>(() => props.state.round?.anchor ?? { x: stop.x, y: stop.y })
@@ -43,6 +73,40 @@ const terrain = computed(() => {
 const revealed = computed(() =>
   terrain.value && mask.value ? revealedOverDisk(mask.value, terrain.value) : undefined,
 )
+
+watch(
+  revealed,
+  (seen) => {
+    const t = terrain.value
+    const m = mask.value
+    const stopManifest = manifest.value
+    if (!seen || !t || !m || !stopManifest) return
+    const cellSize = t.grid.cellSize
+    emit('ground', {
+      grid: t.grid,
+      origin: t.origin,
+      revealed: seen,
+      cellSize,
+      slopeLimitDeg: stopManifest.world.slopeLimitDeg,
+      revealedM2: revealedVertexCount(m) * cellSize * cellSize,
+    })
+  },
+  { immediate: true },
+)
+
+/** The fog as shown: the stop's mask with what the playing drive has seen so far lifted. */
+const shownSeen = computed(() => {
+  const base = revealed.value
+  if (!base || props.reveals.length === 0) return base
+  const seen = base.slice()
+  for (const group of props.reveals) {
+    for (let n = 0; n < group.vertices.length; n++) {
+      const k = group.vertices[n]!
+      if (k < seen.length) seen[k] = 1
+    }
+  }
+  return seen
+})
 
 const ground = computed<PlanGround | undefined>(() => {
   const m = manifest.value
@@ -122,19 +186,7 @@ async function confirm(): Promise<void> {
   }
 }
 
-const livePose = shallowRef<{ x: number; y: number; headingRad: number }>()
-const livePlan = shallowRef<MapPoint[]>([])
-const driving = computed(() => props.state.segment)
-watch(
-  () => driving.value?.id,
-  () => {
-    livePose.value = undefined
-    livePlan.value = []
-  },
-)
-const rover = computed(
-  () => livePose.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad },
-)
+const rover = computed(() => props.rover ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad })
 
 const submissions = computed(() =>
   (props.state.round?.submissions ?? []).map((s) => ({ id: s.id, goal: s.goal })),
@@ -146,14 +198,15 @@ const submissions = computed(() =>
     <div class="space-y-2">
       <StopMap
         :terrain="terrain"
-        :seen="revealed"
+        :seen="shownSeen"
         :center="manifest ? { x: manifest.stop.x, y: manifest.stop.y } : { x: stop.x, y: stop.y }"
         :radius="manifest?.radius ?? 500"
         :anchor="state.round ? anchor : undefined"
         :ring="rules.segmentDistanceBand"
         :rover="rover"
         :trail="state.trail"
-        :plan="livePlan"
+        :plan="plan"
+        :driven="driven"
         :deaths="state.deaths"
         :death-radius-m="rules.failureZone.destinationRadiusM"
         :submissions="submissions"
@@ -174,14 +227,7 @@ const submissions = computed(() =>
           </template>
         </div>
       </StopMap>
-      <SegmentRover
-        v-if="driving"
-        :key="driving.id"
-        :segment-id="driving.id"
-        :server-offset-ms="serverOffsetMs"
-        @pose="livePose = $event"
-        @plan="livePlan = $event"
-      />
+      <slot name="controls" />
     </div>
     <div class="space-y-4">
       <PickPreview

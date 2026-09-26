@@ -68,6 +68,7 @@ describe('failures', () => {
     const authors = [m.bob, m.ada, m.bob]
     let now = at(reach.endsAt, MINUTE)
     let last = reach
+    const failures: (typeof reach)[] = []
     for (const [k, death] of deaths.entries()) {
       forced.outcomes.push(failAt(stop1, death))
       const submitted = await m.submit(authors[k]!.id, goal, now)
@@ -101,6 +102,7 @@ describe('failures', () => {
         winnerSubmissionId: null,
       })
       last = segment
+      failures.push(segment)
       now = at(segment.endsAt, MINUTE)
     }
 
@@ -117,6 +119,23 @@ describe('failures', () => {
       fromStopId: stop0.id,
       anchorX: stop0.x,
       anchorY: stop0.y,
+    })
+    const state = await publicMissionState(db, { missionId: m.missionId, now: last.endsAt })
+    expect(state.tally).toEqual({
+      distanceM: [reach, ...failures].reduce((sum, s) => sum + s.outcome!.distanceM, 0),
+      stops: 2,
+      arrived: 1,
+      stoppedShort: 0,
+      failed: 3,
+      resets: 1,
+      longestM: Math.max(...[reach, ...failures].map((s) => s.outcome!.distanceM)),
+    })
+    expect(state.lastSegment).toEqual({
+      id: last.id,
+      status: 'failed',
+      startedAt: last.startedAt,
+      fromStopId: stop1.id,
+      distanceM: last.outcome!.distanceM,
     })
   })
 

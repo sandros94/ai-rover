@@ -2,31 +2,41 @@ import type { MaybeRefOrGetter } from 'vue'
 import type {
   DriveEvent,
   DriveOutcome,
+  KeyframeBlock,
   SegmentSlice,
   StoredSegmentManifest,
 } from '#shared/utils/drive'
+import { KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { PlaybackClock, PlaybackMode, PlaybackRate, SegmentStream } from '#shared/utils/client'
 import { createPlaybackClock, createSegmentStream } from '#shared/utils/client'
 import { useJourneyClient } from './useJourneyClient'
 
 /**
  * Plays a published segment in the browser: an animation-frame loop ticks the clock, polls for
- * released slices and exposes the interpolated keyframe with the events and reveals so far, and
- * the outcome only once playback reaches it.
+ * released slices and exposes the interpolated keyframe with the keyframes, events and reveals
+ * so far, and the outcome only once playback reaches it. A new `segmentId` starts over; none
+ * stops playback and clears everything.
  * `serverOffsetMs` (server minus browser clock, see `useMissionState`) keeps release times on
  * the server's clock.
  */
 export function useSegmentPlayback(
-  segmentId: string,
+  segmentId: MaybeRefOrGetter<string | null | undefined>,
   options: { serverOffsetMs?: MaybeRefOrGetter<number> } = {},
 ) {
   const client = useJourneyClient()
   const manifest = shallowRef<StoredSegmentManifest>()
   const frame = shallowRef<Float32Array>()
+  const keyframes = shallowRef<KeyframeBlock>()
   const events = shallowRef<DriveEvent[]>([])
   const reveals = shallowRef<SegmentSlice['reveals']>([])
+  /** Every reveal group held, reached or not: what the whole drive will have revealed so far. */
+  const heldReveals = shallowRef<SegmentSlice['reveals']>([])
   const outcome = shallowRef<DriveOutcome>()
   const simTime = ref(0)
+  /** The live edge: the latest sim time playback may show. */
+  const liveTime = ref(0)
+  /** Sim time of the last held keyframe; seeking past it shows nothing new. */
+  const heldUntil = ref(0)
   const mode = ref<PlaybackMode>('live')
   const rate = ref<PlaybackRate>(1)
   const error = shallowRef<unknown>(null)
@@ -35,6 +45,8 @@ export function useSegmentPlayback(
   let clock: PlaybackClock | undefined
   let stream: SegmentStream | undefined
   let handle: number | undefined
+  /** Bumped per segment, so a manifest arriving after a switch is dropped. */
+  let generation = 0
 
   function frameLoop(): void {
     handle = requestAnimationFrame(frameLoop)
@@ -45,41 +57,86 @@ export function useSegmentPlayback(
       error.value = caught
     })
     frame.value = stream.frameAt(sim)
+    keyframes.value = stream.keyframesUntil(sim)
     const nextEvents = stream.eventsUntil(sim)
     if (nextEvents.length !== events.value.length) events.value = nextEvents
     const nextReveals = stream.revealsUntil(sim)
     if (nextReveals.length !== reveals.value.length) reveals.value = nextReveals
+    const held = stream.revealsUntil(Infinity)
+    if (held.length !== heldReveals.value.length) heldReveals.value = held
     outcome.value = stream.outcomeAt(sim)
+    const all = stream.keyframesUntil(Infinity)
+    heldUntil.value = all.count ? all.data[(all.count - 1) * KEYFRAME_STRIDE]! : 0
+    liveTime.value = clock.liveTimeAt(wall)
     simTime.value = sim
     mode.value = clock.mode
   }
 
-  onMounted(async () => {
+  function stop(): void {
+    if (handle !== undefined) cancelAnimationFrame(handle)
+    handle = undefined
+    clock = undefined
+    stream = undefined
+    manifest.value = undefined
+    frame.value = undefined
+    keyframes.value = undefined
+    events.value = []
+    reveals.value = []
+    heldReveals.value = []
+    outcome.value = undefined
+    simTime.value = 0
+    liveTime.value = 0
+    heldUntil.value = 0
+    mode.value = 'live'
+    error.value = null
+  }
+
+  async function start(id: string): Promise<void> {
+    const current = ++generation
     try {
-      const loaded = await client.getSegmentManifest(segmentId)
+      const loaded = await client.getSegmentManifest(id)
+      if (current !== generation) return
       manifest.value = loaded
       clock = createPlaybackClock({
         now,
         startedAt: loaded.startedAt,
         sliceSeconds: loaded.sliceSeconds,
       })
+      clock.setRate(rate.value)
       stream = createSegmentStream({ client, manifest: loaded })
       frameLoop()
     } catch (caught) {
-      error.value = caught
+      if (current === generation) error.value = caught
     }
+  }
+
+  onMounted(() => {
+    watch(
+      () => toValue(segmentId),
+      (id) => {
+        generation++
+        stop()
+        if (id) void start(id)
+      },
+      { immediate: true },
+    )
   })
   onBeforeUnmount(() => {
+    generation++
     if (handle !== undefined) cancelAnimationFrame(handle)
   })
 
   return {
     manifest,
     frame,
+    keyframes,
     events,
     reveals,
+    heldReveals,
     outcome,
     simTime,
+    liveTime,
+    heldUntil,
     mode,
     rate,
     error,

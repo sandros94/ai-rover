@@ -2,11 +2,13 @@ import type { DB } from '../../database/db'
 import type { Mission, SegmentStatus, Stop } from '../../database/schema'
 import { getMission } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
-import { getDrivingSegment, listDeaths } from '../../repositories/segments'
+import type { SettledSegment } from '../../repositories/segments'
+import { getDrivingSegment, listSettledSegments } from '../../repositories/segments'
 import { getStop, listStops } from '../../repositories/stops'
 import type { Verdict } from '../jev/client'
 import { DEFAULT_SLICE_SECONDS } from '#shared/utils/drive'
 import type { MissionRules } from '#shared/utils/mission'
+import { shouldResetToPreviousStop } from '#shared/utils/mission'
 import type { SubmissionSummary } from '#shared/utils/nav'
 import { LifecycleError } from './errors'
 import { roundStanding } from './round'
@@ -24,8 +26,71 @@ export interface PublicSubmission {
     risk: number
     distanceWeight: number
     timeWeight: number
+    /** Jev's probability of each level, safest or least confident first. */
+    probabilities: { risk: number[]; distanceConfidence: number[]; timeConfidence: number[] }
   }
   summary: SubmissionSummary
+}
+
+export type { SettledSegment }
+
+/** Journey totals over settled segments: a drive counts once its ending is public. */
+export interface JourneyTally {
+  /** Ground distance of every settled drive, failures included, metres. */
+  distanceM: number
+  /** Stops reached, the landing stop included. */
+  stops: number
+  arrived: number
+  stoppedShort: number
+  failed: number
+  /** Returns to the previous stop after clustered failures. */
+  resets: number
+  /** Ground distance of the longest settled drive, metres. */
+  longestM: number
+}
+
+/**
+ * Totals of `segments` (settled, in start order) over the mission's `stops`. A reset is counted
+ * where the tick applies one: at a failure from a reached stop (never the landing stop) once the
+ * deaths from that stop cluster by `rules`.
+ */
+export function journeyTally(
+  segments: readonly Pick<SettledSegment, 'status' | 'fromStopId' | 'distanceM' | 'death'>[],
+  options: { stops: readonly { id: string; fromSegmentId: string | null }[]; rules: MissionRules },
+): JourneyTally {
+  const reached = new Set(options.stops.filter((s) => s.fromSegmentId).map((s) => s.id))
+  const deathsFrom = new Map<string, { x: number; y: number }[]>()
+  const reset = new Set<string>()
+  const tally: JourneyTally = {
+    distanceM: 0,
+    stops: options.stops.length,
+    arrived: 0,
+    stoppedShort: 0,
+    failed: 0,
+    resets: 0,
+    longestM: 0,
+  }
+  for (const s of segments) {
+    tally.distanceM += s.distanceM
+    tally.longestM = Math.max(tally.longestM, s.distanceM)
+    if (s.status === 'arrived') tally.arrived++
+    else if (s.status === 'stopped-short') tally.stoppedShort++
+    else {
+      tally.failed++
+      const deaths = deathsFrom.get(s.fromStopId) ?? []
+      if (s.death) deaths.push(s.death)
+      deathsFrom.set(s.fromStopId, deaths)
+      if (
+        reached.has(s.fromStopId) &&
+        !reset.has(s.fromStopId) &&
+        shouldResetToPreviousStop(deaths, { rules: options.rules })
+      ) {
+        reset.add(s.fromStopId)
+        tally.resets++
+      }
+    }
+  }
+  return tally
 }
 
 /**
@@ -68,6 +133,12 @@ export interface PublicMissionState {
   trail: { index: number; x: number; y: number }[]
   /** Death positions of settled failures, oldest first: goals and routes must keep clear. */
   deaths: { x: number; y: number }[]
+  /** The most recently started settled segment, for replay; null before the first settles. */
+  lastSegment: Pick<
+    SettledSegment,
+    'id' | 'status' | 'startedAt' | 'fromStopId' | 'distanceM'
+  > | null
+  tally: JourneyTally
 }
 
 export async function publicMissionState(
@@ -113,11 +184,20 @@ export async function publicMissionState(
           risk: s.judgment.risk.score,
           distanceWeight: s.judgment.distanceWeight,
           timeWeight: s.judgment.timeWeight,
+          probabilities: {
+            risk: s.judgment.risk.probabilities,
+            distanceConfidence: s.judgment.distanceConfidence.probabilities,
+            timeConfidence: s.judgment.timeConfidence.probabilities,
+          },
         },
         summary: s.summary,
       })),
     }
   }
+
+  const stops = await listStops(db, missionId)
+  const settled = await listSettledSegments(db, missionId)
+  const last = settled.at(-1)
 
   return {
     now,
@@ -151,7 +231,18 @@ export async function publicMissionState(
           manifestKey: driving.manifestKey,
         },
     release: driving ? { startedAt: driving.startedAt, sliceSeconds } : null,
-    trail: (await listStops(db, missionId)).map(({ index, x, y }) => ({ index, x, y })),
-    deaths: (await listDeaths(db, missionId)).map(({ x, y }) => ({ x, y })),
+    trail: stops.map(({ index, x, y }) => ({ index, x, y })),
+    // Segments of a mission never overlap, so start order is also the order their deaths became public.
+    deaths: settled.flatMap((segment) => (segment.death ? [{ ...segment.death }] : [])),
+    lastSegment: last
+      ? {
+          id: last.id,
+          status: last.status,
+          startedAt: last.startedAt,
+          fromStopId: last.fromStopId,
+          distanceM: last.distanceM,
+        }
+      : null,
+    tally: journeyTally(settled, { stops, rules: mission.config.rules }),
   }
 }

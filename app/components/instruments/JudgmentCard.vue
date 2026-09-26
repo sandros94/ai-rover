@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { MissionStateJson } from '~/composables/useMissionState'
 
-type Judgment = NonNullable<MissionStateJson['round']>['submissions'][number]['judgment']
+type Public = NonNullable<MissionStateJson['round']>['submissions'][number]['judgment']
+/** Without per-level probabilities the levels are drawn from the expected values alone. */
+type Judgment = Omit<Public, 'probabilities'> & { probabilities?: Public['probabilities'] }
 
 const props = defineProps<{ judgment: Judgment }>()
 
@@ -23,22 +25,40 @@ const CONFIDENCE_LEVELS = 5
 const GAP = 2
 /** Marker position, percent: level k spans [k, k + 1) quarters, its centre at k + ½. */
 const riskPct = computed(() => ((props.judgment.risk + 0.5) / RISK.length) * 100)
+/** A level's opacity: its probability when known, else whether the expected value falls in it. */
+const riskOpacity = (k: number) => {
+  const p = props.judgment.probabilities?.risk[k]
+  return p === undefined ? (Math.abs(props.judgment.risk - k) < 0.5 ? 1 : 0.35) : 0.2 + 0.8 * p
+}
+const percent = (p: number) => `${Math.round(p * 100)} %`
 const confidences = computed(() =>
   [
     {
       id: 'distance-confidence',
       label: 'Distance confidence',
       weight: props.judgment.distanceWeight,
+      probabilities: props.judgment.probabilities?.distanceConfidence,
     },
-    { id: 'time-confidence', label: 'Time confidence', weight: props.judgment.timeWeight },
+    {
+      id: 'time-confidence',
+      label: 'Time confidence',
+      weight: props.judgment.timeWeight,
+      probabilities: props.judgment.probabilities?.timeConfidence,
+    },
   ].map((c) => {
     const level = c.weight * (CONFIDENCE_LEVELS - 1)
+    const probabilities =
+      c.probabilities?.length === CONFIDENCE_LEVELS ? c.probabilities : undefined
     return {
       ...c,
       level,
+      probabilities,
+      markerPct: ((level + 0.5) / CONFIDENCE_LEVELS) * 100,
+      // With probabilities every block is whole and weighted by opacity; without, a meter.
       blocks: Array.from({ length: CONFIDENCE_LEVELS }, (_, k) =>
-        Math.max(0, Math.min(1, level + 1 - k)),
+        probabilities ? 1 : Math.max(0, Math.min(1, level + 1 - k)),
       ),
+      opacity: (k: number) => (probabilities ? 0.2 + 0.8 * probabilities[k]! : 1),
     }
   }),
 )
@@ -89,7 +109,7 @@ const confidences = computed(() =>
           height="10"
           rx="4"
           :fill="level.fill"
-          :opacity="Math.abs(judgment.risk - k) < 0.5 ? 1 : 0.35"
+          :opacity="riskOpacity(k)"
         />
         <svg :x="`${riskPct}%`" overflow="visible">
           <path
@@ -102,6 +122,14 @@ const confidences = computed(() =>
       <div class="grid grid-cols-4 text-center text-xs text-muted">
         <span v-for="level in RISK" :key="level.label">{{ level.label }}</span>
       </div>
+      <div
+        v-if="judgment.probabilities?.risk.length === RISK.length"
+        class="grid grid-cols-4 text-center text-xs tabular-nums"
+      >
+        <span v-for="(p, k) in judgment.probabilities.risk" :key="k" data-test="risk-probability">{{
+          percent(p)
+        }}</span>
+      </div>
     </div>
     <div v-for="c in confidences" :key="c.id" :data-test="c.id">
       <div class="flex items-baseline justify-between text-sm">
@@ -111,14 +139,15 @@ const confidences = computed(() =>
         >
       </div>
       <svg
-        class="block h-2.5 w-full"
+        class="block w-full overflow-visible"
+        :class="c.probabilities ? 'h-5' : 'h-2.5'"
         role="img"
         :aria-label="`${c.label} ${(c.level + 1).toFixed(1)} of ${CONFIDENCE_LEVELS}`"
       >
         <g v-for="(fill, k) in c.blocks" :key="k" data-test="level">
           <rect
             :x="`${(k * 100) / CONFIDENCE_LEVELS}%`"
-            y="0"
+            :y="c.probabilities ? 9 : 0"
             :style="{ width: `calc(${100 / CONFIDENCE_LEVELS}% - ${GAP}px)` }"
             height="10"
             rx="3"
@@ -126,14 +155,27 @@ const confidences = computed(() =>
           />
           <rect
             :x="`${(k * 100) / CONFIDENCE_LEVELS}%`"
-            y="0"
+            :y="c.probabilities ? 9 : 0"
             :style="{ width: `calc((${100 / CONFIDENCE_LEVELS}% - ${GAP}px) * ${fill})` }"
             height="10"
             rx="3"
             fill="var(--viz-series-1)"
+            :opacity="c.opacity(k)"
           />
         </g>
+        <svg v-if="c.probabilities" :x="`${c.markerPct}%`" overflow="visible">
+          <path
+            d="M 0 8 l -5 -7 h 10 z"
+            class="fill-(--ui-text-highlighted) stroke-(--ui-bg)"
+            stroke-width="2"
+          />
+        </svg>
       </svg>
+      <div v-if="c.probabilities" class="grid grid-cols-5 text-center text-xs tabular-nums">
+        <span v-for="(p, k) in c.probabilities" :key="k" data-test="level-probability">{{
+          percent(p)
+        }}</span>
+      </div>
     </div>
   </UCard>
 </template>

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, ne, sql } from 'drizzle-orm'
 import type { DriveOutcome } from '#shared/utils/drive/segment'
 import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
@@ -154,6 +154,45 @@ export function publicSegment(row: Segment, now: Date): PublicSegment {
   const { outcome, endsAt, ...base } = row
   if (endsAt.getTime() <= now.getTime()) return { ...base, released: true, endsAt, outcome }
   return { ...base, released: false }
+}
+
+/** A segment whose ending is public, as the journey totals need it. */
+export interface SettledSegment {
+  id: string
+  status: 'arrived' | 'stopped-short' | 'failed'
+  startedAt: Date
+  fromStopId: string
+  /** Ground distance the drive covered, metres. */
+  distanceM: number
+  /** Where the rover was lost; null unless failed. */
+  death: { x: number; y: number } | null
+}
+
+/** The mission's settled segments in start order; the one driving is left out. */
+export async function listSettledSegments(db: DB, missionId: string): Promise<SettledSegment[]> {
+  const rows = await db
+    .select({
+      id: segment.id,
+      status: segment.status,
+      startedAt: segment.startedAt,
+      fromStopId: segment.fromStopId,
+      outcome: segment.outcome,
+      deathX: segment.deathX,
+      deathY: segment.deathY,
+    })
+    .from(segment)
+    .where(and(eq(segment.missionId, missionId), ne(segment.status, 'driving')))
+    .orderBy(asc(segment.startedAt), asc(segment.id))
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status as SettledSegment['status'],
+    startedAt: row.startedAt,
+    fromStopId: row.fromStopId,
+    // A segment settles only once its outcome is written.
+    distanceM: row.outcome!.distanceM,
+    // The settled check constraint makes both coordinates non-null on a failed segment.
+    death: row.status === 'failed' ? { x: row.deathX!, y: row.deathY! } : null,
+  }))
 }
 
 /** Death positions of settled failures, oldest first; unsettled ones are not public yet. */

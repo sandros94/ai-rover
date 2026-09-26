@@ -40,6 +40,12 @@ export interface SegmentStream {
    */
   frameAt(simSeconds: number): Float32Array | undefined
   /**
+   * The held frames with `t ≤ simSeconds` as one block (count 0 before the first slice). The
+   * same object comes back while that count is unchanged, so a consumer can skip recomputing;
+   * treat its data as read-only.
+   */
+  keyframesUntil(simSeconds: number): KeyframeBlock
+  /**
    * The outcome once playback has reached it: the last slice is held and `simSeconds` is at or
    * past the record's end (`outcome.durationS`); undefined before either.
    */
@@ -143,6 +149,28 @@ export function createSegmentStream(options: {
     data: frames.subarray(0, frameCount * KEYFRAME_STRIDE),
   })
 
+  let reached: KeyframeBlock | undefined
+
+  function keyframesUntil(simSeconds: number): KeyframeBlock {
+    let lo = 0
+    let hi = frameCount
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (frames[mid * KEYFRAME_STRIDE]! <= simSeconds) lo = mid + 1
+      else hi = mid
+    }
+    // A buffer grown since keeps the same leading frames, so a cached view stays correct.
+    if (reached?.count !== lo) {
+      reached = {
+        hz: keyframeHz,
+        stride: KEYFRAME_STRIDE,
+        count: lo,
+        data: frames.subarray(0, lo * KEYFRAME_STRIDE),
+      }
+    }
+    return reached
+  }
+
   /** Items with `t ≤ simSeconds`, the list being ordered by `t`. */
   function until<T extends { t: number }>(list: T[], simSeconds: number): T[] {
     let lo = 0
@@ -175,6 +203,7 @@ export function createSegmentStream(options: {
     frameAt(simSeconds) {
       return frameCount === 0 ? undefined : interpolatePose(block(), simSeconds)
     },
+    keyframesUntil,
     outcomeAt: (simSeconds) => (outcome && simSeconds >= outcome.durationS ? outcome : undefined),
     eventsUntil: (simSeconds) => until(events, simSeconds),
     revealsUntil: (simSeconds) => until(reveals, simSeconds),

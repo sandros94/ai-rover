@@ -41,6 +41,7 @@ export {
   REVEALED_HEADER_BYTES,
   revealDisk,
   revealedOverDisk,
+  revealedVertexCount,
   revealVertices,
 } from './revealed'
 export type { StopManifest } from './manifest'

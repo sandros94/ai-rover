@@ -27,6 +27,8 @@ const props = withDefaults(
     trail?: MapPoint[]
     /** The route being driven. */
     plan?: MapPoint[]
+    /** Where the rover has driven so far this segment. */
+    driven?: MapPoint[]
     deaths?: MapPoint[]
     deathRadiusM?: number
     submissions?: { id: string; goal: MapPoint; mine?: boolean }[]
@@ -43,6 +45,7 @@ const props = withDefaults(
     rover: undefined,
     trail: () => [],
     plan: () => [],
+    driven: () => [],
     deaths: () => [],
     deathRadiusM: 30,
     submissions: () => [],
@@ -380,6 +383,14 @@ function recenter(): void {
         :points="points(plan)"
         class="fill-none stroke-(--ui-info)"
         stroke-width="3"
+      />
+      <polyline
+        v-if="driven.length > 1"
+        data-test="driven"
+        :points="points(driven)"
+        class="fill-none stroke-(--ui-primary)"
+        stroke-width="2.5"
+        stroke-linejoin="round"
       />
       <g v-for="(death, k) in deaths" :key="`death-${k}`">
         <circle
