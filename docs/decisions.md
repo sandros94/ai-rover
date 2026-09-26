@@ -59,6 +59,7 @@ Current, settled design decisions with their reasons. This file describes the pr
 
 ## Client
 
+- **Live playback trails wall-clock by one slice plus a few seconds.** A slice is released only after its window ends, so the live view runs one slice behind, with a small margin to fetch it; sim time never passes released slices, and replay rejoins live when it catches up. The outcome is shown only when playback reaches it, never when the last slice merely loads.
 - **The browser reads through one data layer.** Composables fetch stop manifests, chunks (progressively: pick ring and viewport first), revealed masks and segment slices (gated by release time), decode the binary formats, run the shared interpolation and keep a playback clock synced to wall-clock; every visual reads from it, and it is tested on recorded fixtures without a browser.
 - **3D is the goal, the stop disk is the first step.** The full free-roam streaming world is the destination; the first implementation renders the current stop disk with chunk LOD, the rover playing keyframes, a follow camera, trail and ghosts, and confirms the project working locally in a production-like posture.
 

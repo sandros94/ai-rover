@@ -46,7 +46,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 
 - JWE cookie session (`unauth` h3v2 + `unjwt`) with nuxt-auth-utils-like DX; GitHub OAuth hand-rolled; AT Protocol OAuth hand-rolled public client (PAR, PKCE, DPoP via `unjwt`/`unsecure`, handle→DID→PDS discovery), login-only.
 
-## Phase 6 — Live delivery + UI
+## Phase 6 — Live delivery + UI — data layer done (journey client, chunk cache, sampler, playback clock, slice stream, composables); development module and playground exist
 
 - Keyframe playback against wall-clock + polled CDN-cached mission-state endpoint (see `docs/decisions.md`).
 - Nuxt UI shell, Tres/Three terrain with chunk LOD, rover playback from keyframes, trail + failed ghosts, replay scrubber, mission clock.
