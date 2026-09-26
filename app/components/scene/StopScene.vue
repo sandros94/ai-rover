@@ -5,6 +5,7 @@ import type { DiskLayout, TerrainChunk } from '#shared/utils/client/scene'
 import { framePlacement, HILLSHADE_LIGHT, SCENE_COLORS } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
+import type { RoverVariant } from '~/composables/useRoverVariant'
 import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
 import RouteLine from './RouteLine.vue'
@@ -33,6 +34,8 @@ const props = withDefaults(
     /** What the playing drive has seen so far, as disk-grid indices laid out by `layout`. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
     layout?: DiskLayout
+    /** The rover to draw; by default the JPL model at this device's detail. */
+    roverVariant?: RoverVariant
   }>(),
   {
     geometry: undefined,
@@ -47,8 +50,14 @@ const props = withDefaults(
     deathRadiusM: undefined,
     reveals: () => [],
     layout: undefined,
+    roverVariant: undefined,
   },
 )
+
+const emit = defineEmits<{
+  /** The rover drawn changed: the procedural one, or a JPL model once loaded. */
+  roverReady: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+}>()
 
 const rover = computed(() => framePlacement(props.frame).position)
 const focus = computed(() => ({ x: rover.value.x, y: rover.value.y }))
@@ -57,11 +66,14 @@ const target = computed(() => ({ ...rover.value, z: rover.value.z + 1 }))
 
 /**
  * Lighting for the rover only (the terrain's shading is baked): the hillshade's sun from the
- * north-west and an ambient floor. A directional light shines from its position towards its
- * target at the world origin, so the position is the direction alone. three.js divides Lambert
- * light by π, hence the factor on the intensities.
+ * north-west and a sky-to-ground hemisphere fill, so the model's sides away from the sun still
+ * read against the ground. A directional light shines from its position towards its target at
+ * the world origin, so the position is the direction alone. three.js divides Lambert light by
+ * π, hence the factor on the intensities.
  */
 const SUN = new Vector3(HILLSHADE_LIGHT.x, HILLSHADE_LIGHT.y, HILLSHADE_LIGHT.z)
+/** Fill from a pale dusty sky above and the warm ground below. */
+const HEMISPHERE = { sky: '#e8dccb', ground: '#6b5a48' }
 /** Ground for a scene without terrain: a 1 m grid in the rover's ground plane. */
 const plane = new GridHelper(40, 40, '#a8a29e', '#57534e')
 plane.rotation.x = Math.PI / 2
@@ -77,7 +89,11 @@ onBeforeUnmount(() => plane.dispose())
     :clear-color="SCENE_COLORS.sky"
   >
     <FollowCamera :target="target" :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]" />
-    <TresAmbientLight :intensity="0.35 * Math.PI" />
+    <TresHemisphereLight
+      :sky-color="HEMISPHERE.sky"
+      :ground-color="HEMISPHERE.ground"
+      :intensity="0.55 * Math.PI"
+    />
     <TresDirectionalLight :position="SUN" :intensity="0.9 * Math.PI" />
     <TerrainChunks
       v-if="chunks.length > 0"
@@ -98,6 +114,11 @@ onBeforeUnmount(() => plane.dispose())
       :geometry="geometry"
       :radius-m="deathRadiusM"
     />
-    <RoverModel :frame="frame" :geometry="geometry" />
+    <RoverModel
+      :frame="frame"
+      :geometry="geometry"
+      :variant="roverVariant"
+      @ready="emit('roverReady', $event)"
+    />
   </TresCanvas>
 </template>

@@ -32,5 +32,7 @@ export {
 } from './terrain-mesh'
 export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
 export { flatFrame, framePlacement, roverParts } from './rover-parts'
+export type { RigNode, RigTransforms } from './rover-rig'
+export { DIFFERENTIAL_RATIO, RIG_JOINTS, rigTransforms, ROVER_RIG_NODES } from './rover-rig'
 export type { OverlayMesh } from './overlays'
 export { drapePath, groundDisc, ribbonMesh } from './overlays'

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Mesh, Object3D } from 'three'
 import {
   BoxGeometry,
   Color,
@@ -12,10 +13,19 @@ import {
   Vector3,
 } from 'three'
 import { frameAttitude } from '#shared/utils/client/instruments'
-import type { RoverPart } from '#shared/utils/client/scene'
-import { framePlacement, ROVER_TONES, roverParts, SCENE_COLORS } from '#shared/utils/client/scene'
+import type { RigNode, RoverPart } from '#shared/utils/client/scene'
+import {
+  framePlacement,
+  rigTransforms,
+  ROVER_RIG_NODES,
+  ROVER_TONES,
+  roverParts,
+  SCENE_COLORS,
+} from '#shared/utils/client/scene'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
 import { DEFAULT_ROVER_GEOMETRY } from '#shared/utils/rover'
+import type { RoverVariant } from '~/composables/useRoverVariant'
+import { loadRoverModel } from '~/utils/rover-model'
 
 const props = withDefaults(
   defineProps<{
@@ -24,9 +34,21 @@ const props = withDefaults(
     geometry?: ResolvedRoverGeometry
     /** Draw as a red translucent silhouette, for a death marker. */
     ghost?: boolean
+    /** Which rover to draw; by default the JPL model at this device's detail, the light one for ghosts. */
+    variant?: RoverVariant
   }>(),
-  { geometry: () => DEFAULT_ROVER_GEOMETRY, ghost: false },
+  { geometry: () => DEFAULT_ROVER_GEOMETRY, ghost: false, variant: undefined },
 )
+
+const emit = defineEmits<{
+  /** The drawn rover changed: the procedural one, or a JPL model once loaded. */
+  ready: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+}>()
+
+const variant = computed<RoverVariant>(
+  () => props.variant ?? (props.ghost ? 'low' : useRoverVariant()),
+)
+const baseURL = useRuntimeConfig().app.baseURL
 
 const partsAt = (frame: Float32Array) => roverParts(frameAttitude(frame), props.geometry)
 const initial = partsAt(props.frame)
@@ -34,6 +56,9 @@ const boxCount = initial.filter((part) => part.shape === 'box').length
 const cylinderCount = initial.length - boxCount
 
 const root = new Group()
+/** The procedural rover: drawn while the model loads, and when it cannot. */
+const placeholder = new Group()
+root.add(placeholder)
 const unitBox = new BoxGeometry(1, 1, 1)
 const unitCylinder = new CylinderGeometry(0.5, 0.5, 1, 20)
 const material = props.ghost
@@ -50,8 +75,10 @@ const cylinders = new InstancedMesh(unitCylinder, material, cylinderCount)
 for (const mesh of [boxes, cylinders]) {
   // The instances move every frame; a stale bounding sphere would cull them.
   mesh.frustumCulled = false
-  root.add(mesh)
+  placeholder.add(mesh)
 }
+const proceduralTriangles =
+  (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
 if (!props.ghost) {
   const color = new Color()
   let b = 0
@@ -88,12 +115,76 @@ function place(parts: RoverPart[], frame: Float32Array): void {
 }
 
 place(initial, props.frame)
+
+/** The JPL model in place, with its articulated nodes and their rest rotations. */
+let model:
+  | { object: Object3D; joints: { node: Object3D; rest: Quaternion; name: RigNode }[] }
+  | undefined
+const turn = new Quaternion()
+
+function pose(frame: Float32Array): void {
+  if (!model) return place(partsAt(frame), frame)
+  const rig = rigTransforms(frame)
+  root.position.set(rig.position.x, rig.position.y, rig.position.z)
+  root.quaternion.set(rig.quaternion.x, rig.quaternion.y, rig.quaternion.z, rig.quaternion.w)
+  for (const { node, rest, name } of model.joints) {
+    const q = rig.joints[name]
+    node.quaternion.copy(rest).multiply(turn.set(q.x, q.y, q.z, q.w))
+  }
+}
+
+/** Draws the JPL model `object` in place of the current rover, or the procedural one without it. */
+function showModel(object: Object3D | undefined): void {
+  const joints = object
+    ? ROVER_RIG_NODES.map((name) => {
+        const node = object.getObjectByName(name)
+        if (!node) throw new Error(`RoverModel: the rover model has no node ${name}.`)
+        return { node, rest: node.quaternion.clone(), name }
+      })
+    : []
+  if (model) root.remove(model.object)
+  model = object && { object, joints }
+  placeholder.visible = !object
+  if (object) {
+    if (props.ghost) {
+      object.traverse((child) => {
+        if ((child as Mesh).isMesh) (child as Mesh).material = material
+      })
+    }
+    root.add(object)
+  }
+  pose(props.frame)
+}
+
+let unmounted = false
 watch(
-  () => props.frame,
-  (frame) => place(partsAt(frame), frame),
+  variant,
+  async (wanted) => {
+    if (wanted === 'procedural') {
+      showModel(undefined)
+      emit('ready', { variant: wanted, triangles: proceduralTriangles, loadMs: 0 })
+      return
+    }
+    try {
+      const loaded = await loadRoverModel(wanted, baseURL)
+      if (unmounted || variant.value !== wanted) return
+      showModel(loaded.scene.clone())
+      emit('ready', { variant: wanted, triangles: loaded.triangles, loadMs: loaded.loadMs })
+    } catch (error) {
+      // The procedural rover stays: the scene works without the download.
+      console.warn(
+        `RoverModel: the ${wanted} rover model did not load; drawing the procedural rover.`,
+        error,
+      )
+    }
+  },
+  { immediate: true },
 )
+watch(() => props.frame, pose)
 
 onBeforeUnmount(() => {
+  unmounted = true
+  // Only the procedural rover's resources: the loaded model's are shared by every rover on the page.
   boxes.dispose()
   cylinders.dispose()
   unitBox.dispose()
