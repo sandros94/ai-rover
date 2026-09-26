@@ -1,4 +1,5 @@
-import { and, asc, count, desc, eq, gte, ne, sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, gte, lte, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import type { DriveOutcome } from '#shared/utils/drive/segment'
 import type { DB } from '../database/db'
@@ -280,11 +281,18 @@ const settledOf = (missionId: string) =>
   and(eq(segment.missionId, missionId), ne(segment.status, 'driving'))
 
 /**
- * The mission's settled drives with their joins; `number` and `journeyBeforeM` are windows over
- * every settled drive, so they hold whatever page or single drive is read.
+ * Narrows the journey: settled drives numbered `from` to `to` (both included) that ended after
+ * `since`. Absent fields do not narrow.
  */
-function journeyQuery(db: DB, missionId: string) {
-  const ordered = db
+export interface JourneyRange {
+  since?: Date
+  from?: number
+  to?: number
+}
+
+/** Every settled drive of the mission with its number and the distance driven before it. */
+function orderedJourney(db: DB, missionId: string) {
+  return db
     .select({
       id: segment.id,
       number: sql<number>`row_number() over (order by ${segment.startedAt}, ${segment.id})`.as(
@@ -298,6 +306,23 @@ function journeyQuery(db: DB, missionId: string) {
     .from(segment)
     .where(settledOf(missionId))
     .as('ordered')
+}
+
+type OrderedJourney = ReturnType<typeof orderedJourney>
+
+function inRange(ordered: OrderedJourney, range: JourneyRange = {}): SQL | undefined {
+  return and(
+    range.from === undefined ? undefined : gte(ordered.number, range.from),
+    range.to === undefined ? undefined : lte(ordered.number, range.to),
+    range.since === undefined ? undefined : gt(segment.endsAt, range.since),
+  )
+}
+
+/**
+ * The mission's settled drives with their joins; `number` and `journeyBeforeM` are windows over
+ * every settled drive, so they hold whatever page, range or single drive is read.
+ */
+function journeyQuery(db: DB, ordered: OrderedJourney) {
   const from = alias(stop, 'from_stop')
   const to = alias(stop, 'to_stop')
   return db
@@ -351,17 +376,28 @@ function journeySegment(row: JourneyRow): JourneySegment {
   }
 }
 
-/** A page of the mission's settled drives, newest first, with how many there are in all. */
+/**
+ * A page of the mission's settled drives within `range` (all of them when absent), newest or
+ * oldest first, with how many the range holds in all.
+ */
 export async function listJourneySegments(
   db: DB,
   missionId: string,
-  options: { limit: number; offset: number },
+  options: { limit: number; offset: number; range?: JourneyRange; order?: 'newest' | 'oldest' },
 ): Promise<{ segments: JourneySegment[]; total: number }> {
-  const rows = await journeyQuery(db, missionId)
-    .orderBy(desc(segment.startedAt), desc(segment.id))
+  const ordered = orderedJourney(db, missionId)
+  const where = inRange(ordered, options.range)
+  const direction = options.order === 'oldest' ? asc : desc
+  const rows = await journeyQuery(db, ordered)
+    .where(where)
+    .orderBy(direction(segment.startedAt), direction(segment.id))
     .limit(options.limit)
     .offset(options.offset)
-  const [counted] = await db.select({ n: count() }).from(segment).where(settledOf(missionId))
+  const [counted] = await db
+    .select({ n: count() })
+    .from(segment)
+    .innerJoin(ordered, eq(ordered.id, segment.id))
+    .where(where)
   return { segments: rows.map(journeySegment), total: counted?.n ?? 0 }
 }
 
@@ -371,7 +407,9 @@ export async function getJourneySegment(
   segmentId: string,
   options: { missionId: string },
 ): Promise<JourneySegment> {
-  const [row] = await journeyQuery(db, options.missionId).where(eq(segment.id, segmentId))
+  const [row] = await journeyQuery(db, orderedJourney(db, options.missionId)).where(
+    eq(segment.id, segmentId),
+  )
   if (!row) {
     throw new DbError(
       'NOT_FOUND',

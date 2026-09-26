@@ -13,7 +13,8 @@ import PhoneSheet from './PhoneSheet.vue'
  * over it. On a wide viewport the offered `panels` are windows the visitor opens, drags, resizes
  * and closes, their layout kept per browser; on a phone the instruments and the vote are bottom
  * sheets, hidden until their toggle. Keys: `1` and `2` switch views, `h` shows or hides the
- * instruments, space plays or pauses and `l` goes live when there is playback.
+ * instruments, space plays or pauses and `l` goes live when there is playback; a page adds its
+ * own through `shortcuts`, listed with the rest.
  *
  * Slots: `title` (the top bar's left end), `scene`, `top` and `bottom` (widgets centred on those
  * edges), and `panel-<id>` for each offered panel's content.
@@ -31,8 +32,10 @@ const props = withDefaults(
       /** Whether there is a live edge to go to. */
       live: boolean
     } | null
+    /** The page's own keys, registered and listed in the help. */
+    shortcuts?: readonly { key: string; label: string; run: () => void }[]
   }>(),
-  { playback: null },
+  { playback: null, shortcuts: () => [] },
 )
 
 const emit = defineEmits<{ toggle: []; live: [] }>()
@@ -98,13 +101,14 @@ const status = computed(() => {
   return { label: `Replay ${formatDuration(p.t)} · ${p.rate}×`, color: 'info' as const }
 })
 
-const SHORTCUTS = [
+const SHORTCUTS = computed(() => [
   { keys: ['1'], label: '2D map' },
   { keys: ['2'], label: '3D scene' },
   { keys: ['h'], label: 'Show or hide the instruments' },
   { keys: ['space'], label: 'Play or pause' },
-  { keys: ['l'], label: 'Go live' },
-]
+  ...(props.playback?.live === false ? [] : [{ keys: ['l'], label: 'Go live' }]),
+  ...props.shortcuts.map(({ key, label }) => ({ keys: [key], label })),
+])
 
 defineShortcuts(
   computed(() => ({
@@ -113,6 +117,7 @@ defineShortcuts(
     'h': toggleInstruments,
     ...(props.playback ? { ' ': () => emit('toggle') } : {}),
     ...(props.playback?.live ? { l: () => emit('live') } : {}),
+    ...Object.fromEntries(props.shortcuts.map(({ key, run }) => [key, run])),
   })),
 )
 </script>

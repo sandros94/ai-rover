@@ -1,6 +1,6 @@
 import type { DB } from '../../database/db'
 import { getMission } from '../../repositories/missions'
-import type { JourneySegment } from '../../repositories/segments'
+import type { JourneyRange, JourneySegment } from '../../repositories/segments'
 import { getJourneySegment, listJourneySegments } from '../../repositories/segments'
 import { listStops } from '../../repositories/stops'
 import type { MissionRules } from '#shared/utils/mission'
@@ -34,25 +34,75 @@ export function parseJourneyPage(raw: unknown): number {
   return page
 }
 
+export type { JourneyRange }
+
+/** A positive integer segment number, or undefined when absent. */
+function parseSegmentNumber(name: string, raw: unknown): number | undefined {
+  if (raw === undefined) return undefined
+  const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : Number.NaN
+  if (!Number.isSafeInteger(n) || n < 1) {
+    throw new MissionError(
+      'INVALID_INPUT',
+      `The ${name} ${JSON.stringify(raw)} is not a segment number; pass a positive integer.`,
+    )
+  }
+  return n
+}
+
 /**
- * One page of the mission's settled drives, newest first. The drive in progress is never listed:
- * its row holds the private outcome.
+ * The range query parameters: `from` and `to` segment numbers (both included) and `since`, an
+ * ISO instant the drives must have ended after. Undefined when none is given.
+ */
+export function parseJourneyRange(query: Record<string, unknown>): JourneyRange | undefined {
+  const from = parseSegmentNumber('from', query.from)
+  const to = parseSegmentNumber('to', query.to)
+  let since: Date | undefined
+  if (query.since !== undefined) {
+    const ms = typeof query.since === 'string' && query.since ? Date.parse(query.since) : Number.NaN
+    if (!Number.isFinite(ms)) {
+      throw new MissionError(
+        'INVALID_INPUT',
+        `The since ${JSON.stringify(query.since)} is not an instant; pass an ISO 8601 date and time.`,
+      )
+    }
+    since = new Date(ms)
+  }
+  if (from !== undefined && to !== undefined && from > to) {
+    throw new MissionError(
+      'INVALID_INPUT',
+      `The range from segment ${from} to segment ${to} is reversed; pass from ≤ to.`,
+    )
+  }
+  if (from === undefined && to === undefined && since === undefined) return undefined
+  return {
+    ...(since === undefined ? {} : { since }),
+    ...(from === undefined ? {} : { from }),
+    ...(to === undefined ? {} : { to }),
+  }
+}
+
+/**
+ * One page of the mission's settled drives: newest first, or within `range` oldest first, the
+ * order a playlist plays them in. The drive in progress is never listed: its row holds the
+ * private outcome.
  */
 export async function journeyPage(
   db: DB,
-  options: { missionId: string; page: number },
+  options: { missionId: string; page: number; range?: JourneyRange },
 ): Promise<{ drives: PublicDrive[]; page: number; pageSize: number; total: number }> {
-  const { missionId, page } = options
+  const { missionId, page, range } = options
   const { segments, total } = await listJourneySegments(db, missionId, {
     limit: JOURNEY_PAGE_SIZE,
     offset: (page - 1) * JOURNEY_PAGE_SIZE,
+    range,
+    order: range ? 'oldest' : 'newest',
   })
   return { drives: segments.map(publicDrive), page, pageSize: JOURNEY_PAGE_SIZE, total }
 }
 
 /**
  * One settled drive to replay, with what the replay needs beside it: the mission clock and
- * rules, and the stops reached up to the one it left.
+ * rules, the stops reached up to the one it left, and the settled drive after it, if any.
  */
 export async function journeyDrive(
   db: DB,
@@ -61,12 +111,22 @@ export async function journeyDrive(
   drive: PublicDrive
   mission: { id: string; solsEpoch: Date; rules: MissionRules }
   trail: { index: number; x: number; y: number }[]
+  next: { id: string; number: number } | null
 }> {
   const { missionId, segmentId } = options
   const drive = publicDrive(await getJourneySegment(db, segmentId, { missionId }))
   const mission = await getMission(db, missionId)
   const stops = await listStops(db, missionId)
+  const after = drive.number + 1
+  const {
+    segments: [next],
+  } = await listJourneySegments(db, missionId, {
+    limit: 1,
+    offset: 0,
+    range: { from: after, to: after },
+  })
   return {
+    next: next ? { id: next.id, number: next.number } : null,
     drive,
     mission: { id: mission.id, solsEpoch: mission.solsEpoch, rules: mission.config.rules },
     trail: stops

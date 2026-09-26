@@ -39,7 +39,13 @@ useSeoMeta({
   </UContainer>
   <div v-else class="h-dvh">
     <ClientOnly>
-      <DriveReplay :replay="data" />
+      <DriveReplay
+        :key="data.drive.id"
+        :drives="[data.drive]"
+        :mission="data.mission"
+        :trail="data.trail"
+        :next="data.next ? { to: `/drives/${data.next.id}`, number: data.next.number } : null"
+      />
       <template #fallback>
         <HudSceneHud view="3d" :panels="[]" />
       </template>

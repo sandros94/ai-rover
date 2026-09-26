@@ -2,6 +2,23 @@ import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { useSegmentPlayback } from './useSegmentPlayback'
 
+/** What a track reads of playback: one live or replayed segment, or a playlist's current one. */
+export type PlaybackSource = Pick<
+  ReturnType<typeof useSegmentPlayback>,
+  | 'manifest'
+  | 'frame'
+  | 'keyframes'
+  | 'events'
+  | 'reveals'
+  | 'heldReveals'
+  | 'simTime'
+  | 'liveTime'
+  | 'heldUntil'
+  | 'mode'
+  | 'rate'
+  | 'paused'
+>
+
 /** Instrument updates per second: enough to read, cheap next to the map's per-frame overlay. */
 export const INSTRUMENT_HZ = 10
 /** Most points of the driven path drawn; longer drives are thinned evenly. */
@@ -19,7 +36,7 @@ const QW = KEYFRAME_FIELDS.indexOf('qw')
  * {@link INSTRUMENT_HZ}, the rover at the playback frame (the one layer that moves every frame),
  * the route followed at the playback time and the path driven so far.
  */
-export function usePlaybackTrack(playback: ReturnType<typeof useSegmentPlayback>) {
+export function usePlaybackTrack(playback: PlaybackSource) {
   const snapshot = useThrottled(
     () => ({
       frame: playback.frame.value,

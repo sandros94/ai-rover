@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DriveList from '~/components/journey/DriveList.vue'
+import ReplayBar from '~/components/journey/ReplayBar.vue'
 
 const route = useRoute()
 const page = computed({
@@ -19,7 +20,8 @@ useSeoMeta({ title: 'Journey · Jev Rover' })
     <SiteHeader />
     <h1 class="text-base font-semibold">Journey</h1>
     <p class="text-sm text-muted">
-      Every drive that has ended, newest first. Open one to replay it.
+      Every drive that has ended, newest first. Open one to replay it, or replay several back to
+      back.
     </p>
     <UAlert
       v-if="error"
@@ -32,6 +34,7 @@ useSeoMeta({ title: 'Journey · Jev Rover' })
       "
     />
     <template v-else-if="data">
+      <ReplayBar v-if="data.total > 0" :latest="data.total" />
       <DriveList :drives="data.drives" />
       <UPagination
         v-if="data.total > data.pageSize"

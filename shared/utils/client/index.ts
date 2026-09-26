@@ -13,6 +13,8 @@ export type { DiskTerrain, TerrainSampler } from './terrain-sampler'
 export { createTerrainSampler } from './terrain-sampler'
 export type { PlaybackClock, PlaybackMode, PlaybackRate } from './playback'
 export { createPlaybackClock, DEFAULT_LIVE_MARGIN_SECONDS, PLAYBACK_RATES } from './playback'
+export type { Playlist, PlaylistClock } from './playlist'
+export { createPlaylist, createPlaylistClock, PLAYLIST_PREFETCH_AT } from './playlist'
 export type { SegmentStream } from './segment-stream'
 export {
   createSegmentStream,

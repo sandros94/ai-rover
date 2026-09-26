@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatDuration } from '#shared/utils/client/instruments'
 import type { DriveJson } from '~/composables/useJourney'
+import { driveRoute } from '~/composables/useJourney'
 
 /** One settled drive, a segment of the mission, in a line: where from and to, how it ended, how far and long, and whose. */
 const props = defineProps<{ drive: DriveJson }>()
@@ -12,10 +13,7 @@ const STATUS = {
 } as const
 
 const status = computed(() => STATUS[props.drive.status])
-const route = computed(() => {
-  const { from, to } = props.drive
-  return `Stop ${from.index} → ${to ? `stop ${to.index}` : 'lost'}`
-})
+const route = computed(() => driveRoute(props.drive))
 const started = computed(() =>
   new Date(props.drive.startedAt).toLocaleString(undefined, {
     dateStyle: 'medium',

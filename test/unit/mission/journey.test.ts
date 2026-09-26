@@ -1,8 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DB } from '#server/database/db'
-import { journeyDrive, journeyPage, parseJourneyPage } from '#server/utils/mission/journey'
+import {
+  journeyDrive,
+  journeyPage,
+  parseJourneyPage,
+  parseJourneyRange,
+} from '#server/utils/mission/journey'
 import { MissionError } from '#shared/utils/mission'
-import { createTestDb, dbErrorOf, seedJourney } from '../db/helpers'
+import { createTestDb, dbErrorOf, JOURNEY_T0, seedJourney } from '../db/helpers'
+
+const HOUR = 3_600_000
+const plus = (ms: number) => new Date(JOURNEY_T0.getTime() + ms)
 
 let db: DB
 let close: () => Promise<void>
@@ -41,6 +49,80 @@ describe('journeyPage', () => {
   })
 })
 
+describe('journeyPage over a range', () => {
+  it('lists the settled drives numbered from and to, oldest first, as a playlist plays them', async () => {
+    const j = await seedJourney(db)
+    const both = await journeyPage(db, {
+      missionId: j.mission.id,
+      page: 1,
+      range: { from: 1, to: 2 },
+    })
+    expect(both).toMatchObject({ page: 1, pageSize: 50, total: 2 })
+    expect(both.drives.map((d) => [d.id, d.number])).toEqual([
+      [j.arrival.id, 1],
+      [j.failure.id, 2],
+    ])
+    const second = await journeyPage(db, { missionId: j.mission.id, page: 1, range: { from: 2 } })
+    expect(second).toMatchObject({ total: 1 })
+    expect(second.drives.map((d) => d.id)).toEqual([j.failure.id])
+    const first = await journeyPage(db, { missionId: j.mission.id, page: 1, range: { to: 1 } })
+    expect(first.drives.map((d) => d.id)).toEqual([j.arrival.id])
+    const none = await journeyPage(db, { missionId: j.mission.id, page: 1, range: { from: 3 } })
+    expect(none).toMatchObject({ total: 0, drives: [] })
+  })
+
+  it('lists the drives that ended after `since`, never the one still playing', async () => {
+    const j = await seedJourney(db)
+    const page = (since: Date) =>
+      journeyPage(db, { missionId: j.mission.id, page: 1, range: { since } })
+    const all = await page(plus(-HOUR))
+    expect(all.drives.map((d) => d.id)).toEqual([j.arrival.id, j.failure.id])
+    // Strictly after: a drive ending at `since` is the one already seen.
+    const after = await page(plus(HOUR))
+    expect(after.drives.map((d) => d.id)).toEqual([j.failure.id])
+    expect(after.total).toBe(1)
+    const later = await page(plus(3 * HOUR))
+    expect(later).toMatchObject({ total: 0, drives: [] })
+    expect(JSON.stringify(all)).not.toContain(j.driving.id)
+  })
+
+  it('combines `since` with numbers', async () => {
+    const j = await seedJourney(db)
+    const page = await journeyPage(db, {
+      missionId: j.mission.id,
+      page: 1,
+      range: { since: plus(-HOUR), from: 2, to: 2 },
+    })
+    expect(page.drives.map((d) => d.id)).toEqual([j.failure.id])
+  })
+})
+
+describe('parseJourneyRange', () => {
+  it('reads segment numbers and an ISO instant, nothing when none is given', () => {
+    expect(parseJourneyRange({})).toBeUndefined()
+    expect(parseJourneyRange({ page: '2' })).toBeUndefined()
+    expect(parseJourneyRange({ from: '3', to: '7' })).toEqual({ from: 3, to: 7 })
+    expect(parseJourneyRange({ from: '3' })).toEqual({ from: 3 })
+    expect(parseJourneyRange({ since: '2026-09-25T12:00:00.000Z' })).toEqual({
+      since: new Date('2026-09-25T12:00:00.000Z'),
+    })
+  })
+
+  it('refuses bad numbers, a reversed range and a bad instant with a typed error', () => {
+    for (const query of [
+      { from: '0' },
+      { to: '-1' },
+      { from: '1.5' },
+      { from: ['1', '2'] },
+      { from: '5', to: '4' },
+      { since: 'yesterday' },
+      { since: '' },
+    ]) {
+      expect(() => parseJourneyRange(query)).toThrow(MissionError)
+    }
+  })
+})
+
 describe('journeyDrive', () => {
   it('gives one settled drive with the mission clock, rules and the stops up to its start', async () => {
     const j = await seedJourney(db)
@@ -58,6 +140,15 @@ describe('journeyDrive', () => {
     ])
     const first = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.arrival.id })
     expect(first.trail).toEqual([{ index: 0, x: 0, y: 0 }])
+  })
+
+  it('names the settled drive after it, if any, to continue with', async () => {
+    const j = await seedJourney(db)
+    const first = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.arrival.id })
+    expect(first.next).toEqual({ id: j.failure.id, number: 2 })
+    // The drive after the latest settled one is still playing: nothing to continue with.
+    const last = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.failure.id })
+    expect(last.next).toBeNull()
   })
 
   it('refuses the drive still playing as not found, leaking nothing', async () => {
