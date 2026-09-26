@@ -55,7 +55,13 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Dashboard assembly: done on the home page with live playback, vote cards and the instrument grid.
 - 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment. Done.
 
-## Phase 7 — Failure voting, resets, moderation
+## Phase 7 — Failure voting, resets, moderation, community
+
+- Not-moving flags with scaled quorum and automatic backstop; moderator pause; `/community` tallies; winner-may-submit precedence; auto self-LGTM; LGTM and planning-phase naming.
+- Drive realism: no per-metre stops, imaging stops, AutoNav status events and HUD element.
+- Fog that hides on both views; relief with contours; full-viewport HUD layout with floating panels; 3D default.
+- JPL URDF hero rover.
+- Multi-leg replay: replay a range of legs back to back, disk switching at each stop.
 
 ## Later — Biomes
 
