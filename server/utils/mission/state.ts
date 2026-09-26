@@ -2,8 +2,8 @@ import type { DB } from '../../database/db'
 import type { Mission, SegmentStatus, Stop } from '../../database/schema'
 import { getMission } from '../../repositories/missions'
 import { getOpenRound } from '../../repositories/rounds'
-import { getDrivingSegment } from '../../repositories/segments'
-import { getStop } from '../../repositories/stops'
+import { getDrivingSegment, listDeaths } from '../../repositories/segments'
+import { getStop, listStops } from '../../repositories/stops'
 import type { Verdict } from '../jev/client'
 import { DEFAULT_SLICE_SECONDS } from '#shared/utils/drive'
 import type { MissionRules } from '#shared/utils/mission'
@@ -64,6 +64,10 @@ export interface PublicMissionState {
   } | null
   /** How the driving segment's slices are released; null while none drives. */
   release: { startedAt: Date; sliceSeconds: number } | null
+  /** Every stop reached so far, by index; a stop exists only once its drive has settled. */
+  trail: { index: number; x: number; y: number }[]
+  /** Death positions of settled failures, oldest first: goals and routes must keep clear. */
+  deaths: { x: number; y: number }[]
 }
 
 export async function publicMissionState(
@@ -147,5 +151,7 @@ export async function publicMissionState(
           manifestKey: driving.manifestKey,
         },
     release: driving ? { startedAt: driving.startedAt, sliceSeconds } : null,
+    trail: (await listStops(db, missionId)).map(({ index, x, y }) => ({ index, x, y })),
+    deaths: (await listDeaths(db, missionId)).map(({ x, y }) => ({ x, y })),
   }
 }

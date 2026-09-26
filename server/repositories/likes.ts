@@ -60,3 +60,16 @@ async function lockOpenSubmission(tx: DB, submissionId: string): Promise<void> {
     )
   }
 }
+
+/** Ids of the round's submissions the user likes, whatever their status. */
+export async function listLikedSubmissionIds(
+  db: DB,
+  options: { roundId: string; userId: string },
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: submissionLike.submissionId })
+    .from(submissionLike)
+    .innerJoin(submission, eq(submission.id, submissionLike.submissionId))
+    .where(and(eq(submission.roundId, options.roundId), eq(submissionLike.userId, options.userId)))
+  return rows.map((row) => row.id)
+}

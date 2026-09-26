@@ -113,7 +113,10 @@ export function revealVertices(
  * Per disk-grid vertex: 1 where the mask holds it as seen. Covers the whole grid, including
  * vertices outside the disk radius and in chunks the disk does not list.
  */
-export function revealedOverDisk(mask: RevealedMask, disk: StopDisk): Uint8Array {
+export function revealedOverDisk(
+  mask: RevealedMask,
+  disk: Pick<StopDisk, 'grid' | 'origin'>,
+): Uint8Array {
   assertDiskAligned(mask, disk, 'revealedOverDisk')
   const { vertexCount } = mask
   const cells = vertexCount - 1
@@ -302,7 +305,11 @@ export function decodeRevealedMask(bytes: Uint8Array): RevealedMask {
   return { version: 1, cellSize, vertexCount, chunks }
 }
 
-function assertDiskAligned(mask: RevealedMask, disk: StopDisk, context: string): void {
+function assertDiskAligned(
+  mask: RevealedMask,
+  disk: Pick<StopDisk, 'grid' | 'origin'>,
+  context: string,
+): void {
   const { vertexCount } = mask
   const cells = vertexCount - 1
   const { width, height, cellSize } = disk.grid

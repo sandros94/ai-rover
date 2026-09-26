@@ -24,6 +24,7 @@ export { CHUNK_FORMAT_VERSION, CHUNK_HEADER_BYTES, decodeChunk, encodeChunk } fr
 export type { StopDisk } from './disk'
 export {
   chunksCoveringDisk,
+  completeStopDisk,
   computeStopDisk,
   DEFAULT_SNAP_RADIUS,
   DEFAULT_STOP_RADIUS,

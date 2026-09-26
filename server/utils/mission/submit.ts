@@ -13,28 +13,13 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import type { JourneyStore } from '../journey/store'
-import type { GoalRefusal, MapPoint, MissionRules } from '#shared/utils/mission'
-import { checkPathClearOfDeaths, checkSubmissionGoal } from '#shared/utils/mission'
-import { planSegment, summarizeSubmission } from '#shared/utils/nav'
+import type { GoalRefusal, MapPoint, MissionRules, SubmissionRefusal } from '#shared/utils/mission'
+import { planGoal } from '#shared/utils/mission'
+import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
-
-/**
- * Why a goal was not accepted. Closed set.
- *
- * - `unpathable`: no traversable vertex reachable from the stop lies near the goal; nothing is
- *   stored.
- * - `too-near`, `too-far`, `near-death-zone`: the goal breaks a mission rule; nothing is stored.
- * - `path-near-death-zone`: the planned route passes too close to a death; nothing is stored.
- * - `judged-infeasible`: Jev's verdict is reject; the submission is stored as `rejected`.
- */
-export type SubmissionRefusal =
-  | 'unpathable'
-  | GoalRefusal
-  | 'path-near-death-zone'
-  | 'judged-infeasible'
 
 export type SubmitResult =
   | { accepted: true; submission: Submission }
@@ -63,17 +48,16 @@ export async function assessGoal(
 > {
   const { world, disk, revealed, start } = ground
   const { goal, deaths, rules, jev } = options
-  const rule = checkSubmissionGoal(goal, { start, deaths, rules })
-  if (!rule.ok) return rule
-  const plan = planSegment(disk, {
+  const planned = planGoal(disk, {
     revealed,
     start,
     goal,
+    deaths,
+    rules,
     slopeLimitDeg: world.config.slopeLimitDeg,
   })
-  if (plan.polyline.length > 0 && !checkPathClearOfDeaths(plan.polyline, { deaths, rules }).ok) {
-    return { ok: false, reason: 'path-near-death-zone' }
-  }
+  if (!planned.ok) return planned
+  const { plan } = planned
   const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
   const { cached: _cached, usage: _usage, ...judgment } = await jev.judgeSubmission(summary)
   return { ok: true, assessment: { judgment, metrics: plan.metrics, summary } }

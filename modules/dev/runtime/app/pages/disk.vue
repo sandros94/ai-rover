@@ -1,21 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import type { HeightGrid } from '#shared/utils/terrain'
+import { reliefPixels } from '#shared/utils/client'
 import { DEFAULT_CRATERS, DEFAULT_RELIEF, slopeAt } from '#shared/utils/terrain'
 import type { DiskWire } from '../../shared/disk-wire'
 import { decodeDiskWire } from '../../shared/disk-wire'
 
-/** Hillshade light: from the north-west (azimuth 315°), 45° above the horizon. */
-const LIGHT_ALTITUDE = Math.PI / 4
-const LIGHT = {
-  x: -Math.cos(LIGHT_ALTITUDE) * Math.SQRT1_2,
-  y: Math.cos(LIGHT_ALTITUDE) * Math.SQRT1_2,
-  z: Math.sin(LIGHT_ALTITUDE),
-}
-
 interface DiskData extends DiskWire {
-  /** Lambert shade in [0, 1] per vertex, NaN where the height is. */
-  shade: Float32Array
   minHeight: number
   maxHeight: number
   computeMs: string | null
@@ -62,25 +52,7 @@ function parseDisk(buffer: ArrayBuffer, computeMs: string | null): DiskData {
     if (h < minHeight) minHeight = h
     if (h > maxHeight) maxHeight = h
   }
-  return { ...disk, shade: hillshade(disk.grid), minHeight, maxHeight, computeMs }
-}
-
-/** Central-difference normals (one-sided at the edges), dotted with the light. */
-function hillshade({ heights, width, height, cellSize }: HeightGrid): Float32Array {
-  const shade = new Float32Array(width * height)
-  for (let j = 0; j < height; j++) {
-    const j0 = Math.max(0, j - 1)
-    const j1 = Math.min(height - 1, j + 1)
-    for (let i = 0; i < width; i++) {
-      const i0 = Math.max(0, i - 1)
-      const i1 = Math.min(width - 1, i + 1)
-      const gx = (heights[j * width + i1]! - heights[j * width + i0]!) / ((i1 - i0) * cellSize)
-      const gy = (heights[j1 * width + i]! - heights[j0 * width + i]!) / ((j1 - j0) * cellSize)
-      const dot = (-gx * LIGHT.x - gy * LIGHT.y + LIGHT.z) / Math.sqrt(gx * gx + gy * gy + 1)
-      shade[j * width + i] = Math.max(0, dot)
-    }
-  }
-  return shade
+  return { ...disk, minHeight, maxHeight, computeMs }
 }
 
 function draw(): void {
@@ -94,47 +66,30 @@ function draw(): void {
   if (!context) return
   const image = context.createImageData(width, height)
   const pixels = image.data
-  const span = disk.maxHeight - disk.minHeight || 1
+  pixels.set(
+    reliefPixels(disk.grid, {
+      hillshade: overlays.hillshade,
+      seen: overlays.fog ? disk.visible : undefined,
+      heightRange: { min: disk.minHeight, max: disk.maxHeight },
+    }),
+  )
   for (let j = 0; j < height; j++) {
     // Grid rows run south to north; canvas rows run top to bottom.
     const row = (height - 1 - j) * width
     for (let i = 0; i < width; i++) {
       const k = j * width + i
       const p = (row + i) * 4
-      const h = heights[k]!
-      if (Number.isNaN(h)) continue
-      const t = (h - disk.minHeight) / span
-      // Mars ochre ramp: dark rust at the lowest ground, pale dust at the highest.
-      let r = 90 + 150 * t
-      let g = 45 + 125 * t
-      let b = 30 + 95 * t
-      const shade = disk.shade[k]!
-      // Vertices bordering the NaN corners have no normal; leave them unshaded.
-      if (overlays.hillshade && !Number.isNaN(shade)) {
-        const s = 0.25 + 0.95 * shade
-        r *= s
-        g *= s
-        b *= s
-      }
+      if (Number.isNaN(heights[k]!)) continue
       if (overlays.traversable && !disk.traversable[k]) {
-        r = r * 0.45 + 220 * 0.55
-        g *= 0.45
-        b *= 0.45
+        pixels[p] = pixels[p]! * 0.45 + 220 * 0.55
+        pixels[p + 1] = pixels[p + 1]! * 0.45
+        pixels[p + 2] = pixels[p + 2]! * 0.45
       }
       if (overlays.reachable && disk.reachable[k]) {
-        r *= 0.6
-        g = g * 0.6 + 200 * 0.4
-        b = b * 0.6 + 220 * 0.4
+        pixels[p] = pixels[p]! * 0.6
+        pixels[p + 1] = pixels[p + 1]! * 0.6 + 200 * 0.4
+        pixels[p + 2] = pixels[p + 2]! * 0.6 + 220 * 0.4
       }
-      if (overlays.fog && !disk.visible[k]) {
-        r *= 0.3
-        g *= 0.3
-        b *= 0.3
-      }
-      pixels[p] = r
-      pixels[p + 1] = g
-      pixels[p + 2] = b
-      pixels[p + 3] = 255
     }
   }
   context.putImageData(image, 0, 0)

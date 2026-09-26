@@ -9,3 +9,5 @@ export {
   roundCloseAt,
   shouldResetToPreviousStop,
 } from './rules'
+export type { SubmissionRefusal } from './plan-goal'
+export { planGoal } from './plan-goal'

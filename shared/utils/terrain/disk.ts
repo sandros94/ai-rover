@@ -114,9 +114,37 @@ export function computeStopDisk(
     }
   }
 
-  const grid: HeightGrid = { heights, width, height, cellSize }
-  const vertex = worldToVertex(world, center)
-  const viewer: GridCell = { i: vertex.i - origin.i, j: vertex.j - origin.j }
+  return completeStopDisk(
+    { grid: { heights, width, height, cellSize }, origin, traversable },
+    { center, radius, chunks, mastHeight },
+  )
+}
+
+/**
+ * A stop disk from its stitched grid: reachability and the viewshed from the centre, computed as
+ * {@link computeStopDisk} does. A browser holding the served chunks rebuilds the server's disk
+ * bit for bit this way, without generating terrain. `chunks` are the disk's listed chunks, sorted
+ * by (cy, cx).
+ */
+export function completeStopDisk(
+  terrain: { grid: HeightGrid; origin: GridCell; traversable: Uint8Array },
+  options: {
+    center: { x: number; y: number }
+    radius: number
+    chunks: readonly ChunkCoords[]
+    mastHeight: number
+  },
+): StopDisk {
+  const { grid, origin, traversable } = terrain
+  const { radius, mastHeight } = options
+  assertPoint(options.center, 'completeStopDisk')
+  assertRadius(radius, 'completeStopDisk')
+  const center = { x: options.center.x, y: options.center.y }
+  const { width, height, cellSize } = grid
+  const viewer: GridCell = {
+    i: Math.round(center.x / cellSize) - origin.i,
+    j: Math.round(center.y / cellSize) - origin.j,
+  }
   // The rover stands at the centre, so the ground around it is reachable even when the centre
   // vertex itself is too steep; the viewshed still starts from the centre vertex.
   const seed =
@@ -131,7 +159,7 @@ export function computeStopDisk(
   return {
     center,
     radius,
-    chunks,
+    chunks: options.chunks.map(({ cx, cy }) => ({ cx, cy })),
     grid,
     origin,
     traversable,

@@ -6,6 +6,7 @@ import { getSegment, listDeaths } from '#server/repositories/segments'
 import { getStop } from '#server/repositories/stops'
 import { getSubmission } from '#server/repositories/submissions'
 import { createMissionAtStop } from '#server/utils/mission/create'
+import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
 import { failAt, forced } from './forced'
@@ -77,11 +78,24 @@ describe('failures', () => {
       expect(segment).toMatchObject({ fromStopId: stop1.id, attempt: k + 1, status: 'driving' })
       // The failure stays private while the drive plays: the next round waits at the goal.
       expect(await listDeaths(db, m.missionId)).toHaveLength(k)
+      const playing = await publicMissionState(db, {
+        missionId: m.missionId,
+        now: segment.startedAt,
+      })
+      expect(playing.deaths).toEqual(
+        deaths.slice(0, k).map((d) => ({ x: stop1.x + d.x, y: stop1.y + d.y })),
+      )
       const next = (await getOpenRound(db, m.missionId))!
       expect(next).toMatchObject({ fromStopId: stop1.id, anchorX: goalX, anchorY: goalY })
 
       const settled = await m.tick(segment.endsAt)
       expect(settled.settled).toEqual({ segmentId: segment.id, status: 'failed' })
+      const after = await publicMissionState(db, { missionId: m.missionId, now: segment.endsAt })
+      expect(after.deaths.at(-1)).toEqual({ x: stop1.x + death.x, y: stop1.y + death.y })
+      expect(after.trail).toEqual([
+        { index: 0, x: m.stop.x, y: m.stop.y },
+        { index: 1, x: stop1.x, y: stop1.y },
+      ])
       expect(await getRound(db, next.id)).toMatchObject({
         status: 'void',
         winnerSubmissionId: null,

@@ -11,7 +11,7 @@ import {
   setSubmissionStatus,
   withdrawSubmission,
 } from '#server/repositories/submissions'
-import { countLikes, like, unlike } from '#server/repositories/likes'
+import { countLikes, like, listLikedSubmissionIds, unlike } from '#server/repositories/likes'
 import { createUser } from '#server/repositories/users'
 import {
   createTestDb,
@@ -185,5 +185,24 @@ describe('likes', () => {
       (await dbErrorOf(like(db, '01900000-0000-7000-8000-000000000000', { userId: user.id })))
         ?.code,
     ).toBe('NOT_FOUND')
+  })
+
+  it("lists the round's submissions a user likes, and only that round's", async () => {
+    const { round, user } = await seedMission(db)
+    const grace = await createUser(db, { displayName: 'Grace', avatarUrl: null })
+    const a = await createSubmission(db, submissionInput(round.id, user.id))
+    const b = await createSubmission(db, submissionInput(round.id, grace.id, { x: 60, y: 0 }))
+    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: grace.id })).toEqual([])
+    await like(db, a.id, { userId: grace.id })
+    await like(db, b.id, { userId: grace.id })
+    await like(db, b.id, { userId: user.id })
+    expect(
+      (await listLikedSubmissionIds(db, { roundId: round.id, userId: grace.id })).toSorted(),
+    ).toEqual([a.id, b.id].toSorted())
+    expect(await listLikedSubmissionIds(db, { roundId: round.id, userId: user.id })).toEqual([b.id])
+    const other = await seedMission(db)
+    expect(await listLikedSubmissionIds(db, { roundId: other.round.id, userId: grace.id })).toEqual(
+      [],
+    )
   })
 })

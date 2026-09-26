@@ -38,4 +38,22 @@ export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
       import('../components/playground/AttitudeReadout.vue'),
     needs: ['record'],
   },
+  {
+    id: 'stop-map',
+    title: 'Stop map',
+    group: 'scene',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/StopMapScene.vue'),
+    needs: ['disk', 'record'],
+  },
+  {
+    id: 'pick-preview',
+    title: 'Pick preview',
+    group: 'card',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/PickPreviewCard.vue'),
+    needs: ['disk', 'record'],
+  },
 ]
