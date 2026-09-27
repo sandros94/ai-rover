@@ -64,7 +64,7 @@ export function createClientMetadataHandler(auth: AuthContext) {
       scope: SCOPE,
       dpop_bound_access_tokens: true,
       token_endpoint_auth_method: 'none',
-      client_name: 'Jev Rover',
+      client_name: 'AI Rover',
       client_uri: origin,
     }
   })

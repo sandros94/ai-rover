@@ -118,7 +118,7 @@ describe('databaseStatus', () => {
   })
 
   it('marks a drifted migration and carries the refusal', async () => {
-    await useDB().execute(sql`update jev_dev.migration_digest set digest = 'tampered'`)
+    await useDB().execute(sql`update rover_dev.migration_digest set digest = 'tampered'`)
     await prepareLocalDatabase(local.url, migrations.dir)
 
     const status = await databaseStatus(

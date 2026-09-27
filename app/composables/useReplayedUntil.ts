@@ -1,5 +1,5 @@
 /** Browser storage key of the end of the latest drive replayed to its end. */
-export const REPLAYED_UNTIL_KEY = 'jev-rover:replayed-until'
+export const REPLAYED_UNTIL_KEY = 'ai-rover:replayed-until'
 
 function stored(): string | null {
   try {

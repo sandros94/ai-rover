@@ -280,7 +280,7 @@ describe('AT Protocol sign-in', () => {
       scope: 'atproto',
       dpop_bound_access_tokens: true,
       token_endpoint_auth_method: 'none',
-      client_name: 'Jev Rover',
+      client_name: 'AI Rover',
       client_uri: ORIGIN,
     })
   })
@@ -338,7 +338,7 @@ describe('AT Protocol sign-in', () => {
     })
     expect(pars[1]!.headers.get('content-type')).toBe('application/x-www-form-urlencoded')
 
-    const flow = await openCookie(setCookies(res)['__Host-jev-oauth']!.value)
+    const flow = await openCookie(setCookies(res)['__Host-rover-oauth']!.value)
     expect(flow).toMatchObject({
       provider: 'atproto',
       state: form.state,
@@ -376,7 +376,7 @@ describe('AT Protocol sign-in', () => {
     const mock = network(options)
     const app = appOver(testAuth(mock.fetch))
     const { res } = await start(app)
-    const flow = await openCookie(setCookies(res)['__Host-jev-oauth']!.value)
+    const flow = await openCookie(setCookies(res)['__Host-rover-oauth']!.value)
     const response = await app.request(
       `${ORIGIN}/api/auth/atproto?${query(flow.state as string)}`,
       { headers: { cookie: cookieHeader(res) } },
@@ -447,7 +447,7 @@ describe('AT Protocol sign-in', () => {
     })
 
     const cookies = setCookies(response)
-    expect(cookies['__Host-jev-oauth']!.value).toBe('')
+    expect(cookies['__Host-rover-oauth']!.value).toBe('')
     const opened = await Promise.all(
       Object.values(cookies)
         .filter((cookie) => cookie.value)
@@ -470,7 +470,7 @@ describe('AT Protocol sign-in', () => {
         : mock.fetch(input, init)
     const app = appOver(testAuth(fetch))
     const { res } = await start(app)
-    const flow = await openCookie(setCookies(res)['__Host-jev-oauth']!.value)
+    const flow = await openCookie(setCookies(res)['__Host-rover-oauth']!.value)
     const response = await app.request(
       `${ORIGIN}/api/auth/atproto?code=c&state=${String(flow.state)}&iss=${encodeURIComponent('https://auth.test')}`,
       { headers: { cookie: cookieHeader(res) } },
@@ -492,7 +492,7 @@ describe('sign-in failures', () => {
   ) {
     const app = appOver(testAuth(network().fetch), { ...options, redirectErrors: true })
     const { res } = await start(app)
-    const flow = await openCookie(setCookies(res)['__Host-jev-oauth']!.value)
+    const flow = await openCookie(setCookies(res)['__Host-rover-oauth']!.value)
     return app.request(`${ORIGIN}/api/auth/atproto?${query(flow.state as string)}`, {
       headers: { cookie: cookieHeader(res) },
     })

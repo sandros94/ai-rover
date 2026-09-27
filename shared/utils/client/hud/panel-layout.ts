@@ -23,7 +23,7 @@ export const PANEL_IDS = [
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** Browser storage key of the floating panels' layout. */
-export const PANEL_LAYOUT_KEY = 'jev-rover:panels'
+export const PANEL_LAYOUT_KEY = 'ai-rover:panels'
 /** Bumped when the stored shape or the default arrangement changes; older layouts are dropped. */
 export const PANEL_LAYOUT_VERSION = 1
 

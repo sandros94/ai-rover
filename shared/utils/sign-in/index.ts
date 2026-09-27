@@ -9,7 +9,7 @@ export const SIGN_IN_ERRORS = {
   'link-changed': 'You were signed in as someone else while linking. Sign in and link again.',
   'account-taken': 'That account already belongs to another user. Sign in with it instead.',
   'provider': 'The sign-in provider did not answer as expected. Try again in a moment.',
-  'database': 'Jev could not reach its database. Try again in a moment.',
+  'database': 'AI Rover could not reach its database. Try again in a moment.',
   'sign-in-failed': 'Something went wrong while signing you in. Try again.',
 } as const
 

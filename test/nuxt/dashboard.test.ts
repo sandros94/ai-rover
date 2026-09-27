@@ -203,9 +203,9 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const wrapper of attached.splice(0)) wrapper.unmount()
-  useState('jev-user-session').value = {}
-  useState('jev-rover:panels').value = null
-  useState('jev-rover:hud').value = { visible: true, instruments: false, vote: false }
+  useState('rover-user-session').value = {}
+  useState('ai-rover:panels').value = null
+  useState('ai-rover:hud').value = { visible: true, instruments: false, vote: false }
   useMapFocus().clear()
   localStorage.clear()
   vi.restoreAllMocks()
@@ -368,7 +368,7 @@ describe('MissionDashboard', () => {
   })
 
   it('lets a signed-in user like and marks their own card', async () => {
-    useState('jev-user-session').value = {
+    useState('rover-user-session').value = {
       user: { id: ADA.id, displayName: 'Ada', providers: ['github'] },
     }
     const withSubmission = state({

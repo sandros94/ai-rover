@@ -4,7 +4,7 @@ import { base64Parse } from 'unsecure/utils'
 
 export type SessionKey = () => Promise<JWK_oct<'A256GCM'>>
 
-const DEV_SEED = 'jev-rover development session key'
+const DEV_SEED = 'ai-rover development session key'
 
 /** Shortest secret accepted in place of a JWK. */
 export const MIN_SECRET_LENGTH = 32
@@ -52,7 +52,7 @@ export function sessionKey(raw: string, dev: boolean): SessionKey {
 function derivedKey(secret: string): SessionKey {
   let derived: Promise<JWK_oct<'A256GCM'>> | undefined
   return () =>
-    (derived ??= hkdf(secret, { length: 32, info: 'jev-session', returnAs: 'base64url' }).then(
+    (derived ??= hkdf(secret, { length: 32, info: 'rover-session', returnAs: 'base64url' }).then(
       (k): JWK_oct<'A256GCM'> => ({ kty: 'oct', k, alg: 'A256GCM' }),
     ))
 }

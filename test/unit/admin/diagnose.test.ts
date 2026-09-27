@@ -13,7 +13,7 @@ import { readdir } from 'node:fs/promises'
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const TOKEN = 'operator-token-for-tests-0123456789'
-const ORIGIN = 'https://jev.test'
+const ORIGIN = 'https://rover.test'
 const SETTINGS: AdminSettings = {
   sessionKey: 'a-session-secret-of-at-least-32-characters',
   typesafeToken: '',
@@ -57,12 +57,12 @@ async function diagnosis(app: H3): Promise<Diagnosis> {
 /** A database whose every query fails the way a refused connection does. */
 function failingDb(): DB {
   const refused = Object.assign(
-    new Error('password authentication failed for user "jev" at db.internal:5432'),
+    new Error('password authentication failed for user "rover" at db.internal:5432'),
     { code: '28P01' },
   )
   class DrizzleQueryError extends Error {}
   const fail = () => {
-    throw new DrizzleQueryError('Failed query: select 1 -- postgres://jev:hunter2@db', {
+    throw new DrizzleQueryError('Failed query: select 1 -- postgres://rover:hunter2@db', {
       cause: refused,
     })
   }
@@ -99,7 +99,7 @@ describe('POST /api/admin/diagnose', () => {
     expect(answer.database).toEqual({
       ok: true,
       migrations,
-      tables: expect.objectContaining({ user_account: 2, mission: 0, jev_judgment: 0 }),
+      tables: expect.objectContaining({ user_account: 2, mission: 0, ai_judgment: 0 }),
     })
     expect(Object.keys(answer.database.tables)).toHaveLength(11)
     expect(answer.blobs).toEqual({ ok: true, keys: 2 })

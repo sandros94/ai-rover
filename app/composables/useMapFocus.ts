@@ -7,7 +7,7 @@ import { ROVER_ID } from '#shared/utils/client'
  * views. Shared by the whole page; a page clears it when it leaves.
  */
 export function useMapFocus() {
-  const state = useState<{ id: string | null; seq: number }>('jev-rover:focus', () => ({
+  const state = useState<{ id: string | null; seq: number }>('ai-rover:focus', () => ({
     id: null,
     seq: 0,
   }))

@@ -12,7 +12,7 @@ import {
   extendPages,
 } from 'nuxt/kit'
 
-const ROUTE = '/__jev/db'
+const ROUTE = '/__rover/db'
 
 /** Development-only API routes under `/api/_dev`, by path, method and runtime file. */
 const API_ROUTES = [
@@ -31,12 +31,12 @@ const API_ROUTES = [
  * sign-in, stop-disk viewer and the instrument playground.
  */
 export default defineNuxtModule({
-  meta: { name: 'jev-dev' },
+  meta: { name: 'rover-dev' },
   setup(_options, nuxt) {
     // Declared for every build so the type checker accepts the runtime files either way.
     addTypeTemplate(
       {
-        filename: 'types/jev-dev.d.ts',
+        filename: 'types/rover-dev.d.ts',
         getContents: () =>
           "declare module '#dev-migrations' {\n  const directory: string\n  export default directory\n}\n",
       },
@@ -96,7 +96,7 @@ export default defineNuxtModule({
 
     onDevtoolsReady((ctx) => {
       ctx.docks.register({
-        id: 'jev-db',
+        id: 'rover-db',
         type: 'iframe',
         title: 'Database',
         icon: 'i-lucide-database',

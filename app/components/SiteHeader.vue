@@ -14,7 +14,7 @@ const menu = LINKS.map(({ label, to, icon }) => ({ label, to, icon }))
   <header class="flex min-w-0 items-center gap-2 sm:gap-3">
     <div class="flex min-w-0 shrink items-center gap-1">
       <slot name="title">
-        <NuxtLink to="/" class="truncate text-base font-semibold sm:text-lg">Jev Rover</NuxtLink>
+        <NuxtLink to="/" class="truncate text-base font-semibold sm:text-lg">AI Rover</NuxtLink>
       </slot>
     </div>
     <div class="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">

@@ -1,5 +1,5 @@
 {
-  "name": "jev-rover",
+  "name": "ai-rover",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -20,8 +20,8 @@
     "test:browser": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
-    "db:seed": "curl -fsS -X POST -H \"origin: http://localhost:${PORT:-3000}\" http://localhost:${PORT:-3000}/__jev/db/seed",
-    "db:reset": "curl -fsS -X POST -H \"origin: http://localhost:${PORT:-3000}\" http://localhost:${PORT:-3000}/__jev/db/reset"
+    "db:seed": "curl -fsS -X POST -H \"origin: http://localhost:${PORT:-3000}\" http://localhost:${PORT:-3000}/__rover/db/seed",
+    "db:reset": "curl -fsS -X POST -H \"origin: http://localhost:${PORT:-3000}\" http://localhost:${PORT:-3000}/__rover/db/reset"
   },
   "dependencies": {
     "@iconify-json/lucide": "npm:@iconify-json/lucide@^1.2.135",

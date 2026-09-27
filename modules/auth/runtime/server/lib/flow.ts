@@ -46,7 +46,7 @@ export interface FlowCookie {
  * because the provider returns with a top-level GET from another site.
  */
 export function createFlowCookie(key: SessionKey, dev: boolean): FlowCookie {
-  const name = cookieName('jev-oauth', dev)
+  const name = cookieName('rover-oauth', dev)
   const attributes = { httpOnly: true, secure: !dev, sameSite: 'lax', path: '/' } as const
   return {
     async seal(event, flow) {

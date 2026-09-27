@@ -113,7 +113,7 @@ async function callback(
     headers: {
       'accept': 'application/vnd.github+json',
       'authorization': `Bearer ${token.access_token}`,
-      'user-agent': 'jev-rover',
+      'user-agent': 'ai-rover',
       'x-github-api-version': '2022-11-28',
     },
   })

@@ -44,13 +44,13 @@ export async function databaseStatus(
   const db = useDB()
   const [tracking] = await rows<{ migrations: boolean; digests: boolean }>(
     sql`select to_regclass('netlify.migrations') is not null as migrations,
-               to_regclass('jev_dev.migration_digest') is not null as digests`,
+               to_regclass('rover_dev.migration_digest') is not null as digests`,
   )
   const ran = tracking?.migrations
     ? await rows<{ name: string; digest: string | null; recorded_ms: number | null }>(
         tracking.digests
           ? sql`select m.name, d.digest, extract(epoch from d.recorded_at) * 1000 as recorded_ms
-                from netlify.migrations m left join jev_dev.migration_digest d on d.name = m.name
+                from netlify.migrations m left join rover_dev.migration_digest d on d.name = m.name
                 order by m.name`
           : sql`select name, null as digest, null as recorded_ms from netlify.migrations order by name`,
       )

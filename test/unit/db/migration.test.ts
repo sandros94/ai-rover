@@ -31,7 +31,6 @@ describe('generated migrations', () => {
       'submission',
       'submission_like',
       'segment',
-      'jev_judgment',
     ]) {
       expect(sql).toContain(`CREATE TABLE "${table}"`)
     }
@@ -137,6 +136,34 @@ describe('the due_and_jev_cache migration', () => {
         { due: false, cap: 5 },
         { due: false, cap: 2 },
       ])
+    } finally {
+      await connection.pool.end()
+      await server.stop()
+    }
+  })
+})
+
+describe('the ai_judgment migration', () => {
+  it('renames the judgment cache in place, keeping its rows and primary key', async () => {
+    const server = new NetlifyDB({ logger: () => {} })
+    const connection = getDatabase({ connectionString: await server.start() })
+    const db = drizzle({ client: connection, relations })
+    try {
+      const names = readdirSync(MIGRATIONS_DIR).toSorted()
+      const at = names.findIndex((name) => name.endsWith('_ai_judgment'))
+      expect(at).toBeGreaterThan(0)
+      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      await db.execute(raw`
+        insert into jev_judgment (hash, model, answers) values ('h1', 'm', '{"verdict":"accept"}')`)
+
+      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      const rows = await db.execute(raw`select hash, model, answers from ai_judgment`)
+      expect(rows.rows).toEqual([{ hash: 'h1', model: 'm', answers: { verdict: 'accept' } }])
+      const keys = await db.execute(raw`
+        select conname from pg_constraint where conrelid = 'ai_judgment'::regclass and contype = 'p'`)
+      expect(keys.rows).toEqual([{ conname: 'ai_judgment_pkey' }])
+      const old = await db.execute(raw`select to_regclass('jev_judgment') is null as gone`)
+      expect(old.rows).toEqual([{ gone: true }])
     } finally {
       await connection.pool.end()
       await server.stop()

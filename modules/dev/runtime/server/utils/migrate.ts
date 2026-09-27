@@ -14,8 +14,8 @@ export const RESET_REMEDY =
  * otherwise go unnoticed until production disagrees.
  */
 const DIGEST_TABLE = `
-  CREATE SCHEMA IF NOT EXISTS jev_dev;
-  CREATE TABLE IF NOT EXISTS jev_dev.migration_digest (
+  CREATE SCHEMA IF NOT EXISTS rover_dev;
+  CREATE TABLE IF NOT EXISTS rover_dev.migration_digest (
     name text PRIMARY KEY,
     digest text NOT NULL,
     recorded_at timestamptz DEFAULT now()
@@ -121,7 +121,7 @@ async function findDrift(executor: SQLExecutor, directory: string): Promise<stri
   if (!tracked.rows[0]?.tracked) return []
   const ran = await executor.query<{ name: string; digest: string | null }>(
     `SELECT m.name, d.digest FROM netlify.migrations m
-     LEFT JOIN jev_dev.migration_digest d ON d.name = m.name
+     LEFT JOIN rover_dev.migration_digest d ON d.name = m.name
      ORDER BY m.name`,
   )
   const drift: string[] = []
@@ -136,7 +136,7 @@ async function findDrift(executor: SQLExecutor, directory: string): Promise<stri
 
 async function recordDigest(executor: SQLExecutor, name: string, digest: string): Promise<void> {
   await executor.query(
-    `INSERT INTO jev_dev.migration_digest (name, digest) VALUES ($1, $2)
+    `INSERT INTO rover_dev.migration_digest (name, digest) VALUES ($1, $2)
      ON CONFLICT (name) DO UPDATE SET digest = excluded.digest, recorded_at = now()`,
     [name, digest],
   )

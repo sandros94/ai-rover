@@ -626,7 +626,7 @@ const round = (v: Vec3): Vec3 => v.map((x) => Math.round(x * 1e6) / 1e6 + 0) as 
 
 // ---------------------------------------------------------------------------------------------
 
-const src = process.argv[2] ?? join(tmpdir(), `jev-rover-urdf-${COMMIT.slice(0, 7)}`)
+const src = process.argv[2] ?? join(tmpdir(), `ai-rover-urdf-${COMMIT.slice(0, 7)}`)
 mkdirSync(src, { recursive: true })
 const work = mkdtempSync(join(src, 'build-'))
 await ensureSources(src, [])

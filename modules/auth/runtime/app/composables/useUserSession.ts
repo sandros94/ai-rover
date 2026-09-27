@@ -7,7 +7,7 @@ import type { UserSession } from '../../types'
  * and re-read with `fetch()` after anything that changes it server-side.
  */
 export function useUserSession() {
-  const session = useState<UserSession>('jev-user-session', () => ({}))
+  const session = useState<UserSession>('rover-user-session', () => ({}))
   const request = useRequestFetch()
   // During SSR the request fetch does not carry the visitor's cookies on its own.
   const cookie = useRequestHeaders(['cookie'])

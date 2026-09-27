@@ -3,7 +3,7 @@ import { databaseRefusal } from '../utils/migrate'
 
 export default defineHandler(async (event) => {
   // The Database tab carries the remedy, so a refused database must not refuse it.
-  if (event.url.pathname.startsWith('/__jev/db/')) return
+  if (event.url.pathname.startsWith('/__rover/db/')) return
   const refusal = await databaseRefusal()
   if (refusal) throw new HTTPError(refusal, { status: 503 })
 })

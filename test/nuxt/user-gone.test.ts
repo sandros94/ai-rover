@@ -40,7 +40,7 @@ registerEndpoint('/api/mission/likes', () => ({ roundId: 'r1', submissionIds: []
 registerEndpoint('/api/mission/submissions', { method: 'POST', handler: GONE })
 
 function signIn() {
-  useState('jev-user-session').value = {
+  useState('rover-user-session').value = {
     user: { id: ADA.id, displayName: 'Ada', providers: ['github'] },
     loggedInAt: 1,
   }
@@ -53,7 +53,7 @@ function mount(component: Component, props: Record<string, unknown>) {
 }
 
 afterEach(() => {
-  useState('jev-user-session').value = {}
+  useState('rover-user-session').value = {}
   sessionReads = 0
   vi.restoreAllMocks()
 })
@@ -120,7 +120,7 @@ describe('a session whose account is gone', () => {
     await vi.waitFor(() => expect(wrapper.find('[data-test=like-error]').exists()).toBe(true))
     expect(wrapper.find('[data-test=like-error]').text()).toBe(MESSAGE)
     expect(sessionReads).toBeGreaterThan(0)
-    expect(useState('jev-user-session').value).toEqual({})
+    expect(useState('rover-user-session').value).toEqual({})
     // Signed out now: the card asks to sign in.
     expect(wrapper.find('[data-test=like]').attributes('href')).toBe('/login')
   })
@@ -136,7 +136,7 @@ describe('a session whose account is gone', () => {
     await wrapper.find('[data-test=flag]').trigger('click')
     await vi.waitFor(() => expect(wrapper.find('[data-test=flag-error]').exists()).toBe(true))
     expect(wrapper.find('[data-test=flag-error]').text()).toBe(MESSAGE)
-    expect(useState('jev-user-session').value).toEqual({})
+    expect(useState('rover-user-session').value).toEqual({})
   })
 
   it('keeps the message as the refusal of a submission and reads the session again', async () => {
@@ -163,6 +163,6 @@ describe('a session whose account is gone', () => {
     await flow.confirm()
     expect(flow.refusal.value).toEqual({ reason: 'USER_GONE', message: MESSAGE })
     expect(sessionReads).toBeGreaterThan(0)
-    expect(useState('jev-user-session').value).toEqual({})
+    expect(useState('rover-user-session').value).toEqual({})
   })
 })

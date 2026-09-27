@@ -2,7 +2,7 @@
 const { data, error } = await useFetch('/api/community')
 const members = computed(() => data.value?.members ?? [])
 
-useSeoMeta({ title: 'Community · Jev Rover' })
+useSeoMeta({ title: 'Community · AI Rover' })
 </script>
 
 <template>

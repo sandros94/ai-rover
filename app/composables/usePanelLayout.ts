@@ -39,7 +39,7 @@ const SAVE_DELAY_MS = 250
  * not remembered.
  */
 export function usePanelLayout() {
-  const layout = useState<PanelLayout | null>('jev-rover:panels', () => null)
+  const layout = useState<PanelLayout | null>('ai-rover:panels', () => null)
   let timer: ReturnType<typeof setTimeout> | undefined
 
   function write(): void {

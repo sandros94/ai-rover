@@ -14,7 +14,7 @@ import { isSameOrigin } from '../utils/origin'
 import { MissionExistsError, seedLocalMission } from '../utils/seed'
 import { databaseStatus } from '../utils/status'
 
-const PREFIX = '/__jev/db'
+const PREFIX = '/__rover/db'
 
 const finite = v.pipe(v.number(), v.finite())
 

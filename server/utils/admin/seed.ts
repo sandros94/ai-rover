@@ -51,7 +51,7 @@ export function defineAdminSeedHandlerWith(context: AdminContext) {
     try {
       const landed = await db.transaction(async (tx) => {
         // Serialises landings, so two at once cannot both find the database empty.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('jev-mission-landing'))`)
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('rover-mission-landing'))`)
         const [existing] = await tx.select({ id: mission.id }).from(mission).limit(1)
         if (existing) {
           throw new HTTPError({

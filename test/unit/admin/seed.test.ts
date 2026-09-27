@@ -13,7 +13,7 @@ import { createTestDb, memoryStore, tableCounts } from '../mission/helpers'
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const TOKEN = 'operator-token-for-tests-0123456789'
-const ORIGIN = 'https://jev.test'
+const ORIGIN = 'https://rover.test'
 
 let db: DB
 let close: () => Promise<void>

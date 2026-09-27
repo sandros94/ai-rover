@@ -45,7 +45,7 @@ const emit = defineEmits<{ toggle: []; live: []; closeDetail: [] }>()
 const view = defineModel<MapViewMode>('view', { required: true })
 
 /** Kept across pages and stop changes, which remount the HUD; not across visits. */
-const hud = useState('jev-rover:hud', () => ({ visible: true, instruments: false, vote: false }))
+const hud = useState('ai-rover:hud', () => ({ visible: true, instruments: false, vote: false }))
 const wide = useWideViewport()
 const panelLayout = usePanelLayout()
 const { layout } = panelLayout
@@ -155,7 +155,7 @@ defineShortcuts(
     <SiteHeader class="h-12 shrink-0 border-b border-(--ui-border) px-2 sm:px-3">
       <template #title>
         <slot name="title">
-          <NuxtLink to="/" class="truncate text-base font-semibold sm:text-lg">Jev Rover</NuxtLink>
+          <NuxtLink to="/" class="truncate text-base font-semibold sm:text-lg">AI Rover</NuxtLink>
         </slot>
       </template>
       <ViewToggle v-model="view" />

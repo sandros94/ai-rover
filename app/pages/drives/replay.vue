@@ -42,10 +42,10 @@ const DriveReplay = defineAsyncComponent(() =>
 useSeoMeta({
   title: () => {
     const drives = data.value?.drives
-    if (!drives) return 'Replay · Jev Rover'
+    if (!drives) return 'Replay · AI Rover'
     const first = drives[0]!.number
     const last = drives.at(-1)!.number
-    return first === last ? `Segment ${first} · Jev Rover` : `Segments ${first}–${last} · Jev Rover`
+    return first === last ? `Segment ${first} · AI Rover` : `Segments ${first}–${last} · AI Rover`
   },
 })
 </script>

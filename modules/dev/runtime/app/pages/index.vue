@@ -6,7 +6,7 @@ const TOOLS = [
   {
     title: 'Database',
     description: 'Status, migrate, reset, seed',
-    to: '/__jev/db',
+    to: '/__rover/db',
     external: true,
   },
   {

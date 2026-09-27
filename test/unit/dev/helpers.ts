@@ -33,7 +33,7 @@ export async function startLocalDatabase(): Promise<{
 
 /** A disposable copy of the generated migrations, free to edit or delete. */
 export async function copyMigrations(): Promise<{ dir: string; remove: () => Promise<void> }> {
-  const root = await mkdtemp(join(tmpdir(), 'jev-migrations-'))
+  const root = await mkdtemp(join(tmpdir(), 'rover-migrations-'))
   const dir = join(root, 'migrations')
   await cp(MIGRATIONS_DIR, dir, { recursive: true })
   return { dir, remove: () => rm(root, { recursive: true, force: true }) }

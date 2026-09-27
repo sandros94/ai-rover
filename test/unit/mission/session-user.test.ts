@@ -25,7 +25,7 @@ beforeAll(async () => {
 })
 afterAll(() => close())
 
-const COOKIE = '__Host-jev-session'
+const COOKIE = '__Host-rover-session'
 
 /** A mission route for the signed-in user that names who it acted for. */
 type Handler = (event: unknown, context: { user: { id: string } }) => Promise<string>

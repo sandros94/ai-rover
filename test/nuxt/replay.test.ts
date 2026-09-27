@@ -119,7 +119,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const wrapper of attached.splice(0)) wrapper.unmount()
-  useState('jev-rover:hud').value = { visible: true, instruments: false, vote: false }
+  useState('ai-rover:hud').value = { visible: true, instruments: false, vote: false }
   localStorage.clear()
   vi.restoreAllMocks()
   document.body.innerHTML = ''

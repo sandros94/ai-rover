@@ -12,7 +12,7 @@ const page = computed({
 })
 const { data, error } = await useJourneyPage(page)
 
-useSeoMeta({ title: 'Journey · Jev Rover' })
+useSeoMeta({ title: 'Journey · AI Rover' })
 </script>
 
 <template>

@@ -2,7 +2,7 @@
 export type MapViewMode = '2d' | '3d'
 
 /** Browser storage key of the visitor's last choice. */
-export const MAP_VIEW_KEY = 'jev-rover:map-view'
+export const MAP_VIEW_KEY = 'ai-rover:map-view'
 
 /**
  * The map view the visitor last chose, the scene by default. Read from `localStorage` once mounted, so

@@ -39,7 +39,7 @@ describe('user session', () => {
   it('round-trips through the real cookie with small flat claims', async () => {
     const app = appOver(createUserSessions({ key: KEY, dev: false }))
     const login = await app.request(`${ORIGIN}/login`, { method: 'POST' })
-    const cookie = setCookies(login)['__Host-jev-session']!
+    const cookie = setCookies(login)['__Host-rover-session']!
     expect(cookie.attributes).toMatchObject({
       path: '/',
       httponly: true,
@@ -107,15 +107,15 @@ describe('user session', () => {
     vi.setSystemTime(new Date('2026-09-01T00:00:00Z'))
     const app = appOver(createUserSessions({ key: KEY, dev: false }))
     const login = await app.request(`${ORIGIN}/login`, { method: 'POST' })
-    const first = await openCookie(setCookies(login)['__Host-jev-session']!.value)
+    const first = await openCookie(setCookies(login)['__Host-rover-session']!.value)
 
     vi.setSystemTime(new Date('2026-09-02T00:00:00Z'))
     const early = await app.request(`${ORIGIN}/me`, { headers: { cookie: cookieHeader(login) } })
-    expect(setCookies(early)['__Host-jev-session']).toBeUndefined()
+    expect(setCookies(early)['__Host-rover-session']).toBeUndefined()
 
     vi.setSystemTime(new Date('2026-09-07T00:00:00Z'))
     const late = await app.request(`${ORIGIN}/me`, { headers: { cookie: cookieHeader(login) } })
-    const refreshed = await openCookie(setCookies(late)['__Host-jev-session']!.value)
+    const refreshed = await openCookie(setCookies(late)['__Host-rover-session']!.value)
     expect(refreshed.iat).toBeGreaterThan(first.iat as number)
     expect(refreshed.jti).not.toBe(first.jti)
     expect(refreshed.loggedInAt).toBe(first.loggedInAt)
@@ -135,21 +135,21 @@ describe('user session', () => {
         return 'ok'
       })
     const login = await app.request(`${ORIGIN}/login`, { method: 'POST' })
-    const first = await openCookie(setCookies(login)['__Host-jev-session']!.value)
+    const first = await openCookie(setCookies(login)['__Host-rover-session']!.value)
 
     vi.setSystemTime(new Date('2026-09-01T01:00:00Z'))
     const renamed = await app.request(`${ORIGIN}/rename`, {
       method: 'POST',
       headers: { cookie: cookieHeader(login) },
     })
-    const second = await openCookie(setCookies(renamed)['__Host-jev-session']!.value)
+    const second = await openCookie(setCookies(renamed)['__Host-rover-session']!.value)
     expect(second).toMatchObject({ displayName: 'Ada L.', loggedInAt: first.loggedInAt })
 
     const switched = await app.request(`${ORIGIN}/switch`, {
       method: 'POST',
       headers: { cookie: cookieHeader(login, renamed) },
     })
-    const third = await openCookie(setCookies(switched)['__Host-jev-session']!.value)
+    const third = await openCookie(setCookies(switched)['__Host-rover-session']!.value)
     expect(third.sub).toBe('someone-else')
     expect(third.loggedInAt).toBeGreaterThan(first.loggedInAt as number)
   })
@@ -200,7 +200,7 @@ describe('session key', () => {
       )
     }
     expect(() =>
-      createUserSessions({ key: 'jev-rover development session key', dev: false }),
+      createUserSessions({ key: 'ai-rover development session key', dev: false }),
     ).toThrow(/public development seed/)
   })
 
@@ -211,7 +211,7 @@ describe('session key', () => {
     const a = appOver(fresh.createUserSessions({ key: '', dev: true }))
     const b = appOver(fresh.createUserSessions({ key: '', dev: true }))
     const login = await a.request('http://localhost:3000/login', { method: 'POST' })
-    const cookie = setCookies(login)['jev-session']!
+    const cookie = setCookies(login)['rover-session']!
     expect(cookie.attributes.secure).toBeUndefined()
     expect(cookie.attributes.httponly).toBe(true)
     const me = await b.request('http://localhost:3000/me', {

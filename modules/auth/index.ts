@@ -27,7 +27,7 @@ const SERVER_UTILS = [
  * Configured through `runtimeConfig.sessionKey` and `runtimeConfig.oauth`.
  */
 export default defineNuxtModule({
-  meta: { name: 'jev-auth' },
+  meta: { name: 'rover-auth' },
   setup(_options, nuxt) {
     const resolver = createResolver(import.meta.url)
 

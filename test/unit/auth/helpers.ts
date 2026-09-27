@@ -5,7 +5,7 @@ import { createAuthContext } from '~~/modules/auth/runtime/server/lib/context'
 /** A fresh production-shaped session key, as `NUXT_SESSION_KEY` carries it. */
 export const KEY = JSON.stringify(await generateJWK('A256GCM'))
 
-export const ORIGIN = 'https://jev.test'
+export const ORIGIN = 'https://rover.test'
 
 export interface SetCookie {
   value: string

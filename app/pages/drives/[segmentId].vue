@@ -11,7 +11,7 @@ const DriveReplay = defineAsyncComponent(() =>
 
 useSeoMeta({
   title: () =>
-    data.value ? `Segment ${data.value.drive.number} · Jev Rover` : 'Segment · Jev Rover',
+    data.value ? `Segment ${data.value.drive.number} · AI Rover` : 'Segment · AI Rover',
 })
 </script>
 

@@ -65,7 +65,7 @@ describe('GitHub sign-in', () => {
       scope: '',
       allow_signup: 'true',
     })
-    const flow = setCookies(res)['__Host-jev-oauth']!
+    const flow = setCookies(res)['__Host-rover-oauth']!
     expect(flow.attributes).toMatchObject({ httponly: true, secure: true, samesite: 'Lax' })
     expect(Number(flow.attributes['max-age'])).toBe(600)
     const sealed = await openCookie(flow.value)
@@ -151,8 +151,8 @@ describe('GitHub sign-in', () => {
       avatarUrl: 'https://gh.test/o.png',
     })
     const cookies = setCookies(callback)
-    expect(cookies['__Host-jev-oauth']!.value).toBe('')
-    const claims = await openCookie(cookies['__Host-jev-session']!.value)
+    expect(cookies['__Host-rover-oauth']!.value).toBe('')
+    const claims = await openCookie(cookies['__Host-rover-session']!.value)
     expect(claims).toMatchObject({ sub: user!.id, providers: ['github'], handle: 'octo' })
     expect(JSON.stringify(claims)).not.toContain('gho_secret')
   })
@@ -167,7 +167,7 @@ describe('GitHub sign-in', () => {
         `${ORIGIN}/api/auth/github?code=c${k}&state=${location.searchParams.get('state')}`,
         { headers: { cookie: cookieHeader(res) } },
       )
-      ids.push((await openCookie(setCookies(callback)['__Host-jev-session']!.value)).sub)
+      ids.push((await openCookie(setCookies(callback)['__Host-rover-session']!.value)).sub)
     }
     expect(ids[0]).toBe(ids[1])
   })
@@ -186,7 +186,7 @@ describe('GitHub sign-in', () => {
     expect(await findUserByIdentity(db, { provider: 'github', subject: '777' })).toMatchObject({
       id: existing.id,
     })
-    const claims = await openCookie(setCookies(callback)['__Host-jev-session']!.value)
+    const claims = await openCookie(setCookies(callback)['__Host-rover-session']!.value)
     expect(claims).toMatchObject({ sub: existing.id, providers: ['atproto', 'github'] })
   })
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { isSameOrigin } from '~~/modules/dev/runtime/server/utils/origin'
 
 const request = (host: string, headers: Record<string, string>) =>
-  new Request(`http://${host}/__jev/db/reset`, { method: 'POST', headers })
+  new Request(`http://${host}/__rover/db/reset`, { method: 'POST', headers })
 
 describe('isSameOrigin', () => {
   it('accepts an Origin, or a Referer when no Origin is sent, on the dev server itself', () => {

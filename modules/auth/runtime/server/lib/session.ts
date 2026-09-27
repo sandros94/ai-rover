@@ -62,7 +62,7 @@ export function createUserSessionsWithKey(key: SessionKey, dev: boolean): UserSe
     defined ??= key().then((jwk) =>
       defineSession<Claims>({
         key: jwk,
-        name: cookieName('jev-session', dev),
+        name: cookieName('rover-session', dev),
         maxAge: SESSION_MAX_AGE_SECONDS,
         cookie: { httpOnly: true, secure: !dev, sameSite: 'lax', path: '/' },
         jwe: sealingOptions(),

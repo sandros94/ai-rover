@@ -55,7 +55,7 @@ describe('migrateLocalDatabase', () => {
     )
     expect(
       await rows<{ name: string; digest: string }>(
-        sql`select name, digest from jev_dev.migration_digest order by name`,
+        sql`select name, digest from rover_dev.migration_digest order by name`,
       ),
     ).toEqual(digests)
 
@@ -68,7 +68,7 @@ describe('migrateLocalDatabase', () => {
   it('refuses when the recorded digest no longer matches the file', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     await migrateLocalDatabase(local.url, migrations.dir)
-    await useDB().execute(sql`update jev_dev.migration_digest set digest = 'tampered'`)
+    await useDB().execute(sql`update rover_dev.migration_digest set digest = 'tampered'`)
 
     const refusal = await migrateLocalDatabase(local.url, migrations.dir)
     expect(refusal).toContain(`${INIT} was edited after this database applied it`)
@@ -98,10 +98,10 @@ describe('migrateLocalDatabase', () => {
   it('records a digest for an applied migration it has none for', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     await migrateLocalDatabase(local.url, migrations.dir)
-    await useDB().execute(sql`delete from jev_dev.migration_digest`)
+    await useDB().execute(sql`delete from rover_dev.migration_digest`)
 
     expect(await migrateLocalDatabase(local.url, migrations.dir)).toBeNull()
-    expect(await rows(sql`select name from jev_dev.migration_digest order by name`)).toEqual(
+    expect(await rows(sql`select name from rover_dev.migration_digest order by name`)).toEqual(
       MIGRATIONS.map((name) => ({ name })),
     )
   })
@@ -163,7 +163,9 @@ describe('prepareLocalDatabase and resetLocalDatabase', () => {
     ).toEqual([])
     const names = MIGRATIONS.map((name) => ({ name }))
     expect(await rows(sql`select name from netlify.migrations order by name`)).toEqual(names)
-    expect(await rows(sql`select name from jev_dev.migration_digest order by name`)).toEqual(names)
+    expect(await rows(sql`select name from rover_dev.migration_digest order by name`)).toEqual(
+      names,
+    )
   })
 
   it('refuses to reset a database that is not on this machine', async () => {

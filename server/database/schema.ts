@@ -323,7 +323,7 @@ export const missionPause = snakeCase.table(
  * Jev's answers by request hash (SHA-256 of model, state and questions), so an identical
  * submission is never paid for twice. Rows never change once written.
  */
-export const jevJudgment = snakeCase.table('jev_judgment', {
+export const aiJudgment = snakeCase.table('ai_judgment', {
   hash: text().primaryKey(),
   model: text().notNull(),
   answers: jsonb().$type<JudgedAnswers>().notNull(),
@@ -341,7 +341,7 @@ export const schema = {
   segment,
   segmentFlag,
   missionPause,
-  jevJudgment,
+  aiJudgment,
 }
 
 export const relations = defineRelations(schema, (r) => ({
@@ -441,6 +441,6 @@ export type SubmissionLike = typeof submissionLike.$inferSelect
 export type Segment = typeof segment.$inferSelect
 export type NewSegment = typeof segment.$inferInsert
 export type SegmentStatus = (typeof SEGMENT_STATUSES)[number]
-export type JevJudgment = typeof jevJudgment.$inferSelect
+export type AiJudgment = typeof aiJudgment.$inferSelect
 export type SegmentFlag = typeof segmentFlag.$inferSelect
 export type MissionPause = typeof missionPause.$inferSelect
