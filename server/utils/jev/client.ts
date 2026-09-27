@@ -8,6 +8,9 @@ import { JUDGE_UNAVAILABLE, JudgeError } from './errors'
 import { JUDGE_QUESTIONS } from './questions'
 
 /** Pinned model: answers are reproducible only within one model version. */
+/** TypeSafe's public API; requests never go anywhere else whatever the environment says. */
+export const TYPESAFE_API_URL = 'https://api.typesafe.ai'
+
 export const JEV_MODEL = 'jev-1.13.0'
 
 /** Largest summary judged, in JSON characters; Jev's accuracy drops as the state grows. */
@@ -55,6 +58,8 @@ export interface JevCache {
 }
 
 export interface JevClientOptions {
+  /** Where the API lives; the public endpoint unless a test points elsewhere. */
+  baseURL?: string
   /** TypeSafe API key; empty or missing throws `NOT_CONFIGURED`. */
   apiKey: string | undefined
   fetch?: Fetch
@@ -110,8 +115,14 @@ export function createJevClient(options: JevClientOptions): JevClient {
   }
   const { rejectBelow = 0.2, acceptAbove = 0.8 } = options.verdict ?? {}
   const { cache } = options
+  /*
+   * The base URL is pinned: the SDK would otherwise take it from the environment, and a hosting
+   * platform's AI gateway can inject a provider URL of its own there, which then refuses this
+   * project's key.
+   */
   const client = new TypeSafeClient({
     apiKey,
+    baseURL: options.baseURL ?? TYPESAFE_API_URL,
     defaultModel: JEV_MODEL,
     ...(options.fetch && { fetch: options.fetch }),
     ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
