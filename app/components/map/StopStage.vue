@@ -64,6 +64,8 @@ const props = withDefaults(
      */
     objects?: readonly MapObject[]
     roverObject?: RoverObject
+    /** Time of the sol shown, 0.5 noon, for the 3D sun; the scene's own default without it. */
+    solFraction?: number
   }>(),
   {
     terrain: undefined,
@@ -88,6 +90,7 @@ const props = withDefaults(
     picked: null,
     objects: () => [],
     roverObject: undefined,
+    solFraction: undefined,
   },
 )
 
@@ -154,6 +157,7 @@ const sight = useCurrentSight(
       :reveals="reveals"
       :objects="objects"
       :rover-object="roverObject"
+      :lighting="{ solFraction }"
     />
     <div v-else :class="['relative', BLANK]">
       <TerrainProgress :ready="false" v-bind="loading" />
