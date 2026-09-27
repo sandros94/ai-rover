@@ -20,7 +20,8 @@ const DiskScene = defineAsyncComponent({
 
 /**
  * A stop disk drawn flat or in 3D, filling its box: the same rover, route, path driven, past
- * stops, deaths and fog in both. Picking and the pick ring are 2D only; the page owns the switch.
+ * stops, deaths and fog in both, and the survey's ring. Picking is 2D only; the page owns the
+ * switch.
  */
 const props = withDefaults(
   defineProps<{
@@ -52,8 +53,6 @@ const props = withDefaults(
     frame?: Float32Array
     keyframes?: KeyframeBlock
     t?: number
-    anchor?: MapPoint
-    ring?: { minM: number; maxM: number }
     submissions?: { id: string; goal: MapPoint; mine?: boolean }[]
     highlightId?: string | null
     preview?: PreviewResult
@@ -82,8 +81,6 @@ const props = withDefaults(
     frame: undefined,
     keyframes: undefined,
     t: 0,
-    anchor: undefined,
-    ring: undefined,
     submissions: () => [],
     highlightId: null,
     preview: undefined,
@@ -129,8 +126,6 @@ const sight = useCurrentSight(
       :sight="sight"
       :center="center"
       :radius="radius"
-      :anchor="anchor"
-      :ring="ring"
       :rover="rover"
       :trail="trail"
       :plan="plan"

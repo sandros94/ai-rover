@@ -16,7 +16,6 @@ describe('loadOrder', () => {
     })),
   }
   const center = { x: 100, y: 20 }
-  const ring = { minM: 50, maxM: 250 }
   const viewport = { x: -300, y: 60, halfSizeM: 40 }
 
   /** Brute force over the square's 1 m lattice, edges included. */
@@ -26,11 +25,7 @@ describe('loadOrder', () => {
     }
     return false
   }
-  const inRing = (c: ChunkCoords) =>
-    anyPoint(c, (x, y) => {
-      const d = Math.hypot(x - center.x, y - center.y)
-      return d >= ring.minM && d <= ring.maxM
-    })
+
   const inViewport = (c: ChunkCoords) =>
     anyPoint(
       c,
@@ -42,54 +37,42 @@ describe('loadOrder', () => {
     Math.hypot((c.cx + 0.5) * SIZE - p.x, (c.cy + 0.5) * SIZE - p.y)
   const key = (c: ChunkCoords) => `${c.cx},${c.cy}`
 
-  it('puts the viewport first, then the pick ring, then the rest by distance', () => {
-    const order = loadOrder(manifest, { center, ring, viewport })
+  const sortedBy = (list: ChunkCoords[], p: { x: number; y: number }) =>
+    list.every((c, k) => k === 0 || distance(list[k - 1]!, p) <= distance(c, p))
+
+  it('puts the viewport first, then the rest by distance from the centre', () => {
+    const order = loadOrder(manifest, { center, viewport })
     expect(order.map(key).toSorted()).toEqual(manifest.chunks.map(key).toSorted())
     const views = manifest.chunks.filter(inViewport)
-    const rings = manifest.chunks.filter((c) => !inViewport(c) && inRing(c))
     expect(views.length).toBeGreaterThan(0)
-    expect(rings.length).toBeGreaterThan(views.length)
     const first = order.slice(0, views.length)
-    const second = order.slice(views.length, views.length + rings.length)
-    const rest = order.slice(views.length + rings.length)
+    const rest = order.slice(views.length)
     expect(first.map(key).toSorted()).toEqual(views.map(key).toSorted())
-    expect(second.map(key).toSorted()).toEqual(rings.map(key).toSorted())
-    const sortedBy = (list: ChunkCoords[], p: { x: number; y: number }) =>
-      list.every((c, k) => k === 0 || distance(list[k - 1]!, p) <= distance(c, p))
     expect(sortedBy(first, viewport)).toBe(true)
-    expect(sortedBy(second, center)).toBe(true)
     expect(sortedBy(rest, center)).toBe(true)
   })
 
-  it('puts the ring first without a viewport, and leaves the manifest untouched', () => {
+  it('runs nearest the centre first without a viewport, and leaves the manifest untouched', () => {
     const before = JSON.stringify(manifest)
-    const order = loadOrder(manifest, { center, ring })
-    const rings = manifest.chunks.filter(inRing)
-    expect(order.slice(0, rings.length).map(key).toSorted()).toEqual(rings.map(key).toSorted())
+    const order = loadOrder(manifest, { center })
+    expect(sortedBy(order, center)).toBe(true)
     expect(JSON.stringify(manifest)).toBe(before)
     expect(order.every((c) => Object.keys(c).toSorted().join() === 'cx,cy')).toBe(true)
-    expect(loadOrder(manifest, { center, ring })).toEqual(order)
+    expect(loadOrder(manifest, { center })).toEqual(order)
   })
 
   it('takes the chunk size from the manifest', () => {
     const doubled = { ...manifest, world: { chunkSize: 2 * SIZE } }
     const near = { x: 4 * SIZE + 1, y: 1 }
-    const order = loadOrder(doubled, { center: near, ring: { minM: 0, maxM: 1 } })
+    const order = loadOrder(doubled, { center: near })
     expect(order[0]).toEqual({ cx: 2, cy: 0 })
-    expect(loadOrder(manifest, { center: near, ring: { minM: 0, maxM: 1 } })[0]).toEqual({
-      cx: 4,
-      cy: 0,
-    })
+    expect(loadOrder(manifest, { center: near })[0]).toEqual({ cx: 4, cy: 0 })
   })
 
-  it('refuses a non-positive chunk size or an inverted ring', () => {
+  it('refuses a non-positive chunk size or a centre that is not a point', () => {
     const cases: [typeof manifest, Parameters<typeof loadOrder>[1]][] = [
-      [
-        { ...manifest, world: { chunkSize: 0 } },
-        { center, ring },
-      ],
-      [manifest, { center, ring: { minM: 300, maxM: 250 } }],
-      [manifest, { center: { x: Number.NaN, y: 0 }, ring }],
+      [{ ...manifest, world: { chunkSize: 0 } }, { center }],
+      [manifest, { center: { x: Number.NaN, y: 0 } }],
     ]
     for (const [m, options] of cases) expect(() => loadOrder(m, options)).toThrow(ClientError)
   })

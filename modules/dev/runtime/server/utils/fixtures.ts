@@ -6,7 +6,7 @@ import { computeStopDisk, createRevealedMask, defineWorld, revealDisk } from '#s
 export const FIXTURE_NAMES = ['mars', 'jezero', 'gale'] as const
 
 const START = { x: 0, y: 0, headingRad: 0 }
-/** 150 m from the start, mid-range of the 50–250 m segment length. */
+/** 150 m from the start: about 1 h 30 min of driving, inside the 15 min to 2 h time band. */
 const GOAL = { x: 120, y: 90 }
 
 const records = new Map<string, SegmentRecord>()

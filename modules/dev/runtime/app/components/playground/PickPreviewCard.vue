@@ -22,8 +22,8 @@ const cases = computed(() => {
   const { x, y } = start.value
   return {
     'record goal': props.record.goal,
-    'too near': { x: x + 20, y: y + 10 },
-    'too far': { x: x + 300, y },
+    'too short': { x: x + 20, y: y + 10 },
+    'too long': { x: x + 300, y },
     'north 150 m': { x, y: y + 150 },
   }
 })

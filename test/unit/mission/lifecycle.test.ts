@@ -174,8 +174,9 @@ describe('an idle rover and the grace window', () => {
     await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     await m.tick(at(T0, 6 * MINUTE))
     const during = at(T0, 10 * MINUTE)
-    // 55 m from the anchor, 75 m from the stop the rover left: the band is the anchor's.
-    const far = await m.submit(m.bob.id, { x: 0, y: 75 }, during)
+    // About 25 min of driving from the anchor, over 30 min from the stop the rover left: the
+    // time band is measured from the anchor.
+    const far = await m.submit(m.bob.id, { x: 0, y: 62.5 }, during)
     expect(far.accepted).toBe(true)
     const beside = await m.submit(m.cy.id, { x: 20, y: 20 }, during)
     expect(beside.submission!.metrics.straightLineM).toBe(20)
@@ -281,10 +282,11 @@ describe('settlement', () => {
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     const beside = (await getOpenRound(db, m.missionId))!
     const during = at(T0, 10 * MINUTE)
-    // Against the anchor (0, 20) all three are in the band; from (0, 10) only Cy's still is.
-    const tooFar = await m.submit(m.bob.id, { x: 2, y: 80 }, during)
+    // From the anchor (0, 20) all three plan within the time band; from (0, 10) Bob's takes over
+    // 30 min and Dee's under 4 min, and only Cy's still fits.
+    const tooFar = await m.submit(m.bob.id, { x: 0, y: 66.25 }, during)
     const valid = await m.submit(m.cy.id, { x: 20, y: 20 }, during)
-    const tooNear = await m.submit(m.dee.id, { x: 0, y: -1 }, during)
+    const tooNear = await m.submit(m.dee.id, { x: 0, y: 7.5 }, during)
     for (const result of [tooFar, valid, tooNear]) expect(result.accepted).toBe(true)
     expect(valid.submission!.metrics.straightLineM).toBe(20)
     const asked = m.jev.summaries.length

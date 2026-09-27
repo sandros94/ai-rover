@@ -82,6 +82,7 @@ export const METRICS: NavMetrics = {
   meanSlopeDeg: 3,
   unrevealedFraction: 0,
   goalInFog: false,
+  estimatedDriveS: 2600,
   turnCount: 1,
   expansions: 120,
   computeMs: 0,

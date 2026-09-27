@@ -7,13 +7,12 @@ import { MissionError } from './errors'
  */
 export interface MissionRules {
   /**
-   * Radius of every stop disk, metres: the ground a stop publishes and goals are planned over.
-   * A goal made during a drive is in band from the anchor yet planned over the disk of the stop
-   * left, so the radius is at least twice `segmentDistanceBand.maxM`.
+   * Radius of every stop's survey, metres: the ground a stop publishes, and where a round's goals
+   * are picked and planned.
    */
   stopRadiusM: number
-  /** Allowed straight-line distance from the segment start to a submitted goal, metres. */
-  segmentDistanceBand: { minM: number; maxM: number }
+  /** Allowed planned drive time of a segment (the plan's `estimatedDriveS`), seconds. */
+  segmentTimeBand: { minS: number; maxS: number }
   failureZone: {
     /** A goal may not end within this distance of a death position. */
     destinationRadiusM: number
@@ -54,7 +53,7 @@ export interface MissionRules {
 
 export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   stopRadiusM: DEFAULT_STOP_RADIUS,
-  segmentDistanceBand: Object.freeze({ minM: 50, maxM: 250 }),
+  segmentTimeBand: Object.freeze({ minS: 15 * 60, maxS: 2 * 3600 }),
   failureZone: Object.freeze({
     destinationRadiusM: 30,
     pathRadiusM: 15,
@@ -78,19 +77,15 @@ export interface MapPoint {
   y: number
 }
 
-/** Why a goal is refused. Closed set. */
-export type GoalRefusal = 'too-near' | 'too-far' | 'near-death-zone'
+/** Why a goal is refused by rule. Closed set. */
+export type GoalRefusal = 'too-short' | 'too-long' | 'near-death-zone'
 
-/** The distance band is checked before the death zone. */
+/** A goal ending within the destination radius of a death is refused. */
 export function checkSubmissionGoal(
   goal: MapPoint,
-  options: { start: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules },
-): { ok: true } | { ok: false; reason: GoalRefusal } {
-  const { start, deaths, rules } = options
-  const distance = Math.hypot(goal.x - start.x, goal.y - start.y)
-  const { minM, maxM } = rules.segmentDistanceBand
-  if (distance < minM) return { ok: false, reason: 'too-near' }
-  if (distance > maxM) return { ok: false, reason: 'too-far' }
+  options: { deaths: readonly MapPoint[]; rules: MissionRules },
+): { ok: true } | { ok: false; reason: 'near-death-zone' } {
+  const { deaths, rules } = options
   const radius = rules.failureZone.destinationRadiusM
   for (const death of deaths) {
     if (Math.hypot(goal.x - death.x, goal.y - death.y) <= radius) {
@@ -98,6 +93,48 @@ export function checkSubmissionGoal(
     }
   }
   return { ok: true }
+}
+
+/**
+ * A planned drive time checked against `rules.segmentTimeBand`; a refusal says why in words,
+ * the estimate included. The bounds themselves are allowed.
+ */
+export function checkDriveTime(
+  estimatedS: number,
+  options: { rules: MissionRules },
+): { ok: true } | { ok: false; reason: 'too-short' | 'too-long'; message: string } {
+  if (!Number.isFinite(estimatedS) || estimatedS < 0) {
+    throw new MissionError(
+      'INVALID_INPUT',
+      `checkDriveTime: estimatedS is ${estimatedS}; pass the plan's estimated drive time, seconds ≥ 0.`,
+    )
+  }
+  const { minS, maxS } = options.rules.segmentTimeBand
+  const planned = `The planned drive takes about ${formatDriveTime(estimatedS)}`
+  if (estimatedS < minS) {
+    return {
+      ok: false,
+      reason: 'too-short',
+      message: `${planned}; a segment drives at least ${formatDriveTime(minS)}.`,
+    }
+  }
+  if (estimatedS > maxS) {
+    return {
+      ok: false,
+      reason: 'too-long',
+      message: `${planned}; a segment drives at most ${formatDriveTime(maxS)}.`,
+    }
+  }
+  return { ok: true }
+}
+
+/** A drive time in whole minutes, as "42 min", "2 h" or "1 h 05 min". */
+export function formatDriveTime(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours === 0) return `${rest} min`
+  return rest === 0 ? `${hours} h` : `${hours} h ${String(rest).padStart(2, '0')} min`
 }
 
 /**

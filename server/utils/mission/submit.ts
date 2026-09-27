@@ -25,7 +25,13 @@ import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
 export type SubmitResult =
   | { accepted: true; submission: Submission }
-  | { accepted: false; reason: SubmissionRefusal; submission: Submission | null }
+  | {
+      accepted: false
+      reason: SubmissionRefusal
+      submission: Submission | null
+      /** For `too-short` and `too-long`: the refusal in words, the estimate included. */
+      message?: string
+    }
 
 /** What a goal is planned over: a stop's disk, what was seen there, and where plans start. */
 export interface PlanningGround {
@@ -44,7 +50,10 @@ export interface PlanningGround {
 export async function assessGoal(
   ground: PlanningGround,
   options: { goal: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules; jev: JevClient },
-): Promise<{ ok: true; assessment: SubmissionAssessment } | { ok: false; reason: PlanRefusal }> {
+): Promise<
+  | { ok: true; assessment: SubmissionAssessment }
+  | { ok: false; reason: PlanRefusal; message?: string }
+> {
   const { world, disk, revealed, start } = ground
   const { goal, deaths, rules, jev } = options
   const planned = planGoal(disk, {
@@ -63,8 +72,8 @@ export async function assessGoal(
 }
 
 /**
- * Submits a goal to the mission's open round: the goal snapped to the nearest seen pathable vertex,
- * checked against the rules and the settled deaths, planned from the round's anchor over the
+ * Submits a goal to the mission's open round: the goal snapped (see `snapToPathable`), checked
+ * against the rules and the settled deaths, planned from the round's anchor over the
  * disk of its stop and what the rover had seen there, then judged by Jev. During a drive that is
  * the stop the rover left and its mask from before the drive, so nothing the drive discovers is
  * used. An accepted goal starts with its author's like. Throws `MISSION_PAUSED` while an operator
@@ -126,7 +135,10 @@ export async function submitGoal(
     rules: mission.config.rules,
     jev,
   })
-  if (!assessed.ok) return { accepted: false, reason: assessed.reason, submission: null }
+  if (!assessed.ok) {
+    const { reason, message } = assessed
+    return { accepted: false, reason, submission: null, ...(message && { message }) }
+  }
 
   const rejected = assessed.assessment.judgment.verdict === 'reject'
   let submission: Submission

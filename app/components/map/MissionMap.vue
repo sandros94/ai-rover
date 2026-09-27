@@ -94,10 +94,7 @@ const {
   terrain,
   revealed,
   error,
-} = useStopTerrain(props.state.mission.id, stop.index, {
-  center: anchor.value,
-  ring: rules.value.segmentDistanceBand,
-})
+} = useStopTerrain(props.state.mission.id, stop.index, { center: anchor.value })
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 watch(
@@ -191,8 +188,6 @@ const stage = computed((): StageProps => {
     frame: track.frame.value,
     keyframes: track.keyframes.value,
     t: track.t.value,
-    anchor: props.state.round ? anchor.value : undefined,
-    ring: rules.value.segmentDistanceBand,
     submissions: submissions.value,
     highlightId: props.highlight?.id ?? null,
     preview: preview.result.value,

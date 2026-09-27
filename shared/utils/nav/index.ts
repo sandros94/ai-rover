@@ -1,7 +1,7 @@
 export type { NavErrorCode } from './errors'
 export { NavError } from './errors'
 export type { CostMapOptions } from './costmap'
-export { buildCostMap } from './costmap'
+export { buildCostMap, DEFAULT_COST_MAP } from './costmap'
 export type { RouteFailureReason, RouteOptions, RouteResult } from './theta-star'
 export { findRoute } from './theta-star'
 export type { Motion, MotionOptions } from './motions'

@@ -2,9 +2,11 @@ export type { MissionErrorCode } from './errors'
 export { MissionError } from './errors'
 export type { GoalRefusal, MissionRules, MapPoint, RankEntry } from './rules'
 export {
+  checkDriveTime,
   checkPathClearOfDeaths,
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
+  formatDriveTime,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,

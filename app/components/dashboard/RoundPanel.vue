@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { rankRound } from '#shared/utils/client/instruments'
+import { formatDriveTime } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import VoteCard from './VoteCard.vue'
 
@@ -11,6 +12,11 @@ const highlightId = defineModel<string | null>('highlightId', { default: null })
 
 const { loggedIn, user } = useUserSession()
 const round = computed(() => props.state.round)
+/** The planned drive time a destination must fit, in words. */
+const timeBand = computed(() => {
+  const { minS, maxS } = props.state.mission.rules.segmentTimeBand
+  return `${formatDriveTime(minS)} to ${formatDriveTime(maxS)}`
+})
 
 /** Standing order: the submission that would win now comes first. */
 const ranked = computed(() => {
@@ -71,11 +77,12 @@ async function like(id: string, on: boolean): Promise<void> {
     </p>
     <p v-else-if="ranked.length === 0" data-test="round-empty" class="text-sm text-muted">
       <template v-if="state.segment">
-        No destinations yet for the next drive: pick one inside the ring around the planned goal.
+        No destinations yet for the next drive: pick one inside the survey ring, a drive of
+        {{ timeBand }}.
       </template>
       <template v-else>
         The rover is idle at stop {{ state.currentStop.index }}: the first destination picked inside
-        the ring starts a {{ Math.round(state.mission.rules.graceWindowMs / 60_000) }}-minute
+        the survey ring starts a {{ Math.round(state.mission.rules.graceWindowMs / 60_000) }}-minute
         planning phase.
       </template>
     </p>

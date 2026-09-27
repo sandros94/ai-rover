@@ -38,6 +38,8 @@ describe('driveSegment on flat ground', () => {
     expect(Math.abs(outcome.durationS - 3030) / 3030).toBeLessThan(0.05)
     // Driving time alone is distance over the AutoNav rate; the rest is the three imaging stops.
     expect(outcome.durationS).toBeCloseTo(100 / 0.033 + 3 * 30, -1)
+    // The plan's estimate is the same sum, so on flat, seen ground it is the drive's time.
+    expect(record.plan.metrics.estimatedDriveS).toBeCloseTo(outcome.durationS, -1)
     expect(stats.simSteps).toBeGreaterThan(0)
     expect(stats.replans).toBe(0)
     expect(stats.computeMs).toBeGreaterThanOrEqual(0)

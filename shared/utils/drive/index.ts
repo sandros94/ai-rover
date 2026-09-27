@@ -1,6 +1,6 @@
 export type { DriveErrorCode } from './errors'
 export { DriveError } from './errors'
-export { estimatedDriveMinutes } from './estimate'
+
 export type { KeyframeBlock } from './keyframes'
 export {
   decodeKeyframes,
@@ -20,15 +20,10 @@ export type {
   DriveStats,
   SegmentRecord,
   SlipModel,
-  SpeedModel,
-  StopModel,
 } from './segment'
-export {
-  DEFAULT_SLIP_MODEL,
-  DEFAULT_SPEED_MODEL,
-  DEFAULT_STOP_MODEL,
-  driveSegment,
-} from './segment'
+export { DEFAULT_SLIP_MODEL, driveSegment } from './segment'
+export type { SpeedModel, StopModel } from './models'
+export { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from './models'
 export type { DriveStatus, StatusRun } from './status'
 export { statusAt, statusRuns } from './status'
 export type { JourneyKey } from './keys'

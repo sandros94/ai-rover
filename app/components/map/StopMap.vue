@@ -56,9 +56,6 @@ const props = withDefaults(
     /** The survey: ground beyond `radius` of `center` is not drawn, only a ring at its edge. */
     center: MapPoint
     radius: number
-    /** Where picks are measured from, with the allowed distance band around it. */
-    anchor?: MapPoint
-    ring?: { minM: number; maxM: number }
     rover?: { x: number; y: number; headingRad: number }
     trail?: MapPoint[]
     /** The route being driven. */
@@ -83,8 +80,6 @@ const props = withDefaults(
     terrain: undefined,
     seen: undefined,
     sight: undefined,
-    anchor: undefined,
-    ring: undefined,
     rover: undefined,
     trail: () => [],
     plan: () => [],
@@ -498,14 +493,6 @@ const points = (line: readonly MapPoint[]) =>
     .map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`)
     .join(' ')
 
-const ringPath = computed(() => {
-  if (!view.value || !props.anchor || !props.ring) return ''
-  const { x, y } = toScreen(props.anchor)
-  const circle = (r: number) =>
-    `M ${x - r} ${y} a ${r} ${r} 0 1 0 ${2 * r} 0 a ${r} ${r} 0 1 0 ${-2 * r} 0 Z`
-  return `${circle(scaled(props.ring.maxM))} ${circle(scaled(props.ring.minM))}`
-})
-
 const slopeClass = (degrees: number | null) =>
   degrees === null
     ? 'stroke-(--ui-text-muted)'
@@ -785,13 +772,6 @@ const focusRing = computed(() => {
         :r="scaled(radius)"
         class="fill-none stroke-(--ui-text-muted)"
         stroke-width="1"
-      />
-      <path
-        v-if="ringPath"
-        :d="ringPath"
-        fill-rule="evenodd"
-        class="fill-(--ui-primary)/10 stroke-(--ui-primary)"
-        stroke-width="1.5"
       />
       <polyline
         v-if="trail.length > 1"

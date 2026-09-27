@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import { estimatedDriveMinutes } from '../drive/estimate'
+
 import type { StopDisk } from '../terrain/disk'
 import type { World } from '../terrain/world'
 import { NavError } from './errors'
@@ -30,7 +30,7 @@ const ROVER = {
 } as const
 
 const MISSION_RULES =
-  'A segment goes from the current stop to a destination 50 to 250 m away. The rover plans only over ground it has already seen; unseen ground is uncertain and the drive stops safely if it turns out impassable.'
+  'A segment goes from the current stop to a destination within 500 m whose planned drive takes 15 minutes to 2 hours. The destination may lie on unseen ground. The rover plans over what it has seen and treats unseen ground as uncertain; the drive stops safely if it turns out impassable.'
 
 const FAILURE_REASONS: Record<RouteFailureReason, string> = {
   'goal-blocked': 'The destination lies on ground the rover has seen and knows to be impassable.',
@@ -54,7 +54,7 @@ const ReachedRouteSchema = v.strictObject({
   turns_in_place: wholeMetres,
   /** Over the seen part of the path. */
   loose_ground_label: v.picklist(LOOSE_GROUND_LABELS),
-  /** Path at the AutoNav rate plus imaging stops and turns in place; slope slowdown comes on top. */
+  /** The plan's estimated drive time, the one the mission's time band is checked against. */
   estimated_drive_minutes: wholeMetres,
 })
 
@@ -175,7 +175,7 @@ export function summarizeSubmission(
       unseen_label: unseenLabel(metrics.unrevealedFraction),
       turns_in_place: metrics.turnCount,
       loose_ground_label: looseGroundLabel(meanLooseness),
-      estimated_drive_minutes: estimatedDriveMinutes(plan),
+      estimated_drive_minutes: Math.round(metrics.estimatedDriveS / 60),
     },
   }
 }

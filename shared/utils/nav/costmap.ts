@@ -9,6 +9,12 @@ export interface CostMapOptions {
   unrevealedPenalty?: number
 }
 
+/** The cost map a plan uses for omitted fields. */
+export const DEFAULT_COST_MAP: Readonly<Required<CostMapOptions>> = Object.freeze({
+  slopeWeight: 4,
+  unrevealedPenalty: 3,
+})
+
 /**
  * Traversal cost per disk-grid vertex, at least 1 wherever finite. A revealed vertex costs
  * `1 + slopeWeight · (tan slope / tan slopeLimit)²`, or `Infinity` when untraversable. An
@@ -21,7 +27,12 @@ export function buildCostMap(
   disk: StopDisk,
   options: { revealed: Uint8Array; slopeLimitDeg: number } & CostMapOptions,
 ): Float32Array {
-  const { revealed, slopeLimitDeg, slopeWeight = 4, unrevealedPenalty = 3 } = options
+  const {
+    revealed,
+    slopeLimitDeg,
+    slopeWeight = DEFAULT_COST_MAP.slopeWeight,
+    unrevealedPenalty = DEFAULT_COST_MAP.unrevealedPenalty,
+  } = options
   const { grid, traversable, inside } = disk
   const { width, height } = grid
   if (revealed.length !== width * height) {

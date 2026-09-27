@@ -9,7 +9,7 @@ import {
   groundView,
   loadOrder,
 } from '#shared/utils/client'
-import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+
 import type { Chunk, RevealedMask, StopManifest } from '#shared/utils/terrain'
 import { revealedOverDisk } from '#shared/utils/terrain'
 import { useJourneyClient } from './useJourneyClient'
@@ -27,8 +27,8 @@ export const GROUND_VIEW_HZ = 10
 /**
  * A stop's terrain in the browser: manifest, revealed mask, and its chunks loaded progressively,
  * from the stop's disk pack in one request when most of the disk is not held yet, else (or for a
- * stop without a pack) chunk by chunk, the viewport and the pick ring around `center` (default:
- * the stop) first. `loaded` counts loaded chunks; `ground` is the disk as it arrives, at most
+ * stop without a pack) chunk by chunk, the viewport first, then nearest `center` (default: the
+ * stop). `loaded` counts loaded chunks; `ground` is the disk as it arrives, at most
  * {@link GROUND_VIEW_HZ} views a second, for views that draw it chunk by chunk; `terrain` is the
  * stitched disk once every chunk is in, and `revealed` the stop's mask over the disk, one byte per
  * disk vertex, as soon as the mask is in.
@@ -42,7 +42,6 @@ export function useStopTerrain(
   stopIndex: MaybeRefOrGetter<number>,
   options: {
     center?: { x: number; y: number }
-    ring?: { minM: number; maxM: number }
     viewport?: { x: number; y: number; halfSizeM: number }
   } = {},
 ) {
@@ -103,7 +102,6 @@ export function useStopTerrain(
   const orderOf = (stop: StopManifest) =>
     loadOrder(stop, {
       center: options.center ?? { x: stop.stop.x, y: stop.stop.y },
-      ring: options.ring ?? DEFAULT_MISSION_RULES.segmentDistanceBand,
       viewport: options.viewport,
     })
 

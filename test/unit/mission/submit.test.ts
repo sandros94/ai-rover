@@ -44,17 +44,23 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
 }
 
 describe('submitGoal', () => {
-  it('refuses goals outside the distance band without asking Jev', async () => {
+  it('refuses drives planned under 4 min or over 30 min without asking Jev, saying how long', async () => {
     const { ada, submit, jev, round } = await landed()
     expect(await submit(ada.id, { x: 0, y: 5 })).toEqual({
       accepted: false,
-      reason: 'too-near',
+      reason: 'too-short',
       submission: null,
+      message: expect.stringMatching(
+        /^The planned drive takes about \d+ min; a segment drives at least 4 min\.$/,
+      ),
     })
     expect(await submit(ada.id, { x: 0, y: 75 })).toEqual({
       accepted: false,
-      reason: 'too-far',
+      reason: 'too-long',
       submission: null,
+      message: expect.stringMatching(
+        /^The planned drive takes about \d+ min; a segment drives at most 30 min\.$/,
+      ),
     })
     expect(jev.summaries).toHaveLength(0)
     expect(await listRoundSubmissions(db, round.id)).toEqual([])
@@ -224,7 +230,7 @@ describe('submitGoal', () => {
       await withdrawSubmission(db, submission!.id, { userId: ada.id })
     }
     // A refusal by rule stores nothing and pays no Jev, so it is not an attempt.
-    expect(await submit(ada.id, { x: 0, y: 5 })).toMatchObject({ reason: 'too-near' })
+    expect(await submit(ada.id, { x: 0, y: 5 })).toMatchObject({ reason: 'too-short' })
     verdict = 'reject'
     expect(await submit(ada.id, { x: 0, y: 23 })).toMatchObject({ reason: 'judged-infeasible' })
     verdict = 'accept'

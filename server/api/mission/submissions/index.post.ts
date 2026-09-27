@@ -11,7 +11,8 @@ const BodySchema = v.object({ goal: v.object({ x: finite, y: finite }) })
 
 /**
  * Submits a goal; a refused one answers 422 with its reason (and the stored rejection, if any),
- * or 409 when the round moved while the goal was judged, so the client plans again.
+ * a refusal by drive time with the estimate in its message, or 409 when the round moved while
+ * the goal was judged, so the client plans again.
  */
 export default defineMissionHandler(
   { access: 'write', cache: 'none', user: true },
@@ -28,7 +29,7 @@ export default defineMissionHandler(
     if (!result.accepted) {
       throw new HTTPError({
         status: result.reason === 'round-changed' ? 409 : 422,
-        message: `The goal was refused: ${result.reason}.`,
+        message: result.message ?? `The goal was refused: ${result.reason}.`,
         body: { code: 'SUBMISSION_REFUSED', reason: result.reason },
         data: { submission: result.submission },
       })

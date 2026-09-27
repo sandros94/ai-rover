@@ -97,8 +97,6 @@ function onHover(point: MapPoint | null): void {
       :sight="sight"
       :center="disk.center"
       :radius="DEFAULT_STOP_RADIUS"
-      :anchor="anchor"
-      :ring="DEFAULT_MISSION_RULES.segmentDistanceBand"
       :rover="rover"
       :plan="record.plan.polyline"
       :preview="preview.result.value"

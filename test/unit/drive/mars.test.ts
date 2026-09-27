@@ -27,6 +27,12 @@ describe('driveSegment on seed mars, 150 m', () => {
     expect(keyframes.count).toBeGreaterThan(1)
   })
 
+  it('took the time the plan estimated, within 10 %', () => {
+    expect(outcome.kind).toBe('arrived')
+    const { estimatedDriveS } = record.plan.metrics
+    expect(Math.abs(estimatedDriveS / outcome.durationS - 1)).toBeLessThan(0.1)
+  })
+
   it('reveals each vertex once, near the rover, never one already revealed', () => {
     const { width, cellSize } = disk.grid
     const before = revealedOverDisk(revealed, disk)

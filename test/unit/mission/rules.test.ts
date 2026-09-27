@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { MissionRules, RankEntry } from '#shared/utils/mission'
 import {
+  checkDriveTime,
   checkPathClearOfDeaths,
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
+  formatDriveTime,
   MissionError,
   rankSubmissions,
   roundCloseAt,
@@ -11,13 +13,12 @@ import {
 } from '#shared/utils/mission'
 
 const rules = DEFAULT_MISSION_RULES
-const start = { x: 0, y: 0 }
 
 describe('DEFAULT_MISSION_RULES', () => {
   it('carries the documented constants and is frozen', () => {
     expect(rules).toEqual({
       stopRadiusM: 500,
-      segmentDistanceBand: { minM: 50, maxM: 250 },
+      segmentTimeBand: { minS: 900, maxS: 7200 },
       failureZone: { destinationRadiusM: 30, pathRadiusM: 15, clusterRadiusM: 50, strikes: 3 },
       graceWindowMs: 300_000,
       maxJudgedPerRound: 5,
@@ -33,29 +34,16 @@ describe('DEFAULT_MISSION_RULES', () => {
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
     expect(Object.isFrozen(rules.notMoving)).toBe(true)
-    // A goal in band from an anchor in band lies on the disk of the stop left.
-    expect(rules.stopRadiusM).toBeGreaterThanOrEqual(2 * rules.segmentDistanceBand.maxM)
   })
 })
 
 describe('checkSubmissionGoal', () => {
   const check = (x: number, deaths: { x: number; y: number }[] = []) =>
-    checkSubmissionGoal({ x, y: 0 }, { start, deaths, rules })
+    checkSubmissionGoal({ x, y: 0 }, { deaths, rules })
 
-  it('accepts the band edges inclusively', () => {
-    expect(check(50)).toEqual({ ok: true })
-    expect(check(250)).toEqual({ ok: true })
-  })
-
-  it('refuses just inside the minimum and just past the maximum', () => {
-    expect(check(49.999)).toEqual({ ok: false, reason: 'too-near' })
-    expect(check(250.001)).toEqual({ ok: false, reason: 'too-far' })
-  })
-
-  it('measures the band in the plane, not per axis', () => {
-    expect(checkSubmissionGoal({ x: 30, y: 40 }, { start, deaths: [], rules })).toEqual({
-      ok: true,
-    })
+  it('accepts a goal clear of every death, however near or far', () => {
+    expect(check(0)).toEqual({ ok: true })
+    expect(check(480)).toEqual({ ok: true })
   })
 
   it('refuses a goal at or within the destination radius of a death', () => {
@@ -63,16 +51,47 @@ describe('checkSubmissionGoal', () => {
     expect(check(100, [{ x: 110, y: 0 }])).toEqual({ ok: false, reason: 'near-death-zone' })
     expect(check(100, [{ x: 130.001, y: 0 }])).toEqual({ ok: true })
   })
+})
 
-  it('reports the distance band before the death zone', () => {
-    expect(check(20, [{ x: 20, y: 0 }])).toEqual({ ok: false, reason: 'too-near' })
+describe('checkDriveTime', () => {
+  it('accepts the band edges inclusively', () => {
+    expect(checkDriveTime(900, { rules })).toEqual({ ok: true })
+    expect(checkDriveTime(7200, { rules })).toEqual({ ok: true })
+  })
+
+  it('refuses a drive under 15 min as too short, one over 2 h as too long, giving the estimate', () => {
+    expect(checkDriveTime(899, { rules })).toEqual({
+      ok: false,
+      reason: 'too-short',
+      message: 'The planned drive takes about 15 min; a segment drives at least 15 min.',
+    })
+    expect(checkDriveTime(8520, { rules })).toEqual({
+      ok: false,
+      reason: 'too-long',
+      message: 'The planned drive takes about 2 h 22 min; a segment drives at most 2 h.',
+    })
+    expect(checkDriveTime(0, { rules })).toMatchObject({ ok: false, reason: 'too-short' })
   })
 
   it('follows configured rules', () => {
-    const tight: MissionRules = { ...rules, segmentDistanceBand: { minM: 10, maxM: 20 } }
-    expect(checkSubmissionGoal({ x: 15, y: 0 }, { start, deaths: [], rules: tight })).toEqual({
-      ok: true,
-    })
+    const tight: MissionRules = { ...rules, segmentTimeBand: { minS: 60, maxS: 120 } }
+    expect(checkDriveTime(90, { rules: tight })).toEqual({ ok: true })
+    expect(checkDriveTime(121, { rules: tight })).toMatchObject({ reason: 'too-long' })
+  })
+
+  it('refuses an estimate that is not a duration', () => {
+    for (const bad of [-1, Number.NaN, Infinity]) {
+      expect(() => checkDriveTime(bad, { rules })).toThrow(MissionError)
+    }
+  })
+})
+
+describe('formatDriveTime', () => {
+  it('rounds to whole minutes, in hours and minutes past the hour', () => {
+    expect(formatDriveTime(0)).toBe('0 min')
+    expect(formatDriveTime(2519)).toBe('42 min')
+    expect(formatDriveTime(7200)).toBe('2 h')
+    expect(formatDriveTime(3900)).toBe('1 h 05 min')
   })
 })
 

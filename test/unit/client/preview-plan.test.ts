@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES, planGoal } from '#shared/utils/mission'
+import {
+  checkPathClearOfDeaths,
+  DEFAULT_MISSION_RULES,
+  formatDriveTime,
+  planGoal,
+} from '#shared/utils/mission'
 import type { MissionRules } from '#shared/utils/mission'
-import { estimatedDriveMinutes } from '#shared/utils/drive'
+
 import { planSegment } from '#shared/utils/nav'
 import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
 import type { StopDisk } from '#shared/utils/terrain'
@@ -77,9 +82,9 @@ describe('previewPlan on the recorded journey', () => {
     expect(JSON.stringify(result.polyline)).toBe(JSON.stringify(server.polyline))
     expect({ ...result.metrics, computeMs: 0 }).toEqual({ ...server.metrics, computeMs: 0 })
     expect(result.metrics.reached).toBe(true)
-    expect(result.estimatedMinutes).toBe(estimatedDriveMinutes(server))
-    expect(result.estimatedMinutes).toBeGreaterThan(
-      Math.round(server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
+    // Slopes slow the rover and imaging stops it: longer than the path at the AutoNav rate.
+    expect(result.metrics.estimatedDriveS).toBeGreaterThan(
+      server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS,
     )
   })
 
@@ -92,18 +97,22 @@ describe('previewPlan on the recorded journey', () => {
     expect(Math.max(...seen)).toBeCloseTo(result.metrics.maxSlopeDeg, 9)
   })
 
-  it('refuses a goal too near or too far from the anchor, measured after snapping', () => {
-    expect(previewPlan(ground.disk, { ...base, point: { x: 10, y: 5 } })).toMatchObject({
-      ok: false,
-      reason: 'too-near',
-    })
-    const tight: MissionRules = { ...rules, segmentDistanceBand: { minM: 10, maxM: 40 } }
-    const far = previewPlan(ground.disk, { ...base, rules: tight, point })
-    expect(far).toMatchObject({
-      ok: false,
-      reason: 'too-far',
-      goal: serverSnap(point),
-    })
+  it('refuses a drive planned too short or too long, saying how long it would take', () => {
+    // 11 m from the anchor: a few minutes of driving.
+    const short = previewPlan(ground.disk, { ...base, point: { x: 10, y: 5 } })
+    expect(short).toMatchObject({ ok: false, reason: 'too-short', goal: { x: 10, y: 5 } })
+    expect(!short.ok && short.message).toMatch(
+      /^The planned drive takes about \d+ min; a segment drives at least 15 min\.$/,
+    )
+    const planned = previewPlan(ground.disk, { ...base, point })
+    if (!planned.ok) throw new Error('expected a plan')
+    const tight: MissionRules = {
+      ...rules,
+      segmentTimeBand: { minS: 60, maxS: planned.metrics.estimatedDriveS - 1 },
+    }
+    const long = previewPlan(ground.disk, { ...base, rules: tight, point })
+    expect(long).toMatchObject({ ok: false, reason: 'too-long', goal: serverSnap(point) })
+    expect(!long.ok && long.message).toContain(formatDriveTime(planned.metrics.estimatedDriveS))
   })
 
   it('refuses a point beyond the survey as outside, as the server does', () => {
@@ -134,7 +143,7 @@ describe('previewPlan on the recorded journey', () => {
     throw new Error('no fogged vertex in the recorded disk')
   }
   const fogged = foggedVertex()
-  const near = { ...rules, segmentDistanceBand: { minM: 0, maxM: 60 } }
+  const near = { ...rules, segmentTimeBand: { minS: 0, maxS: 7200 } }
 
   it('takes a point on unseen ground at the vertex picked and plans to it, as the server does', () => {
     const point = { x: fogged.x + 0.3, y: fogged.y - 0.2 }
