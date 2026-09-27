@@ -11,10 +11,12 @@ function submission(
   risk = 1,
   createdAt = NOW - 60_000,
   deferred = false,
+  exploration = 0,
 ) {
   return {
     id,
     likes,
+    exploration,
     submitter: { id: `user-${id}` },
     deferred,
     createdAt: new Date(createdAt).toISOString(),
@@ -66,7 +68,20 @@ describe('roundPhase', () => {
     expect(phase).toMatchObject({ kind: 'planning', remainingMs: 0, fraction: 0 })
   })
 
-  it('names the leader by likes, then the mission tie-break', () => {
+  it('names the leader by the ranking score, likes weighed by exploration', () => {
+    const phase = roundPhase({
+      ...base,
+      round: {
+        closesAt: null,
+        // √3 ≈ 1.73 against √1 × (1 + 1) = 2.
+        submissions: [submission('a', 3), submission('c', 1, 1, NOW - 60_000, false, 1)],
+      },
+      driving: true,
+    })
+    expect(phase.leader).toEqual({ id: 'c', likes: 1 })
+  })
+
+  it('names the leader by likes on equal exploration, then the mission tie-break', () => {
     const phase = roundPhase({
       ...base,
       round: {

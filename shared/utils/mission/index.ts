@@ -10,6 +10,7 @@ export {
   formatDriveTime,
   MissionRulesSchema,
   parseMissionRules,
+  rankingScore,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,

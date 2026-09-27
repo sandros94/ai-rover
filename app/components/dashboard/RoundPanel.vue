@@ -4,7 +4,10 @@ import { formatDriveTime } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import VoteCard from './VoteCard.vue'
 
-/** The open round: its cards in standing order, LGTMs, and which card's route the map shows. */
+/**
+ * The open round: its cards in standing order by ranking score, LGTMs, and which card's route the
+ * map shows.
+ */
 const props = defineProps<{ state: MissionStateJson }>()
 /** An LGTM changed the mission state. */
 const emit = defineEmits<{ changed: [] }>()
@@ -66,6 +69,10 @@ async function like(id: string, on: boolean): Promise<void> {
         {{ state.segment ? 'Vote closes when the drive ends' : `Stop ${state.currentStop.index}` }}
       </span>
     </div>
+    <p v-if="round" data-test="ranking" class="text-xs text-muted">
+      Ranked by √LGTMs × (1 + exploration): a destination in unexplored ground, or in a pocket left
+      beside the driven path, counts for up to twice its LGTMs.
+    </p>
     <p v-if="likeError" data-test="like-error" role="alert" class="text-xs text-error">
       {{ likeError }}
     </p>

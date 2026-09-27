@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { goalBearing } from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
+import { rankingScore } from '#shared/utils/mission'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
 import type { MissionStateJson } from '~/composables/useMissionState'
 
@@ -27,6 +28,9 @@ const emit = defineEmits<{ like: [liked: boolean]; highlight: [] }>()
 
 /** Distance and bearing, clockwise from north (world +y), of the goal from the anchor. */
 const goal = computed(() => goalBearing(props.anchor, props.submission.goal))
+
+/** What the standing is ranked by, beside the LGTMs it comes from. */
+const score = computed(() => rankingScore(props.submission).toFixed(2))
 
 /** The code's parts of the exploration value, in words, for the hover. */
 const explorationParts = computed(() => {
@@ -63,6 +67,16 @@ const route = computed(() => {
         title="Written by the author of the drive in progress: it wins only if nobody else's is left."
       />
       <div class="ml-auto flex items-center gap-1">
+        <UTooltip text="Ranking score: √LGTMs × (1 + exploration)">
+          <span
+            data-test="score"
+            class="px-1 text-xs text-muted tabular-nums"
+            tabindex="0"
+            :aria-label="`Ranking score ${score}, the square root of the LGTMs times one plus the exploration`"
+          >
+            score {{ score }}
+          </span>
+        </UTooltip>
         <UButton
           data-test="highlight"
           size="xs"

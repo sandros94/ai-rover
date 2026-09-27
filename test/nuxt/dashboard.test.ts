@@ -397,6 +397,28 @@ describe('MissionDashboard', () => {
     expect(wrapper.find('[data-test=like]').attributes('href')).toBe('/login')
   })
 
+  it('stands the cards by ranking score, each showing its score beside the LGTMs', async () => {
+    const crowd = { ...SUBMISSION, id: 'crowd', likes: 100, exploration: 0 }
+    const explorer = {
+      ...SUBMISSION,
+      id: 'explorer',
+      likes: 25,
+      exploration: 1,
+      submitter: { ...ADA, id: 'someone-else' },
+    }
+    const withBoth = state({ round: { ...state().round!, submissions: [crowd, explorer] } })
+    const wrapper = await mountDashboard({ state: withBoth, error: null, serverOffsetMs: 0 })
+    const cards = wrapper.findAllComponents(VoteCard)
+    // Both score 10; the higher exploration stands first.
+    expect(cards.map((card) => card.props('submission').id)).toEqual(['explorer', 'crowd'])
+    expect(cards.map((card) => card.find('[data-test=score]').text())).toEqual([
+      'score 10.00',
+      'score 10.00',
+    ])
+    expect(cards[0]!.find('[data-test=like]').text()).toContain('25 LGTM')
+    expect(wrapper.find('[data-test=ranking]').text()).toMatch(/√LGTMs × \(1 \+ exploration\)/)
+  })
+
   it('lets a signed-in user like and marks their own card', async () => {
     useState('rover-user-session').value = {
       user: { id: ADA.id, displayName: 'Ada', providers: ['github'] },

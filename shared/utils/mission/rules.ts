@@ -33,9 +33,9 @@ export interface MissionRules {
    */
   maxJudgedPerRound: number
   /**
-   * How submissions with equal likes are ordered. `'risk'`: lower Jev risk score, then higher
-   * confidence sum, then earlier. `'confidence'`: higher confidence sum, then earlier.
-   * Closed set.
+   * How submissions with equal ranking scores (see {@link rankingScore}) are ordered after the
+   * higher exploration value. `'risk'`: lower Jev risk score, then higher confidence sum, then
+   * earlier. `'confidence'`: higher confidence sum, then earlier. Closed set.
    */
   tieBreak: 'risk' | 'confidence'
   /** The weight of each part of a goal's exploration value (see `explorationValue`). */
@@ -272,15 +272,29 @@ export interface RankEntry {
   /** The submitter. */
   userId: string
   likes: number
+  /** The goal's exploration value, 0 to 1. */
+  exploration: number
   createdAt: Date
   judgment: { distanceWeight: number; timeWeight: number; risk: { score: number } }
 }
 
 /**
- * Most liked first, ties by `rules.tieBreak`; the id breaks what remains, so the order never
- * depends on the input order. Submissions by `drivingAuthorId`, who wrote the drive the round
- * runs beside, rank after everyone else's whatever their likes: others take precedence, and the
- * author's pick wins only when nobody else's is left.
+ * What a submission ranks by: √likes × (1 + exploration). The square root damps a crowd's pull,
+ * and a goal opening new ground counts for up to twice its likes' worth.
+ */
+export function rankingScore(entry: Pick<RankEntry, 'likes' | 'exploration'>): number {
+  return Math.sqrt(Math.max(0, entry.likes)) * (1 + entry.exploration)
+}
+
+/** Scores this close are equal: scores equal in exact arithmetic can differ in the last bits. */
+const SCORE_TOLERANCE = 1e-9
+
+/**
+ * Highest {@link rankingScore} first; equal scores by higher exploration, then by
+ * `rules.tieBreak`; the id breaks what remains, so the order never depends on the input order.
+ * Submissions by `drivingAuthorId`, who wrote the drive the round runs beside, rank after
+ * everyone else's whatever their score: others take precedence, and the author's pick wins only
+ * when nobody else's is left.
  */
 export function rankSubmissions<T extends RankEntry>(
   entries: readonly T[],
@@ -290,10 +304,15 @@ export function rankSubmissions<T extends RankEntry>(
   const byRisk = options.rules.tieBreak === 'risk'
   const deferred = (e: RankEntry) =>
     options.drivingAuthorId != null && e.userId === options.drivingAuthorId ? 1 : 0
+  const byScore = (a: RankEntry, b: RankEntry) => {
+    const difference = rankingScore(b) - rankingScore(a)
+    return Math.abs(difference) > SCORE_TOLERANCE ? difference : 0
+  }
   return entries.toSorted(
     (a, b) =>
       deferred(a) - deferred(b) ||
-      b.likes - a.likes ||
+      byScore(a, b) ||
+      b.exploration - a.exploration ||
       (byRisk ? a.judgment.risk.score - b.judgment.risk.score : 0) ||
       confidence(b) - confidence(a) ||
       a.createdAt.getTime() - b.createdAt.getTime() ||

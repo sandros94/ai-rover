@@ -32,7 +32,7 @@ const ROVER = {
 } as const
 
 const MISSION_RULES =
-  'A segment goes from the current stop to a destination within 500 m whose planned drive takes 15 minutes to 2 hours. The destination may lie on unseen ground. The rover plans over what it has seen and treats unseen ground as uncertain; the drive stops safely if it turns out impassable.'
+  'A segment goes from the current stop to a destination within 500 m whose planned drive takes 15 minutes to 2 hours. The destination may lie on unseen ground. The rover plans over what it has seen and treats unseen ground as uncertain; the drive stops safely if it turns out impassable. The mission explores: people like destinations, and the winner is ranked by likes weighted by how much new ground it opens.'
 
 const FAILURE_REASONS: Record<RouteFailureReason, string> = {
   'goal-blocked': 'The destination lies on ground the rover has seen and knows to be impassable.',

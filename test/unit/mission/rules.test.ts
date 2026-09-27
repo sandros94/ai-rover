@@ -8,6 +8,7 @@ import {
   formatDriveTime,
   MissionError,
   parseMissionRules,
+  rankingScore,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,
@@ -274,11 +275,13 @@ describe('rankSubmissions', () => {
     createdAt: Date,
     weights: { distance: number; time: number; risk: number },
     userId = `user-${id}`,
+    exploration = 0,
   ): RankEntry {
     return {
       id,
       userId,
       likes,
+      exploration,
       createdAt,
       judgment: {
         distanceWeight: weights.distance,
@@ -289,7 +292,61 @@ describe('rankSubmissions', () => {
   }
   const ids = (entries: RankEntry[]) => entries.map((e) => e.id)
 
-  it('ranks by likes first, whatever the tie-break', () => {
+  it('scores √likes × (1 + exploration)', () => {
+    expect(rankingScore({ likes: 16, exploration: 0 })).toBe(4)
+    expect(rankingScore({ likes: 16, exploration: 0.5 })).toBe(6)
+    expect(rankingScore({ likes: 9, exploration: 1 })).toBe(6)
+    expect(rankingScore({ likes: 0, exploration: 1 })).toBe(0)
+  })
+
+  it('ranks 25 likes at exploration 1 above 100 likes at exploration 0', () => {
+    const entries = [
+      entry('crowd', 100, at(0), { distance: 1, time: 1, risk: 0 }, 'bob', 0),
+      entry('explorer', 25, at(9), { distance: 0, time: 0, risk: 3 }, 'cy', 1),
+    ]
+    // Both score 10; the higher exploration takes the tie before risk, confidence or time.
+    expect(rankingScore(entries[0]!)).toBe(rankingScore(entries[1]!))
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual(['explorer', 'crowd'])
+  })
+
+  it('ranks 150 likes at exploration 0.7 (score 20.8) above 400 likes at exploration 0 (score 20)', () => {
+    const entries = [
+      entry('influencer', 400, at(0), { distance: 1, time: 1, risk: 0 }, 'bob', 0),
+      entry('explorer', 150, at(9), { distance: 0, time: 0, risk: 3 }, 'cy', 0.7),
+    ]
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual(['explorer', 'influencer'])
+  })
+
+  it('falls from equal scores to exploration, then risk, confidence and time', () => {
+    const entries = [
+      // √4 × 1.5 = √9 × 1 = 3: equal scores throughout.
+      entry('nine-bare', 9, at(0), { distance: 1, time: 1, risk: 0 }, 'a', 0),
+      entry('four-explored', 4, at(9), { distance: 0, time: 0, risk: 3 }, 'b', 0.5),
+      entry('nine-risky', 9, at(0), { distance: 1, time: 1, risk: 2 }, 'c', 0),
+      entry('nine-unsure', 9, at(0), { distance: 0, time: 0, risk: 0 }, 'd', 0),
+      entry('nine-late', 9, at(5), { distance: 1, time: 1, risk: 0 }, 'e', 0),
+    ]
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual([
+      'four-explored',
+      'nine-bare',
+      'nine-late',
+      'nine-unsure',
+      'nine-risky',
+    ])
+  })
+
+  it('ranks the driving author last on an equal score, however much it explores', () => {
+    const entries = [
+      entry('author', 25, at(0), { distance: 1, time: 1, risk: 0 }, 'ada', 1),
+      entry('other', 100, at(9), { distance: 0, time: 0, risk: 3 }, 'bob', 0),
+    ]
+    expect(ids(rankSubmissions(entries, { rules, drivingAuthorId: 'ada' }))).toEqual([
+      'other',
+      'author',
+    ])
+  })
+
+  it('ranks by the score first, whatever the tie-break', () => {
     const entries = [
       entry('a', 1, at(0), { distance: 1, time: 1, risk: 0 }),
       entry('b', 3, at(5), { distance: 0, time: 0, risk: 4 }),
