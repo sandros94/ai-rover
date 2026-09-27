@@ -40,6 +40,7 @@ const SUBMISSION: Submission = {
   likes: 3,
   submitter: ADA,
   deferred: false,
+  goalInFog: false,
   judgment: {
     feasible: 0.72,
     verdict: 'review',
@@ -280,6 +281,16 @@ describe('VoteCard', () => {
       submission: { ...SUBMISSION, deferred: true },
     })
     expect(deferred.find('[data-test=deferred]').text()).toMatch(/others take precedence/i)
+  })
+
+  it('says the destination is unexplored when the goal lies in the fog', async () => {
+    const plain = await mount(VoteCard, props)
+    expect(plain.find('[data-test=goal-in-fog]').exists()).toBe(false)
+    const fogged = await mount(VoteCard, {
+      ...props,
+      submission: { ...SUBMISSION, goalInFog: true },
+    })
+    expect(fogged.find('[data-test=goal-in-fog]').text()).toBe('destination unexplored')
   })
 
   it('falls back to the expected levels without probabilities', async () => {

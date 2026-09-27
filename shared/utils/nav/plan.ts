@@ -33,6 +33,8 @@ export interface NavMetrics {
   meanSlopeDeg: number
   /** Share of path length over vertices not yet revealed, 0 to 1. */
   unrevealedFraction: number
+  /** The goal vertex has not been revealed: the destination is unexplored ground. */
+  goalInFog: boolean
   /** Turns in place among the motions. */
   turnCount: number
   expansions: number
@@ -70,6 +72,7 @@ export function planSegment(
   const { width, cellSize } = grid
   const from = vertexInDisk(disk, start, 'start')
   const to = vertexInDisk(disk, goal, 'goal')
+  // Unseen ground costs the flat penalty, so a goal in the fog is planned to like any other.
   const costMap = buildCostMap(disk, options)
   const route = findRoute(costMap, {
     width,
@@ -101,6 +104,7 @@ export function planSegment(
     maxSlopeDeg: along?.maxSlopeDeg ?? 0,
     meanSlopeDeg: along?.meanSlopeDeg ?? 0,
     unrevealedFraction: along?.unrevealedFraction ?? 0,
+    goalInFog: !revealed[to.j * width + to.i],
     turnCount: motions.filter((motion) => motion.type === 'turn').length,
     expansions: route.expansions,
     computeMs: 0,

@@ -27,6 +27,8 @@ export interface PublicSubmission {
    * precedence, whatever the likes.
    */
   deferred: boolean
+  /** The goal lies on ground the rover had not seen when it was planned. */
+  goalInFog: boolean
   judgment: {
     feasible: number
     verdict: Verdict
@@ -290,6 +292,7 @@ export async function publicMissionState(
         likes: s.likes,
         submitter: s.submitter,
         deferred: s.userId === drivingAuthorId,
+        goalInFog: s.metrics.goalInFog,
         judgment: publicJudgment(s.judgment),
         summary: s.summary,
       })),

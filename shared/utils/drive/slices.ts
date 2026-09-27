@@ -80,6 +80,8 @@ export const SegmentManifestSchema = v.strictObject({
       maxSlopeDeg: finite,
       meanSlopeDeg: finite,
       unrevealedFraction: finite,
+      // Absent from manifests published before goals could lie on unseen ground.
+      goalInFog: v.optional(v.boolean(), false),
       turnCount: count,
       expansions: count,
       computeMs: finite,

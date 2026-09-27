@@ -503,33 +503,37 @@ describe('snapToPathable', () => {
     })
   })
 
-  it('never snaps to an unseen vertex, however pathable', () => {
-    // (30, 40) and its four neighbours are pathable but unseen: the nearest seen one wins.
-    const revealed = fogged([
-      [30, 40],
-      [31, 40],
-      [29, 40],
-      [30, 41],
-      [30, 39],
-    ])
-    const snapped = snapToPathable(base, { x: 30, y: 40 }, { revealed })
-    expect(snapped.ok).toBe(true)
-    if (!snapped.ok) return
-    const { x, y } = snapped.point
-    expect(revealed[at(x, y)]).toBe(1)
-    expect(Math.hypot(x - 30, y - 40)).toBeCloseTo(Math.SQRT2, 9)
+  it('takes a point on unseen ground at its own vertex, whatever the ground there holds', () => {
+    const revealed = fogged(square(28, 38, 32, 42))
+    const goal = { ok: true, point: { x: 30, y: 40 } }
+    expect(snapToPathable(base, { x: 30.4, y: 39.6 }, { revealed })).toEqual(goal)
+    // Nothing of the unseen vertex is read: blocked, unreachable and without a height alike.
+    const hidden = blocked(square(28, 38, 32, 42))
+    const heights = hidden.grid.heights.slice()
+    heights[at(30, 40)] = Number.NaN
+    expect(
+      snapToPathable(
+        { ...hidden, grid: { ...hidden.grid, heights } },
+        { x: 30.4, y: 39.6 },
+        {
+          revealed,
+        },
+      ),
+    ).toEqual(goal)
   })
 
-  it('refuses a point with only unseen ground within the search radius as unrevealed', () => {
-    const revealed = fogged(square(20, 30, 40, 50))
-    expect(snapToPathable(base, { x: 30, y: 40 }, { revealed })).toEqual({
-      ok: false,
-      reason: 'unrevealed',
+  it('takes the vertex nearest the point, even with seen pathable ground a step away', () => {
+    // (30, 40) alone is unseen; seen pathable neighbours do not pull the goal off it.
+    const revealed = fogged([[30, 40]])
+    expect(snapToPathable(base, { x: 30.3, y: 40.2 }, { revealed })).toEqual({
+      ok: true,
+      point: { x: 30, y: 40 },
     })
-    // Unseen ground is refused whatever it holds: blocked and unseen is still unrevealed.
-    expect(snapToPathable(blocked(square(20, 30, 40, 50)), { x: 30, y: 40 }, { revealed })).toEqual(
-      { ok: false, reason: 'unrevealed' },
-    )
+    // A point nearest a seen vertex keeps the seen rules, however near the fog.
+    expect(snapToPathable(base, { x: 30.6, y: 40 }, { revealed })).toEqual({
+      ok: true,
+      point: { x: 31, y: 40 },
+    })
   })
 
   it('refuses seen blocked ground as unpathable even beside unseen pathable ground', () => {

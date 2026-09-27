@@ -81,6 +81,7 @@ export const METRICS: NavMetrics = {
   maxSlopeDeg: 6,
   meanSlopeDeg: 3,
   unrevealedFraction: 0,
+  goalInFog: false,
   turnCount: 1,
   expansions: 120,
   computeMs: 0,

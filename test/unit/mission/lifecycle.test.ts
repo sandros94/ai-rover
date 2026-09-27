@@ -389,6 +389,7 @@ describe('the public state', () => {
         likes: 1,
         submitter: { id: m.ada.id, displayName: 'Ada', avatarUrl: null },
         deferred: false,
+        goalInFog: false,
         judgment: {
           feasible: 0.9,
           verdict: 'accept',

@@ -249,18 +249,20 @@ export function completeStopDisk(
 /**
  * Why {@link snapToPathable} found no vertex. Closed set.
  *
- * - `unrevealed`: no vertex within the search radius has been seen, so nothing there may be picked.
- * - `unpathable`: seen vertices lie within the search radius but none is traversable and
- *   reachable, or no vertex of the disk lies there at all.
+ * - `unpathable`: the vertex under the point has been seen, and no seen vertex within the search
+ *   radius is traversable and reachable.
  * - `outside`: the point lies beyond the survey.
  */
-export type SnapRefusal = 'unpathable' | 'unrevealed' | 'outside'
+export type SnapRefusal = 'unpathable' | 'outside'
 
 /**
- * The vertex nearest `point` that is seen, traversable, marked reachable and within the survey,
- * searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point; a point beyond
- * the survey is refused as `outside`. Equal distances go to the lowest (j, i). The refusal is
- * decided from seen vertices and the survey only, so it never tells what unseen ground holds.
+ * Where a goal picked at `point` lands. A point beyond the survey is refused as `outside`. The
+ * vertex nearest the point within the survey decides the rest: unseen, it is the goal as it is,
+ * nothing read of its height or traversability, since the rover knows nothing of it; seen, the
+ * goal is the vertex nearest the point that is seen, traversable and marked reachable, searched
+ * within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}), else `unpathable`. Equal distances go
+ * to the lowest (j, i). Every answer comes from seen vertices and the survey only, so none tells
+ * what unseen ground holds.
  */
 export function snapToPathable(
   disk: StopDisk,
@@ -275,8 +277,8 @@ export function snapToPathable(
   const { revealed } = options
   const radiusM = options.radiusM ?? DEFAULT_SNAP_RADIUS
   assertRadius(radiusM, 'snapToPathable')
-  const { center, radius, origin, grid, traversable, reachable, inside } = disk
-  const { width, height, cellSize } = grid
+  const { center, radius, grid, traversable, reachable, inside } = disk
+  const { width, height } = grid
   if (revealed.length !== width * height) {
     throw new TerrainError(
       'INVALID_GRID',
@@ -286,30 +288,44 @@ export function snapToPathable(
   if (Math.hypot(point.x - center.x, point.y - center.y) > radius) {
     return { ok: false, reason: 'outside' }
   }
+  const nearest = nearestVertex(disk, point, (k) => inside[k] === 1, radiusM)
+  if (!nearest) return { ok: false, reason: 'unpathable' }
+  if (!revealed[nearest.k]) return { ok: true, point: nearest.point }
+  const pathable = (k: number) =>
+    inside[k] === 1 && revealed[k] === 1 && traversable[k] === 1 && reachable[k] === 1
+  const snapped = nearestVertex(disk, point, pathable, radiusM)
+  return snapped ? { ok: true, point: snapped.point } : { ok: false, reason: 'unpathable' }
+}
+
+/**
+ * The disk-grid vertex nearest `point` for which `accept` holds, within `radiusM` of it, lowest
+ * (j, i) on equal distances; undefined when there is none.
+ */
+function nearestVertex(
+  disk: Pick<StopDisk, 'grid' | 'origin'>,
+  point: { x: number; y: number },
+  accept: (k: number) => boolean,
+  radiusM: number,
+): { k: number; point: { x: number; y: number } } | undefined {
+  const { origin, grid } = disk
+  const { width, height, cellSize } = grid
   const reach = Math.ceil(radiusM / cellSize)
   const ci = Math.round(point.x / cellSize) - origin.i
   const cj = Math.round(point.y / cellSize) - origin.j
-  let best: { x: number; y: number } | undefined
+  let best: { k: number; point: { x: number; y: number } } | undefined
   let bestDistance = Infinity
-  let candidates = false
-  let seen = false
   for (let j = Math.max(0, cj - reach); j <= Math.min(height - 1, cj + reach); j++) {
     for (let i = Math.max(0, ci - reach); i <= Math.min(width - 1, ci + reach); i++) {
       const x = (origin.i + i) * cellSize
       const y = (origin.j + j) * cellSize
       const distance = Math.hypot(x - point.x, y - point.y)
       const k = j * width + i
-      if (distance > radiusM || !inside[k]) continue
-      candidates = true
-      if (!revealed[k]) continue
-      seen = true
-      if (!traversable[k] || !reachable[k] || distance >= bestDistance) continue
-      best = { x, y }
+      if (distance > radiusM || distance >= bestDistance || !accept(k)) continue
+      best = { k, point: { x, y } }
       bestDistance = distance
     }
   }
-  if (best) return { ok: true, point: best }
-  return { ok: false, reason: candidates && !seen ? 'unrevealed' : 'unpathable' }
+  return best
 }
 
 /** Distance from `value` to the closed interval [lo, hi]. */

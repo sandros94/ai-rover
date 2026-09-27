@@ -97,6 +97,7 @@ const route = computed(() => {
         {{ Math.round(goal.distanceM) }} m · {{ goal.degrees }}° {{ goal.compass }}
       </span>
       <span v-if="route" class="tabular-nums">{{ route }}</span>
+      <span v-if="submission.goalInFog" data-test="goal-in-fog">destination unexplored</span>
     </p>
     <JudgmentCard :judgment="submission.judgment" />
   </div>

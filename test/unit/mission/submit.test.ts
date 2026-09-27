@@ -155,8 +155,7 @@ describe('submitGoal', () => {
     expect(Math.hypot(goal.x - edge!.x, goal.y - edge!.y)).toBe(1)
   })
 
-  it('refuses a goal on ground the rover has not seen, without asking Jev', async () => {
-    // Fogged, yet pathable and in band: only what the rover has seen may be a goal.
+  it('takes a goal on ground the rover has not seen at the vertex picked, planned through the fog', async () => {
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
@@ -172,12 +171,15 @@ describe('submitGoal', () => {
       jev: jev.client,
       missionId: created.mission.id,
       userId: ada!.id,
-      goal: { x: -36, y: -40 },
+      goal: { x: -30.3, y: 0.2 },
       now: at(T0, MINUTE),
     })
-    expect(result).toEqual({ accepted: false, reason: 'unrevealed', submission: null })
-    expect(jev.summaries).toHaveLength(0)
-    expect(await listRoundSubmissions(db, created.round.id)).toEqual([])
+    expect(result.accepted).toBe(true)
+    const { submission } = result
+    expect({ x: submission!.goalX, y: submission!.goalY }).toEqual({ x: -30, y: 0 })
+    expect(submission!.metrics).toMatchObject({ reached: true, goalInFog: true })
+    expect(submission!.metrics.unrevealedFraction).toBeGreaterThan(0)
+    expect(jev.summaries).toHaveLength(1)
   })
 
   it('stores a rejected verdict as a rejected submission and reports it', async () => {
