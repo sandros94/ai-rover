@@ -97,8 +97,20 @@ describe('RoverAttitude', () => {
     const wrapper = await mount(RoverAttitude, { props: { frame: frameAt() } })
     expect(wrapper.findAll('[data-test=side-view] [data-test=wheel]')).toHaveLength(6)
     expect(wrapper.findAll('[data-test=rear-view] [data-test=wheel]')).toHaveLength(6)
-    for (const name of ['pitch', 'roll', 'tilt', 'differential', 'bogie-left', 'bogie-right'])
-      expect(wrapper.find(`[data-test=readout-${name}]`).exists()).toBe(true)
+    expect(wrapper.findAll('[data-test^=readout-]').map((r) => r.attributes('data-test'))).toEqual([
+      'readout-pitch',
+      'readout-roll',
+      'readout-tilt',
+      'readout-bogie-left',
+      'readout-bogie-right',
+      'readout-differential',
+    ])
+  })
+
+  it('labels the side view as the right side, bogie before rocker', async () => {
+    const wrapper = await mount(RoverAttitude, { props: { frame: frameAt() } })
+    const caption = wrapper.find('[data-test=side-view] + figcaption').text()
+    expect(caption.replace(/\s+/g, ' ')).toBe('Side, right · bogie rocker')
   })
 
   it('turns the wheel treads with the wheel spin', async () => {

@@ -5,6 +5,7 @@ import {
   frameAttitude,
   levelPoint,
   roverLinkage,
+  sideView,
 } from '#shared/utils/client/instruments'
 import type { Point3, ResolvedRoverGeometry } from '#shared/utils/rover'
 import { DEFAULT_ROVER_GEOMETRY, DEFAULT_ROVER_LIMITS as L } from '#shared/utils/rover'
@@ -25,6 +26,7 @@ const MAST = { x: 0.7, top: 2 }
 
 const attitude = computed(() => frameAttitude(props.frame))
 const linkage = computed(() => roverLinkage(attitude.value, G.value))
+const view = computed(() => sideView(attitude.value, G.value))
 const level = (p: Point3) => levelPoint(attitude.value, p)
 
 type Project = (p: Point3) => [number, number]
@@ -66,7 +68,7 @@ const body = computed(() => {
   }
 })
 
-/** Per side (left first, drawn last): rocker front → pivot → bogie pivot, bogie middle → pivot → rear. */
+/** Rear view, per side: rocker front → pivot → bogie pivot, bogie middle → pivot → rear. */
 const arms = computed(() =>
   [1, 0].map((s) => {
     const { wheels: w, rockerPivots: rp, bogiePivots: bp } = linkage.value
@@ -74,7 +76,6 @@ const arms = computed(() =>
       side: s,
       rocker: [w[s]!, rp[s]!, bp[s]!],
       bogie: [w[2 + s]!, bp[s]!, w[4 + s]!],
-      wheels: [s, 2 + s, 4 + s],
     }
   }),
 )
@@ -94,9 +95,9 @@ const readouts = computed(() => {
     row('pitch', 'Pitch', a.pitchRad, L.pitchRad, l.pitch),
     row('roll', 'Roll', a.rollRad, L.rollRad, l.roll),
     row('tilt', 'Tilt', a.tiltRad, L.tiltRad, l.tilt),
-    row('differential', 'Differential', a.differentialRad, L.differentialRad, l.differential),
     row('bogie-left', 'Bogie left', a.bogie.left, L.bogieRad, l.bogieLeft),
     row('bogie-right', 'Bogie right', a.bogie.right, L.bogieRad, l.bogieRight),
+    row('differential', 'Differential', a.differentialRad, L.differentialRad, l.differential),
   ]
 })
 const STATUS = {
@@ -120,28 +121,30 @@ const TREADS = [0, 60, 120, 180, 240, 300]
         >
           <line x1="-170" x2="190" y1="0" y2="0" stroke="var(--viz-grid)" stroke-width="1" />
           <polyline
-            :points="groundLine(side, linkage.wheels[4]!, linkage.wheels[0]!, 1.9)"
+            :points="
+              groundLine(side, view.near.wheels[2]!.center, view.near.wheels[0]!.center, 1.9)
+            "
             fill="none"
             stroke="var(--viz-axis)"
             stroke-width="3"
             stroke-linecap="round"
           />
-          <g v-for="arm in arms" :key="arm.side" :opacity="arm.side === 1 ? 0.35 : 1">
-            <polygon
-              v-if="arm.side === 0"
-              :points="pts(side, body.side)"
-              class="fill-(--ui-bg-elevated) stroke-(--ui-border-accented)"
-              stroke-width="1.5"
-            />
+          <g v-for="key in ['far', 'near'] as const" :key="key" :opacity="key === 'far' ? 0.35 : 1">
+            <template v-if="key === 'near'">
+              <polygon
+                :points="pts(side, body.side)"
+                class="fill-(--ui-bg-elevated) stroke-(--ui-border-accented)"
+                stroke-width="1.5"
+              />
+              <polyline
+                :points="pts(side, body.mast)"
+                fill="none"
+                class="stroke-(--ui-border-accented)"
+                stroke-width="4"
+              />
+            </template>
             <polyline
-              v-if="arm.side === 0"
-              :points="pts(side, body.mast)"
-              fill="none"
-              class="stroke-(--ui-border-accented)"
-              stroke-width="4"
-            />
-            <polyline
-              :points="pts(side, arm.rocker)"
+              :points="pts(side, view[key].rocker)"
               fill="none"
               stroke="var(--viz-series-1)"
               stroke-width="5"
@@ -149,7 +152,7 @@ const TREADS = [0, 60, 120, 180, 240, 300]
               stroke-linecap="round"
             />
             <polyline
-              :points="pts(side, arm.bogie)"
+              :points="pts(side, view[key].bogie)"
               fill="none"
               stroke="var(--viz-series-2)"
               stroke-width="4"
@@ -157,20 +160,17 @@ const TREADS = [0, 60, 120, 180, 240, 300]
               stroke-linecap="round"
             />
             <g
-              v-for="k in arm.wheels"
+              v-for="(w, k) in view[key].wheels"
               :key="k"
               data-test="wheel"
-              :transform="`translate(${side(linkage.wheels[k]!).join(' ')})`"
+              :transform="`translate(${side(w.center).join(' ')})`"
             >
               <circle
                 :r="G.wheelRadius * S"
                 class="fill-(--ui-bg) stroke-(--ui-text-highlighted)"
                 stroke-width="3"
               />
-              <g
-                data-test="tread"
-                :transform="`rotate(${((attitude.spins[k] ?? 0) * 180) / Math.PI})`"
-              >
+              <g data-test="tread" :transform="`rotate(${(w.spin * 180) / Math.PI})`">
                 <line
                   v-for="a in TREADS"
                   :key="a"
@@ -184,7 +184,7 @@ const TREADS = [0, 60, 120, 180, 240, 300]
               </g>
             </g>
             <circle
-              v-for="(p, i) in [arm.rocker[1]!, arm.rocker[2]!]"
+              v-for="(p, i) in [view[key].rocker[1], view[key].rocker[2]]"
               :key="i"
               :cx="side(p)[0]"
               :cy="side(p)[1]"
@@ -195,9 +195,9 @@ const TREADS = [0, 60, 120, 180, 240, 300]
           </g>
         </svg>
         <figcaption class="text-xs text-muted">
-          Side, left · rocker
-          <span class="inline-block size-2 rounded-full bg-(--viz-series-1)" /> bogie
-          <span class="inline-block size-2 rounded-full bg-(--viz-series-2)" />
+          Side, right · bogie
+          <span class="inline-block size-2 rounded-full bg-(--viz-series-2)" /> rocker
+          <span class="inline-block size-2 rounded-full bg-(--viz-series-1)" />
         </figcaption>
       </figure>
       <figure>

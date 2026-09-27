@@ -5,6 +5,7 @@ import {
   attitudeLevels,
   frameAttitude,
   roverLinkage,
+  sideView,
 } from '#shared/utils/client/instruments/attitude-geometry'
 
 const DEG = Math.PI / 180
@@ -129,6 +130,41 @@ describe('roverLinkage', () => {
     expect(pitched.wheels[0]!.z).toBeLessThan(pitched.wheels[4]!.z)
     const rolled = roverLinkage({ ...FLAT, rollRad: 10 * DEG })
     expect(rolled.wheels[2]!.z).toBeGreaterThan(rolled.wheels[3]!.z)
+  })
+})
+
+describe('sideView', () => {
+  const flat = sideView(frameAttitude(frame({})))
+  const view = (values: Parameters<typeof frame>[0]) => sideView(frameAttitude(frame(values)))
+
+  it('draws the right side near and the left side far at the resolved geometry', () => {
+    const l = roverLinkage(FLAT)
+    expect(flat.near.wheels.map((w) => w.center)).toEqual([l.wheels[1], l.wheels[3], l.wheels[5]])
+    expect(flat.near.rocker).toEqual([l.wheels[1], l.rockerPivots[1], l.bogiePivots[1]])
+    expect(flat.near.bogie).toEqual([l.wheels[3], l.bogiePivots[1], l.wheels[5]])
+    expect(flat.far.wheels.map((w) => w.center)).toEqual([l.wheels[0], l.wheels[2], l.wheels[4]])
+  })
+
+  it('articulates the near side with the right bogie, not the left', () => {
+    const right = view({ bogieR: 10 * DEG, bogieL: 0 }).near
+    expect(right.wheels[1]!.center.z).toBeGreaterThan(G.wheelRadius)
+    expect(right.wheels[2]!.center.z).toBeLessThan(G.wheelRadius)
+    const left = view({ bogieL: 10 * DEG, bogieR: 0 })
+    expect(left.near).toEqual(flat.near)
+    expect(left.far.wheels[1]!.center.z).toBeGreaterThan(G.wheelRadius)
+  })
+
+  it('articulates the near side with the right rocker, not the left', () => {
+    expect(view({ rockerR: 10 * DEG, rockerL: 0 }).near.wheels[0]!.center.z).toBeGreaterThan(
+      G.wheelRadius,
+    )
+    expect(view({ rockerL: 10 * DEG, rockerR: 0 }).near).toEqual(flat.near)
+  })
+
+  it('turns the wheels of each side with the spins of that side', () => {
+    const v = view({ spinFL: 1, spinFR: 2, spinML: 3, spinMR: 4, spinRL: 5, spinRR: 6 })
+    expect(v.near.wheels.map((w) => w.spin)).toEqual([2, 4, 6])
+    expect(v.far.wheels.map((w) => w.spin)).toEqual([1, 3, 5])
   })
 })
 

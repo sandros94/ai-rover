@@ -100,6 +100,53 @@ export function roverLinkage(
   }
 }
 
+/** One side of the rocker-bogie in the level frame, as the side view draws it. */
+export interface SideArm {
+  /** Front wheel, rocker pivot, bogie pivot. */
+  rocker: [Point3, Point3, Point3]
+  /** Middle wheel, bogie pivot, rear wheel. */
+  bogie: [Point3, Point3, Point3]
+  /** Front, middle, rear, each with its cumulative rotation in radians. */
+  wheels: { center: Point3; spin: number }[]
+}
+
+/**
+ * The side view's two arms. The view draws the nose pointing to the viewer's right, so the viewer
+ * sees the rover's right side: the near arm follows the right rocker and right bogie angles, the
+ * far arm behind it the left ones.
+ */
+export interface SideView {
+  near: SideArm
+  far: SideArm
+}
+
+type SideAttitude = Articulation & Pick<FrameAttitude, 'spins'>
+
+/** Side 0 is left, 1 right, each with its own rocker angle. */
+function sideArm(attitude: SideAttitude, geometry: ResolvedRoverGeometry, s: 0 | 1): SideArm {
+  // The linkage turns the right rocker by the opposite of the left rocker angle it takes.
+  const left = s === 0 ? attitude.rocker.left : -attitude.rocker.right
+  const {
+    wheels: w,
+    rockerPivots,
+    bogiePivots,
+  } = roverLinkage({ ...attitude, rocker: { left, right: -left } }, geometry)
+  const bogiePivot = bogiePivots[s]!
+  return {
+    rocker: [w[s]!, rockerPivots[s]!, bogiePivot],
+    bogie: [w[2 + s]!, bogiePivot, w[4 + s]!],
+    wheels: [s, 2 + s, 4 + s].map((k) => ({ center: w[k]!, spin: attitude.spins[k] ?? 0 })),
+  }
+}
+
+/** The side view's arms at an attitude; see {@link SideView} for which side is near. */
+export function sideView(
+  attitude: SideAttitude,
+  geometry: ResolvedRoverGeometry = DEFAULT_ROVER_GEOMETRY,
+): SideView {
+  return { near: sideArm(attitude, geometry, 1), far: sideArm(attitude, geometry, 0) }
+}
+
 /** Closed set, in rising severity. */
 export type AttitudeLevel = 'ok' | 'warn' | 'fail'
 

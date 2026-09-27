@@ -3,8 +3,16 @@ export type {
   AttitudeReading,
   FrameAttitude,
   RoverLinkage,
+  SideArm,
+  SideView,
 } from './attitude-geometry'
-export { attitudeLevels, frameAttitude, levelPoint, roverLinkage } from './attitude-geometry'
+export {
+  attitudeLevels,
+  frameAttitude,
+  levelPoint,
+  roverLinkage,
+  sideView,
+} from './attitude-geometry'
 export type { Odometer, OdometerReading } from './efficiency'
 export { createOdometer, driveEfficiency, slipOverLastMetre } from './efficiency'
 export type { FeedItem } from './event-feed'
