@@ -116,24 +116,41 @@ describe('revealed mask', () => {
 })
 
 describe('revealedOverDisk', () => {
-  it('matches isRevealed at every vertex of the disk grid', () => {
+  it('matches isRevealed within the survey and holds nothing beyond it', () => {
     const mask = revealDisk(createRevealedMask(world), second)
     const bits = revealedOverDisk(mask, first)
     const { width, height } = first.grid
     expect(bits.length).toBe(width * height)
     let revealed = 0
     let hidden = 0
+    let beyond = 0
     for (let gj = 0; gj < height; gj++) {
       for (let gi = 0; gi < width; gi++) {
         const point = { x: gi + first.origin.i, y: gj + first.origin.j }
-        const expected = isRevealed(mask, world, point) ? 1 : 0
+        const within = Math.hypot(point.x - first.center.x, point.y - first.center.y) <= 90
+        const seen = isRevealed(mask, world, point)
+        const expected = within && seen ? 1 : 0
         expect(bits[gj * width + gi]).toBe(expected)
         if (expected) revealed++
         else hidden++
+        if (seen && !within) beyond++
       }
     }
     expect(revealed).toBeGreaterThan(0)
     expect(hidden).toBeGreaterThan(0)
+    // The second stop saw ground of the first disk's margin, which is not part of its survey.
+    expect(beyond).toBeGreaterThan(0)
+  })
+
+  it('holds no vertex beyond the survey, whatever the mask has seen', () => {
+    // Every vertex of every chunk seen: the survey alone bounds what the disk reveals.
+    const all = createRevealedMask(world)
+    for (const { cx, cy } of first.chunks) {
+      all.chunks.set(`${cx},${cy}`, new Uint8Array(all.vertexCount ** 2).fill(1))
+    }
+    const bits = revealedOverDisk(all, first)
+    expect(bits.some((b) => b === 0)).toBe(true)
+    expect(bits.every((b, k) => b === first.inside[k])).toBe(true)
   })
 
   it('refuses a disk from a world with a different cell size', () => {

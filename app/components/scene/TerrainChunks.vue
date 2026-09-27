@@ -6,7 +6,9 @@ import {
   Mesh,
   MeshDepthMaterial,
   MeshLambertMaterial,
+  Vector2,
 } from 'three'
+import type { WebGLProgramParametersWithUniforms } from 'three'
 import type { GridRect } from '#shared/utils/client'
 import { maskChange } from '#shared/utils/client'
 import type { ChunkFog, ChunkMesh, LodLevel, TerrainChunk } from '#shared/utils/client/scene'
@@ -46,6 +48,8 @@ const props = defineProps<{
    * A new value recolours, in place, only the chunks meeting what changed.
    */
   sight?: Uint8Array
+  /** The stop's survey, world metres: ground beyond it is not drawn. Absent: none is cut. */
+  survey?: { center: { x: number; y: number }; radius: number }
 }>()
 
 /** Distance the focus must move before levels are re-evaluated. */
@@ -68,6 +72,32 @@ interface Drawn {
 }
 
 const root = new Group()
+/**
+ * The survey cut per fragment, so its edge is a true circle at every level of detail; the
+ * uniforms are shared with the compiled programs and follow the prop. The shadow pass cuts too:
+ * ground beyond the survey is not shown, so it casts no shadow into it either.
+ */
+const surveyUniforms = {
+  surveyCenter: { value: new Vector2() },
+  // Far beyond any disk: nothing is cut until a survey is given.
+  surveyRadius: { value: 1e9 },
+}
+function cutToSurvey(shader: WebGLProgramParametersWithUniforms): void {
+  Object.assign(shader.uniforms, surveyUniforms)
+  shader.vertexShader = `varying vec2 vSurveyXY;\n${shader.vertexShader.replace(
+    '#include <project_vertex>',
+    '#include <project_vertex>\n\tvSurveyXY = (modelMatrix * vec4(transformed, 1.0)).xy;',
+  )}`
+  shader.fragmentShader = `uniform vec2 surveyCenter;\nuniform float surveyRadius;\nvarying vec2 vSurveyXY;\n${shader.fragmentShader.replace(
+    'void main() {',
+    'void main() {\n\tif (distance(vSurveyXY, surveyCenter) > surveyRadius) discard;',
+  )}`
+}
+watchEffect(() => {
+  const survey = props.survey
+  surveyUniforms.surveyCenter.value.set(survey?.center.x ?? 0, survey?.center.y ?? 0)
+  surveyUniforms.surveyRadius.value = survey?.radius ?? 1e9
+})
 const material = new MeshLambertMaterial({ vertexColors: true })
 material.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader
@@ -85,6 +115,7 @@ material.onBeforeCompile = (shader) => {
       '#include <fog_fragment>',
       '#include <fog_fragment>\n#ifdef USE_FOG\ngl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, vFogAmount );\n#endif',
     )
+  cutToSurvey(shader)
 }
 /**
  * The shadow pass draws the ground without its skirts. A skirt's top edge lies on the ground,
@@ -103,6 +134,7 @@ depthMaterial.onBeforeCompile = (shader) => {
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', '#include <common>\nvarying float vSkirt;')
     .replace('void main() {', 'void main() {\n  if ( vSkirt > 0.0 ) discard;')
+  cutToSurvey(shader)
 }
 const drawn = new Map<string, Drawn>()
 let lastFocus: { x: number; y: number } | undefined

@@ -26,10 +26,9 @@ import {
 } from '#shared/utils/terrain'
 
 /**
- * Radius 60 m keeps the disk to the four chunks around the origin (about 85 KB, and as much again
- * for their pack), so every blob
- * the manifest names is on disk; a 30 m drive keeps the slices near 160 KB. Production uses a
- * 500 m disk and 50–250 m drives, which would weigh megabytes.
+ * A 60 m survey keeps the disk, margin included, to the sixteen chunks around the origin, so
+ * every blob the manifest names is on disk; a 30 m drive keeps the slices near 160 KB.
+ * Production uses a 500 m survey, which would weigh megabytes.
  */
 export const JOURNEY_FIXTURE = Object.freeze({
   seed: 'mars',

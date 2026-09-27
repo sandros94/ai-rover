@@ -112,19 +112,23 @@ export function revealProgress(fog: FogState, k: number, fadeMs = REVEAL_FADE_MS
  * rect-sized array row by row: 1 where unseen; on seen ground the larger of the fade still to
  * run and a soft edge falling to 0 over {@link FOG_EDGE_CELLS} cells from the nearest unseen
  * vertex. The edge lies on the revealed side, so no unseen vertex is ever partly shown.
+ *
+ * With `inside` (one byte per vertex, 1 within the survey), vertices beyond the survey are no
+ * ground at all: they carry no fog (0) and seen ground beside them has no soft edge.
  */
 export function fogCover(
   fog: FogState,
   size: { width: number; height: number },
-  options: { rect?: GridRect; edgeCells?: number; fadeMs?: number } = {},
+  options: { rect?: GridRect; edgeCells?: number; fadeMs?: number; inside?: Uint8Array } = {},
 ): Float32Array {
   const { width, height } = size
   checkSeen(fog.seen, width, height, 'fogCover')
-  const { edgeCells = FOG_EDGE_CELLS, fadeMs = REVEAL_FADE_MS } = options
+  const { edgeCells = FOG_EDGE_CELLS, fadeMs = REVEAL_FADE_MS, inside } = options
+  if (inside) checkSeen(inside, width, height, 'fogCover')
   const rect = options.rect ?? { i0: 0, j0: 0, i1: width, j1: height }
   const reach = edgeCells + 1
   const outer = expandRect(rect, reach, size)
-  const distance = distanceTo(fog.seen, width, outer, reach, 0)
+  const distance = distanceTo(fog.seen, width, outer, reach, 0, inside)
   const outerWidth = outer.i1 - outer.i0
   const rectWidth = rect.i1 - rect.i0
   const cover = new Float32Array(rectWidth * (rect.j1 - rect.j0))
@@ -132,6 +136,7 @@ export function fogCover(
     for (let i = rect.i0; i < rect.i1; i++) {
       const k = j * width + i
       const o = (j - rect.j0) * rectWidth + (i - rect.i0)
+      if (inside && !inside[k]) continue
       if (!fog.seen[k]) {
         cover[o] = 1
         continue
@@ -306,7 +311,8 @@ function windowSums(heights: Float32Array, seen: Uint8Array, width: number, rect
 /**
  * Chamfer distance, in cells, from each vertex of `rect` to the nearest vertex whose seen flag
  * equals `target`, capped at `cap`; rect-sized, row by row. Vertices outside `rect` count as
- * not being targets, so pad `rect` by `cap` around the area whose distances matter.
+ * not being targets, so pad `rect` by `cap` around the area whose distances matter. With
+ * `inside`, a vertex beyond the survey counts as seen.
  */
 function distanceTo(
   seen: Uint8Array,
@@ -314,13 +320,16 @@ function distanceTo(
   rect: GridRect,
   cap: number,
   target: 0 | 1,
+  inside?: Uint8Array,
 ): Float32Array {
   const w = rect.i1 - rect.i0
   const h = rect.j1 - rect.j0
   const d = new Float32Array(w * h)
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
-      d[j * w + i] = (seen[(rect.j0 + j) * width + rect.i0 + i] ? 1 : 0) === target ? 0 : cap
+      const k = (rect.j0 + j) * width + rect.i0 + i
+      const flag = seen[k] || (inside && !inside[k]) ? 1 : 0
+      d[j * w + i] = flag === target ? 0 : cap
     }
   }
   const diagonal = Math.SQRT2

@@ -36,6 +36,7 @@ import {
 import { RELIEF_STOPS, rgbHex, routeDestination, SEEN_STOPS } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
+import { surveyMask } from '#shared/utils/terrain'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 
 const props = withDefaults(
@@ -52,6 +53,7 @@ const props = withDefaults(
      * out of it, or all of it while there is none, is drawn as seen before.
      */
     sight?: Uint8Array
+    /** The survey: ground beyond `radius` of `center` is not drawn, only a ring at its edge. */
     center: MapPoint
     radius: number
     /** Where picks are measured from, with the allowed distance band around it. */
@@ -189,6 +191,22 @@ const painted = ref(0)
 /** How many of the terrain's placed rectangles the relief shows. */
 let shownPlaced = 0
 
+/**
+ * Per grid vertex, 1 within the survey: beyond it the map shows its own background. Kept while
+ * the grid and the survey stay, as views of arriving ground come and go.
+ */
+let surveyKey = ''
+const inside = computed<Uint8Array | undefined>((previous) => {
+  const terrain = props.terrain
+  if (!terrain) return undefined
+  const { grid, origin } = terrain
+  const { x, y } = props.center
+  const key = `${grid.width},${grid.height},${grid.cellSize},${origin.i},${origin.j},${x},${y},${props.radius}`
+  if (previous && surveyKey === key) return previous
+  surveyKey = key
+  return surveyMask(terrain, { center: props.center, radius: props.radius })
+})
+
 /** The sight when it fits the grid drawn; one that does not is no sight. */
 const shownSight = computed(() => {
   const grid = props.terrain?.grid
@@ -288,13 +306,24 @@ function paintArea(
   area: GridRect,
 ): void {
   const { width, height } = grid
-  reliefPixels(grid, { heightRange: heightRange.value, fog, rect: area, into: image.data.data })
-  const cover = fog && fogCover(fog, grid, { rect: area })
+  const survey = inside.value
+  reliefPixels(grid, {
+    heightRange: heightRange.value,
+    fog,
+    inside: survey,
+    rect: area,
+    into: image.data.data,
+  })
+  const cover = fog && fogCover(fog, grid, { rect: area, inside: survey })
   const areaWidth = area.i1 - area.i0
   for (let j = area.j0; j < area.j1; j++) {
     for (let i = area.i0; i < area.i1; i++) {
-      image.clear[j * width + i] =
-        !cover || cover[(j - area.j0) * areaWidth + (i - area.i0)] === 0 ? 1 : 0
+      const k = j * width + i
+      image.clear[k] =
+        (!survey || survey[k] === 1) &&
+        (!cover || cover[(j - area.j0) * areaWidth + (i - area.i0)] === 0)
+          ? 1
+          : 0
     }
   }
   image.context.putImageData(
@@ -327,9 +356,9 @@ function buildContours(image: ReliefImage, tiles: readonly ContourTile[]): void 
 }
 
 watch(
-  [() => props.terrain, fogRgb, heightRange, fade, shownSight] as const,
+  [() => props.terrain, fogRgb, heightRange, fade, shownSight, inside] as const,
   (next, previous) => {
-    const [terrain, rgb, range, frame, sight] = next
+    const [terrain, rgb, range, frame, sight, survey] = next
     const before = previous?.[0]
     const sameGround =
       !!relief &&
@@ -337,7 +366,8 @@ watch(
       before?.grid === terrain.grid &&
       before.origin === terrain.origin &&
       previous?.[1] === rgb &&
-      previous[2] === range
+      previous[2] === range &&
+      previous[5] === survey
     if (!sameGround) return paint()
     const update: ReliefUpdate = {}
     if (frame !== previous[3]) {
@@ -749,11 +779,12 @@ const focusRing = computed(() => {
       aria-hidden="true"
     >
       <circle
+        data-test="survey-ring"
         :cx="toScreen(center).x"
         :cy="toScreen(center).y"
         :r="scaled(radius)"
-        class="fill-none stroke-(--ui-border-accented)"
-        stroke-dasharray="4 4"
+        class="fill-none stroke-(--ui-text-muted)"
+        stroke-width="1"
       />
       <path
         v-if="ringPath"

@@ -727,9 +727,10 @@ class Drive {
     return out
   }
 
-  /** Marks vertices as seen, recording those not seen before. */
+  /** Marks vertices within the survey as seen, recording those not seen before. */
   private reveal(vertices: number[]): void {
-    const fresh = vertices.filter((k) => !this.seen[k])
+    const { inside } = this.options.disk
+    const fresh = vertices.filter((k) => !this.seen[k] && inside[k])
     if (fresh.length === 0) return
     for (const k of fresh) this.seen[k] = 1
     this.reveals.push({ t: this.time(), vertices: Uint32Array.from(fresh) })

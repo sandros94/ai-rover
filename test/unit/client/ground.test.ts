@@ -38,17 +38,18 @@ describe('createDiskGround', () => {
 
   it('places each listed chunk once, giving its vertex rectangle', () => {
     const ground = createDiskGround(manifest)
-    expect(ground.place(northEast)).toEqual({ i0: 64, j0: 64, i1: 129, j1: 129 })
+    // The disk's sixteen chunks run from cx, cy = -2: the four round the origin sit in the middle.
+    expect(ground.place(northEast)).toEqual({ i0: 128, j0: 128, i1: 193, j1: 193 })
     expect(ground.place(northEast)).toBeUndefined()
     expect(ground.place(generateChunk(world, { cx: 5, cy: 5 }))).toBeUndefined()
-    expect(ground.place(southWest)).toEqual({ i0: 0, j0: 0, i1: 65, j1: 65 })
+    expect(ground.place(southWest)).toEqual({ i0: 64, j0: 64, i1: 129, j1: 129 })
     expect(ground.placed).toEqual([
+      { i0: 128, j0: 128, i1: 193, j1: 193 },
       { i0: 64, j0: 64, i1: 129, j1: 129 },
-      { i0: 0, j0: 0, i1: 65, j1: 65 },
     ])
     const { heights, width } = ground.grid
-    expect(heights[70 * width + 70]).toBe(northEast.heights[6 * 65 + 6])
-    expect(heights[10 * width + 100]).toBeNaN()
+    expect(heights[134 * width + 134]).toBe(northEast.heights[6 * 65 + 6])
+    expect(heights[74 * width + 164]).toBeNaN()
   })
 
   it('refuses a chunk of another geometry with DECODE, leaving it to place', () => {
@@ -80,14 +81,14 @@ describe('painting a partial disk', () => {
     expect(tiles(false)).toEqual([])
     ground.place(southWest)
     ground.place(northEast)
-    expect(tiles(false)).toEqual([0, 3])
-    expect(tiles(true)).toEqual([0, 1, 2, 3])
+    expect(tiles(false)).toEqual([5, 10])
+    expect(tiles(true)).toEqual(Array.from({ length: 16 }, (_, k) => k))
     // An arrival meets its neighbours' tiles along the shared edge too.
     const arrived = ground.place(southEast)!
     expect(contourTiles(ground.grid, arrived, { tile: 64, complete: false })).toEqual([
-      { index: 0, rect: { i0: 0, j0: 0, i1: 65, j1: 65 } },
-      { index: 1, rect: { i0: 64, j0: 0, i1: 129, j1: 65 } },
-      { index: 3, rect: { i0: 64, j0: 64, i1: 129, j1: 129 } },
+      { index: 5, rect: { i0: 64, j0: 64, i1: 129, j1: 129 } },
+      { index: 6, rect: { i0: 128, j0: 64, i1: 193, j1: 129 } },
+      { index: 10, rect: { i0: 128, j0: 128, i1: 193, j1: 193 } },
     ])
   })
 
@@ -98,10 +99,10 @@ describe('painting a partial disk', () => {
     const { grid } = ground
     const pixels = reliefPixels(grid, { heightRange: manifest.heightRange })
     const alpha = (i: number, j: number) => pixels[((grid.height - 1 - j) * grid.width + i) * 4 + 3]
-    expect(alpha(10, 10)).toBe(255)
-    expect(alpha(100, 100)).toBe(255)
-    expect(alpha(100, 10)).toBe(0)
-    expect(alpha(10, 100)).toBe(0)
+    expect(alpha(74, 74)).toBe(255)
+    expect(alpha(164, 164)).toBe(255)
+    expect(alpha(164, 74)).toBe(0)
+    expect(alpha(74, 164)).toBe(0)
   })
 
   it('paints chunk by chunk to the same pixels as the whole disk at once', () => {
@@ -110,11 +111,14 @@ describe('painting a partial disk', () => {
     const { grid } = ground
     const into = new Uint8ClampedArray(grid.width * grid.height * 4)
     reliefPixels(grid, { heightRange: range, into })
-    for (const chunk of [northEast, southWest, northWest, southEast]) {
-      const rect = ground.place(chunk)!
+    // The four round the origin first, then the rest; each chunk lands once.
+    for (const chunk of [northEast, southWest, northWest, southEast, ...chunks]) {
+      const rect = ground.place(chunk)
+      if (!rect) continue
       // New ground shades the vertex beside it: repaint one vertex around the arrival.
       reliefPixels(grid, { heightRange: range, rect: expandRect(rect, 1, grid), into })
     }
+    expect(ground.complete).toBe(true)
     expect(into).toEqual(reliefPixels(disk.grid, { heightRange: range }))
   })
 })

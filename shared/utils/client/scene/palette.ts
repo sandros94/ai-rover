@@ -129,6 +129,8 @@ export function srgbToLinear(channel: number): number {
  */
 export const SCENE_COLORS = Object.freeze({
   route: '#38bdf8',
+  /** The ring at the survey's edge: the 2D map's muted grey. */
+  survey: '#a3a3a3',
   driven: '#fb923c',
   death: '#ef4444',
   /** Whatever is focused. */

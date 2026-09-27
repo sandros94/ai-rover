@@ -1,5 +1,11 @@
 import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
-import { createRevealedMask, defineWorld, revealDisk, traversableMask } from '#shared/utils/terrain'
+import {
+  createRevealedMask,
+  defineWorld,
+  revealDisk,
+  surveyMask,
+  traversableMask,
+} from '#shared/utils/terrain'
 import type { RoverPose } from '#shared/utils/rover'
 import type { SegmentRecord } from '#shared/utils/drive'
 import { DriveError, KEYFRAME_FIELDS } from '#shared/utils/drive'
@@ -75,6 +81,10 @@ export function syntheticDisk(
     grid,
     origin: { i: -HALF, j: -HALF },
     traversable,
+    inside: surveyMask(
+      { grid, origin: { i: -HALF, j: -HALF } },
+      { center: { x: 0, y: 0 }, radius },
+    ),
     reachableFrom: { i: HALF, j: HALF },
     reachable: traversable.slice(),
     visible,

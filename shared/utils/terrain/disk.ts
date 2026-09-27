@@ -6,18 +6,31 @@ import type { GridCell, HeightGrid } from './grid'
 import { viewshed } from './viewshed'
 import type { World } from './world'
 
-/** Radius of a stop disk when none is given: twice the longest segment (250 m). */
+/** Radius of a stop's survey when none is given, metres. */
 export const DEFAULT_STOP_RADIUS = 500
+
+/**
+ * Ground beyond the survey a stop disk still carries, metres: the chunks reach this much past
+ * the circle so shading, contours and the fog surface at its edge read real neighbours.
+ */
+export const SURVEY_MARGIN_M = 40
 
 /** How far {@link snapToPathable} looks for a pathable vertex when none is given, metres. */
 export const DEFAULT_SNAP_RADIUS = 5
 
-/** Everything the map and the planner need around one stationary point. */
+/**
+ * Everything the map and the planner need around one stationary point. The survey is the circle
+ * of `radius` around `center`: nothing beyond it is seen, reached, planned over or picked.
+ */
 export interface StopDisk {
   /** World metres. */
   center: { x: number; y: number }
+  /** The survey's radius, metres. */
   radius: number
-  /** Every chunk whose square intersects the disk, sorted by (cy, cx). */
+  /**
+   * Every chunk whose square comes within `radius` + {@link SURVEY_MARGIN_M} of the centre,
+   * sorted by (cy, cx).
+   */
   chunks: ChunkCoords[]
   /**
    * The listed chunks stitched over their bounding box, shared edges once. Vertices outside every
@@ -28,15 +41,48 @@ export interface StopDisk {
   origin: GridCell
   /** Per grid vertex: the chunks' traversable bit, 0 outside every listed chunk. */
   traversable: Uint8Array
+  /** Per grid vertex: 1 within the survey, as {@link surveyMask} gives it. */
+  inside: Uint8Array
   /**
    * Grid vertex the reachability flood fill starts from: the traversable vertex nearest the centre
    * vertex within the radius (lowest (j, i) on ties), or the centre vertex itself when there is none.
    */
   reachableFrom: GridCell
-  /** Per grid vertex: 8-connected to {@link StopDisk.reachableFrom} over traversable vertices. */
+  /**
+   * Per grid vertex: 8-connected to {@link StopDisk.reachableFrom} over traversable vertices
+   * within the survey.
+   */
   reachable: Uint8Array
-  /** Per grid vertex: in line of sight from the world's mast height above the centre vertex. */
+  /**
+   * Per grid vertex: within the survey and in line of sight from the world's mast height above
+   * the centre vertex.
+   */
   visible: Uint8Array
+}
+
+/**
+ * Per vertex of a grid whose vertex (0, 0) is world vertex `origin`: 1 where the vertex lies
+ * within `radius` metres of `center` (the survey), else 0.
+ */
+export function surveyMask(
+  layout: { grid: Pick<HeightGrid, 'width' | 'height' | 'cellSize'>; origin: GridCell },
+  survey: { center: { x: number; y: number }; radius: number },
+): Uint8Array {
+  const { width, height, cellSize } = layout.grid
+  const { origin } = layout
+  const { center, radius } = survey
+  assertPoint(center, 'surveyMask')
+  assertRadius(radius, 'surveyMask')
+  const out = new Uint8Array(width * height)
+  const radius2 = radius * radius
+  for (let j = 0; j < height; j++) {
+    const dy = (origin.j + j) * cellSize - center.y
+    for (let i = 0; i < width; i++) {
+      const dx = (origin.i + i) * cellSize - center.x
+      if (dx * dx + dy * dy <= radius2) out[j * width + i] = 1
+    }
+  }
+  return out
 }
 
 /** Nearest world vertex index to a point in world metres. */
@@ -96,8 +142,9 @@ export function chunksByRow(chunks: readonly ChunkCoords[]): ChunkCoords[] {
 }
 
 /**
- * Computes the disk around a stop. Heights and traversability come from {@link generateChunk}, so
- * the grid agrees bit for bit with the chunk blobs stored for it.
+ * Computes the disk around a stop: the survey of `radius` and its margin. Heights and
+ * traversability come from {@link generateChunk}, so the grid agrees bit for bit with the chunk
+ * blobs stored for it.
  */
 export function computeStopDisk(
   world: World,
@@ -105,7 +152,8 @@ export function computeStopDisk(
 ): StopDisk {
   const center = { x: options.center.x, y: options.center.y }
   const radius = options.radius ?? DEFAULT_STOP_RADIUS
-  const chunks = chunksCoveringDisk(world, { center, radius })
+  assertRadius(radius, 'computeStopDisk')
+  const chunks = chunksCoveringDisk(world, { center, radius: radius + SURVEY_MARGIN_M })
   const { chunkSize, cellSize, mastHeight } = world.config
   const cells = chunkSize / cellSize
   const vertexCount = cells + 1
@@ -169,17 +217,21 @@ export function completeStopDisk(
     i: Math.round(center.x / cellSize) - origin.i,
     j: Math.round(center.y / cellSize) - origin.j,
   }
+  const inside = surveyMask({ grid, origin }, { center, radius })
+  const walkable = new Uint8Array(width * height)
+  for (let k = 0; k < walkable.length; k++) walkable[k] = traversable[k]! & inside[k]!
   // The rover stands at the centre, so the ground around it is reachable even when the centre
   // vertex itself is too steep; the viewshed still starts from the centre vertex.
   const seed =
-    nearestTraversable(traversable, {
+    nearestTraversable(walkable, {
       width,
       height,
       start: viewer,
       maxDistance: radius / cellSize,
     }) ?? viewer
-  const reachable = reachableFrom(traversable, { width, height, start: seed })
+  const reachable = reachableFrom(walkable, { width, height, start: seed })
   const visible = viewshed(grid, { viewer, mastHeight, radius: radius / cellSize })
+  for (let k = 0; k < visible.length; k++) visible[k]! &= inside[k]!
   return {
     center,
     radius,
@@ -187,6 +239,7 @@ export function completeStopDisk(
     grid,
     origin,
     traversable,
+    inside,
     reachableFrom: seed,
     reachable,
     visible,
@@ -199,14 +252,15 @@ export function completeStopDisk(
  * - `unrevealed`: no vertex within the search radius has been seen, so nothing there may be picked.
  * - `unpathable`: seen vertices lie within the search radius but none is traversable and
  *   reachable, or no vertex of the disk lies there at all.
+ * - `outside`: the point lies beyond the survey.
  */
-export type SnapRefusal = 'unpathable' | 'unrevealed'
+export type SnapRefusal = 'unpathable' | 'unrevealed' | 'outside'
 
 /**
- * The vertex nearest `point` that is seen, traversable, marked reachable and within the disk
- * radius, searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point. Equal
- * distances go to the lowest (j, i). The refusal is decided from seen vertices only, so it never
- * tells what unseen ground holds.
+ * The vertex nearest `point` that is seen, traversable, marked reachable and within the survey,
+ * searched within `radiusM` (default {@link DEFAULT_SNAP_RADIUS}) of the point; a point beyond
+ * the survey is refused as `outside`. Equal distances go to the lowest (j, i). The refusal is
+ * decided from seen vertices and the survey only, so it never tells what unseen ground holds.
  */
 export function snapToPathable(
   disk: StopDisk,
@@ -221,13 +275,16 @@ export function snapToPathable(
   const { revealed } = options
   const radiusM = options.radiusM ?? DEFAULT_SNAP_RADIUS
   assertRadius(radiusM, 'snapToPathable')
-  const { center, radius, origin, grid, traversable, reachable } = disk
+  const { center, radius, origin, grid, traversable, reachable, inside } = disk
   const { width, height, cellSize } = grid
   if (revealed.length !== width * height) {
     throw new TerrainError(
       'INVALID_GRID',
       `snapToPathable: revealed holds ${revealed.length} values; the ${width}×${height} disk grid needs ${width * height}. Pass revealedOverDisk of this disk.`,
     )
+  }
+  if (Math.hypot(point.x - center.x, point.y - center.y) > radius) {
+    return { ok: false, reason: 'outside' }
   }
   const reach = Math.ceil(radiusM / cellSize)
   const ci = Math.round(point.x / cellSize) - origin.i
@@ -241,9 +298,9 @@ export function snapToPathable(
       const x = (origin.i + i) * cellSize
       const y = (origin.j + j) * cellSize
       const distance = Math.hypot(x - point.x, y - point.y)
-      if (distance > radiusM || Math.hypot(x - center.x, y - center.y) > radius) continue
-      candidates = true
       const k = j * width + i
+      if (distance > radiusM || !inside[k]) continue
+      candidates = true
       if (!revealed[k]) continue
       seen = true
       if (!traversable[k] || !reachable[k] || distance >= bestDistance) continue

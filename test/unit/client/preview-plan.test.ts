@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES, planGoal } from '#shared/utils/mission'
 import type { MissionRules } from '#shared/utils/mission'
 import { estimatedDriveMinutes } from '#shared/utils/drive'
 import { planSegment } from '#shared/utils/nav'
@@ -106,11 +106,14 @@ describe('previewPlan on the recorded journey', () => {
     })
   })
 
-  it('refuses a point with no pathable ground within reach', () => {
-    expect(previewPlan(ground.disk, { ...base, point: { x: 200, y: 200 } })).toEqual({
-      ok: false,
-      reason: 'unpathable',
-    })
+  it('refuses a point beyond the survey as outside, as the server does', () => {
+    const beyond = { x: 36, y: 48.1 }
+    expect(Math.hypot(beyond.x, beyond.y)).toBeGreaterThan(fixture.disk.radius)
+    const outside = { ok: false, reason: 'outside' }
+    expect(previewPlan(ground.disk, { ...base, point: beyond })).toEqual(outside)
+    expect(snapToPathable(fixture.disk, beyond, { revealed: serverRevealed })).toEqual(outside)
+    // A goal submitted from another stop, planned over this one, is refused rather than thrown.
+    expect(planGoal(fixture.disk, { ...base, start: anchor, goal: beyond })).toEqual(outside)
   })
 
   it('refuses a point on unseen ground as unrevealed, as the server does', () => {

@@ -26,8 +26,8 @@ export function at(base: Date, ms: number): Date {
 export const MINUTE = 60_000
 
 /**
- * The default rules with every distance at a quarter, the stop disk included: a stop generates
- * and publishes 16 chunks instead of 224, and drives run tens of metres. The distances keep their
+ * The default rules with every distance at a quarter, the survey included: a stop generates
+ * and publishes 32 chunks instead of 256, and drives run tens of metres. The distances keep their
  * proportions (the disk still spans twice the band), so a mission behaves as at full size; goals
  * in tests on these rules use the same quarter scale.
  */

@@ -9,7 +9,7 @@ export {
   roundCloseAt,
   shouldResetToPreviousStop,
 } from './rules'
-export type { SubmissionRefusal } from './plan-goal'
+export type { PlanRefusal, SubmissionRefusal } from './plan-goal'
 export { planGoal } from './plan-goal'
 export type { NotMovingReason } from './not-moving'
 export {

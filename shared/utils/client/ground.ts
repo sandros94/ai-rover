@@ -11,6 +11,9 @@ import type { GridRect } from './fog'
 export interface DiskGround {
   readonly grid: HeightGrid
   readonly origin: GridCell
+  /** The stop, world metres, and the radius of its survey: the manifest's. */
+  readonly center: { x: number; y: number }
+  readonly radius: number
   /** Vertex rectangles of the chunks placed, in the order placed; only ever grows. */
   readonly placed: readonly GridRect[]
   /** Every listed chunk is placed. */
@@ -39,7 +42,8 @@ export function chunkVerticesOf(manifest: {
 
 /** The disk the manifest lists, with no chunk placed. */
 export function createDiskGround(
-  manifest: Pick<StopManifest, 'chunks'> & {
+  manifest: Pick<StopManifest, 'chunks' | 'radius'> & {
+    stop: { x: number; y: number }
     world: Pick<StopManifest['world'], 'chunkSize' | 'cellSize'>
   },
 ): DiskGround {
@@ -94,6 +98,8 @@ export function createDiskGround(
   return {
     grid,
     origin: { i: minCx * cells, j: minCy * cells },
+    center: { x: manifest.stop.x, y: manifest.stop.y },
+    radius: manifest.radius,
     placed,
     get complete() {
       return pending.size === 0

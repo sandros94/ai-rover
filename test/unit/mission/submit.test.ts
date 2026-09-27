@@ -60,6 +60,17 @@ describe('submitGoal', () => {
     expect(await listRoundSubmissions(db, round.id)).toEqual([])
   })
 
+  it('refuses a goal beyond the 125 m survey as outside, without asking Jev', async () => {
+    const { ada, submit, jev, round } = await landed()
+    expect(await submit(ada.id, { x: 0, y: 126 })).toEqual({
+      accepted: false,
+      reason: 'outside',
+      submission: null,
+    })
+    expect(jev.summaries).toHaveLength(0)
+    expect(await listRoundSubmissions(db, round.id)).toEqual([])
+  })
+
   it('stores a valid goal as an open submission with its judgment, metrics and summary', async () => {
     const { ada, submit, jev, round } = await landed()
     const result = await submit(ada.id, { x: 0.4, y: 20.3 })

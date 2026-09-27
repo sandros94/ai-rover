@@ -128,6 +128,36 @@ describe('driveSegment on flat ground', () => {
   })
 })
 
+describe('driveSegment near the edge of its survey', () => {
+  const world = syntheticWorld({})
+  // The east half unseen from the stop, so the drive has ground to reveal near the edge.
+  const disk = syntheticDisk(world, { radius: 60, hidden: (x) => x > 0 })
+  const { record } = driveSegment(world, {
+    disk,
+    revealed: revealedAfterStop(world, disk),
+    start: { x: -50, y: 0, headingRad: 0 },
+    goal: { x: 50, y: 0 },
+  })
+
+  it('reveals nothing beyond the survey, though its viewsheds reach past it', () => {
+    const { width, cellSize } = disk.grid
+    let revealed = 0
+    let beyond = 0
+    for (const { vertices } of record.reveals) {
+      for (const k of vertices) {
+        revealed++
+        const i = k % width
+        const x = (disk.origin.i + i) * cellSize
+        const y = (disk.origin.j + (k - i) / width) * cellSize
+        if (Math.hypot(x, y) > disk.radius) beyond++
+      }
+    }
+    expect(record.outcome.kind).toBe('arrived')
+    expect(revealed).toBeGreaterThan(0)
+    expect(beyond).toBe(0)
+  })
+})
+
 describe('driveSegment through a blended corner', () => {
   const world = syntheticWorld({})
   // An L-shaped corridor: north along x = −30, then east along y = 30.

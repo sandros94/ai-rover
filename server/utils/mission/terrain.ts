@@ -8,7 +8,8 @@ import { LifecycleError } from './errors'
 
 /**
  * Worlds and stop disks are pure functions of stored rows, so each process keeps the recent ones.
- * A disk over the default 500 m radius holds about 1.2 M vertices (≈ 8 MB), hence the small bound.
+ * A disk over the default 500 m survey and its margin holds about 1.3 M vertices (≈ 11 MB), hence
+ * the small bound.
  */
 const WORLD_LIMIT = 8
 const DISK_LIMIT = 4

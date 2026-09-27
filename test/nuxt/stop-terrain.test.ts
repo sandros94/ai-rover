@@ -53,10 +53,11 @@ describe('useStopTerrain', () => {
     const records = journeyFetch()
     const terrain = await mountTerrain(records)
     expect(terrainCalls(records.calls)).toEqual([`/journey/${stopManifest.packKey}`])
-    expect(terrain.loaded.value).toBe(4)
+    expect(stopManifest.chunks).toHaveLength(16)
+    expect(terrain.loaded.value).toBe(stopManifest.chunks.length)
     expect(terrain.revealed.value).toBeDefined()
     await vi.waitFor(() => expect(terrain.ground.value?.complete).toBe(true))
-    expect(terrain.ground.value?.placed).toHaveLength(4)
+    expect(terrain.ground.value?.placed).toHaveLength(stopManifest.chunks.length)
     expect(terrain.ground.value?.heightRange).toEqual(stopManifest.heightRange)
   })
 
@@ -68,7 +69,7 @@ describe('useStopTerrain', () => {
     expect(calls.slice(1).toSorted()).toEqual(
       stopManifest.chunks.map((c) => `/journey/${c.key}`).toSorted(),
     )
-    expect(terrain.loaded.value).toBe(4)
+    expect(terrain.loaded.value).toBe(stopManifest.chunks.length)
     expect(terrain.error.value).toBeNull()
   })
 
@@ -84,7 +85,7 @@ describe('useStopTerrain', () => {
     expect(terrainCalls(records.calls).toSorted()).toEqual(
       stopManifest.chunks.map((c) => `/journey/${c.key}`).toSorted(),
     )
-    expect(terrain.loaded.value).toBe(4)
+    expect(terrain.loaded.value).toBe(stopManifest.chunks.length)
     // Its ground is shown whole, tinted over its own heights.
     await vi.waitFor(() => expect(terrain.ground.value?.complete).toBe(true))
     expect(terrain.ground.value?.heightRange).toBeUndefined()

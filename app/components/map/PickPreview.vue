@@ -30,6 +30,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const REASONS: Record<SubmissionRefusal, string> = {
   'unpathable': 'No reachable ground there: pick a spot the rover can get to.',
   'unrevealed': 'The rover has not seen that ground yet: pick a spot on the revealed map.',
+  'outside': 'Beyond the survey: pick a spot inside the ring.',
   'too-near': 'Too near: a segment is at least 50 m.',
   'too-far': 'Too far: a segment is at most 250 m.',
   'near-death-zone': 'Too close to where the rover was lost before.',

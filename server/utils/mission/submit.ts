@@ -13,7 +13,7 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import type { JourneyStore } from '../journey/store'
-import type { GoalRefusal, MapPoint, MissionRules, SubmissionRefusal } from '#shared/utils/mission'
+import type { MapPoint, MissionRules, PlanRefusal, SubmissionRefusal } from '#shared/utils/mission'
 import { planGoal } from '#shared/utils/mission'
 import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
@@ -44,10 +44,7 @@ export interface PlanningGround {
 export async function assessGoal(
   ground: PlanningGround,
   options: { goal: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules; jev: JevClient },
-): Promise<
-  | { ok: true; assessment: SubmissionAssessment }
-  | { ok: false; reason: GoalRefusal | 'path-near-death-zone' }
-> {
+): Promise<{ ok: true; assessment: SubmissionAssessment } | { ok: false; reason: PlanRefusal }> {
   const { world, disk, revealed, start } = ground
   const { goal, deaths, rules, jev } = options
   const planned = planGoal(disk, {

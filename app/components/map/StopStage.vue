@@ -99,6 +99,15 @@ const emit = defineEmits<{ pick: [point: MapPoint]; hover: [point: MapPoint | nu
 /** The 2D fog: the stop's flags with the drive's reveals lifted; the 3D view lifts its own. */
 const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveals))
 
+/** The survey for the 3D view, one object while it stays, so the scene does not redraw its ring. */
+const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
+  const { center, radius } = props
+  if (previous?.center.x === center.x && previous.center.y === center.y) {
+    if (previous.radius === radius) return previous
+  }
+  return { center: { x: center.x, y: center.y }, radius }
+})
+
 /** What the rover has in line of sight now over what has been revealed, across the whole disk. */
 const sight = useCurrentSight(
   () => shownSeen.value,
@@ -144,6 +153,7 @@ const sight = useCurrentSight(
       :terrain="(ground ?? terrain)!"
       :seen="seen"
       :sight="sight"
+      :survey="survey"
       :chunk-vertices="chunkVertices"
       :height-at="heightAt"
       :frame="frame"

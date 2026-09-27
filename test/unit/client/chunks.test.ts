@@ -180,7 +180,7 @@ describe('createChunkCache', () => {
     ).toBe(true)
     expect(calls).toEqual([`/journey/${packKey}`])
     expect(seen).toEqual(chunks.map((c) => `${c.cx},${c.cy}`))
-    expect(cache.size).toBe(4)
+    expect(cache.size).toBe(16)
     expect(cache.geometry).toEqual({ vertexCount: 65, cellSize: 1 })
     await cache.prefetch(chunks)
     expect(calls).toHaveLength(1)

@@ -53,8 +53,9 @@ export interface ReliefFog extends FogState {
  * the grid's own span) times the hillshade unless `hillshade` is false; NaN heights transparent.
  * With `fog`, unseen vertices are opaque fog texture, never relief, revealed ground out of the
  * fog's `sight` takes the seen-before tint, and revealed ground blends into the fog by
- * {@link fogCover}. With `rect`, only those vertices are painted, into `into` when
- * given (a full-size buffer), so a reveal repaints only what it changed.
+ * {@link fogCover}. With `inside` (one byte per vertex, 1 within the survey), vertices beyond
+ * the survey are transparent, neither ground nor fog. With `rect`, only those vertices are
+ * painted, into `into` when given (a full-size buffer), so a reveal repaints only what it changed.
  */
 export function reliefPixels(
   grid: HeightGrid,
@@ -62,14 +63,15 @@ export function reliefPixels(
     hillshade?: boolean
     heightRange?: { min: number; max: number }
     fog?: ReliefFog
+    inside?: Uint8Array
     rect?: GridRect
     into?: Uint8ClampedArray<ArrayBuffer>
   } = {},
 ): Uint8ClampedArray<ArrayBuffer> {
   const { width, height, heights } = grid
-  const { fog } = options
+  const { fog, inside } = options
   const rect = options.rect ?? { i0: 0, j0: 0, i1: width, j1: height }
-  const cover = fog && fogCover(fog, { width, height }, { rect })
+  const cover = fog && fogCover(fog, { width, height }, { rect, inside })
   const range = options.heightRange ?? heightSpan(heights)
   const span = range.max - range.min || 1
   const shaded = options.hillshade !== false
@@ -85,7 +87,7 @@ export function reliefPixels(
       const k = j * width + i
       const p = (row + i) * 4
       const h = heights[k]!
-      if (Number.isNaN(h)) {
+      if (Number.isNaN(h) || (inside && !inside[k])) {
         pixels[p] = pixels[p + 1] = pixels[p + 2] = pixels[p + 3] = 0
         continue
       }

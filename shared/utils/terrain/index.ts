@@ -32,6 +32,8 @@ export {
   DEFAULT_SNAP_RADIUS,
   DEFAULT_STOP_RADIUS,
   snapToPathable,
+  SURVEY_MARGIN_M,
+  surveyMask,
   worldToVertex,
 } from './disk'
 export type { RevealedMask } from './revealed'

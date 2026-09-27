@@ -9,6 +9,8 @@ import {
   MASK_TRAVERSABLE,
   reachableFrom,
   snapToPathable,
+  SURVEY_MARGIN_M,
+  surveyMask,
   TerrainError,
   worldToVertex,
 } from '#shared/utils/terrain'
@@ -161,10 +163,47 @@ describe('computeStopDisk', () => {
   const n = world.config.chunkSize / world.config.cellSize
   const vertexCount = n + 1
 
+  /** The disk's traversable vertices within its survey: what reachability floods over. */
+  const walkable = disk.traversable.map((t, k) => t & disk.inside[k]!)
+
   it('describes the disk it was asked for', () => {
     expect(disk.center).toEqual(center)
     expect(disk.radius).toBe(120)
-    expect(disk.chunks).toEqual(chunksCoveringDisk(world, { center, radius: 120 }))
+    expect(disk.chunks).toEqual(
+      chunksCoveringDisk(world, { center, radius: 120 + SURVEY_MARGIN_M }),
+    )
+  })
+
+  it('covers the survey and its margin with chunks, and no chunk beyond them', () => {
+    expect(disk.chunks).toEqual(bruteForceChunks(world, center, 120 + SURVEY_MARGIN_M))
+    expect(disk.chunks.length).toBeGreaterThan(
+      chunksCoveringDisk(world, { center, radius: 120 }).length,
+    )
+  })
+
+  it('marks the survey: every vertex within the radius of the centre, none beyond', () => {
+    expect(disk.inside).toEqual(surveyMask(disk, disk))
+    let within = 0
+    let mismatches = 0
+    for (let gj = 0; gj < disk.grid.height; gj++) {
+      for (let gi = 0; gi < disk.grid.width; gi++) {
+        const x = gi + disk.origin.i
+        const y = gj + disk.origin.j
+        const expected = Math.hypot(x - center.x, y - center.y) <= 120 ? 1 : 0
+        if (disk.inside[gj * disk.grid.width + gi] !== expected) mismatches++
+        within += expected
+      }
+    }
+    expect(mismatches).toBe(0)
+    expect(within).toBeGreaterThan(0)
+  })
+
+  it('sees and reaches nothing beyond the survey, however open the ground', () => {
+    let beyond = 0
+    for (let k = 0; k < disk.inside.length; k++) {
+      if (!disk.inside[k] && (disk.visible[k] || disk.reachable[k])) beyond++
+    }
+    expect(beyond).toBe(0)
   })
 
   it('sizes the grid to the chunks’ bounding box with shared edges once', () => {
@@ -253,7 +292,8 @@ describe('computeStopDisk', () => {
     const start = { i: v.i - disk.origin.i, j: v.j - disk.origin.j }
     expect(disk.reachableFrom).toEqual(start)
     const { width, height } = disk.grid
-    expect(disk.reachable).toEqual(reachableFrom(disk.traversable, { width, height, start }))
+    const flood = reachableFrom(walkable, { width, height, start })
+    expect(disk.reachable.every((r, k) => r === flood[k])).toBe(true)
   })
 
   it('reaches only traversable vertices', () => {
@@ -268,12 +308,19 @@ describe('computeStopDisk', () => {
     expect(again).toEqual(disk)
   })
 
-  it('defaults the radius to 500 m', () => {
+  it('defaults the radius to 500 m, and refuses a goal 501 m away as outside', () => {
     const full = computeStopDisk(world, { center: { x: 0, y: 0 } })
     expect(full.radius).toBe(500)
-    expect(full.chunks).toEqual(chunksCoveringDisk(world, { center: { x: 0, y: 0 }, radius: 500 }))
-    expect(full.grid.width).toBe(16 * n + 1)
+    expect(full.chunks).toEqual(
+      chunksCoveringDisk(world, { center: { x: 0, y: 0 }, radius: 500 + SURVEY_MARGIN_M }),
+    )
+    expect(full.grid.width).toBe(18 * n + 1)
     expect(full.visible).toHaveLength(full.grid.width * full.grid.height)
+    const revealed = new Uint8Array(full.visible.length).fill(1)
+    expect(snapToPathable(full, { x: 0, y: 501 }, { revealed })).toEqual({
+      ok: false,
+      reason: 'outside',
+    })
   })
 })
 
@@ -326,9 +373,9 @@ describe('computeStopDisk on an untraversable centre vertex', () => {
   it('reaches a non-empty region holding the seed, the same as a flood fill from the seed', () => {
     expect(disk.reachable[k(disk.reachableFrom)]).toBe(1)
     expect(disk.reachable.some((r) => r === 1)).toBe(true)
-    expect(disk.reachable).toEqual(
-      reachableFrom(disk.traversable, { width, height, start: disk.reachableFrom }),
-    )
+    const walkable = disk.traversable.map((t, n) => t & disk.inside[n]!)
+    const flood = reachableFrom(walkable, { width, height, start: disk.reachableFrom })
+    expect(disk.reachable.every((r, n) => r === flood[n])).toBe(true)
   })
 
   it('still sees from the centre vertex itself', () => {
@@ -436,14 +483,24 @@ describe('snapToPathable', () => {
     expect(snapToPathable(disk, { x: 30, y: 40 }, { revealed: seen, radiusM: 12 }).ok).toBe(true)
   })
 
-  it('refuses a point outside the disk', () => {
-    const out = { ok: false, reason: 'unpathable' }
+  it('refuses a point beyond the survey as outside', () => {
+    const out = { ok: false, reason: 'outside' }
     expect(snapToPathable(base, { x: 0, y: 400 }, { revealed: seen })).toEqual(out)
-    // Vertices beyond the disk radius are never candidates, even within the search radius.
-    expect(snapToPathable(base, { x: 0, y: 106 }, { revealed: seen })).toEqual(out)
+    expect(snapToPathable(base, { x: 0, y: 100.01 }, { revealed: seen })).toEqual(out)
     expect(
       terrainErrorOf(() => snapToPathable(base, { x: Number.NaN, y: 0 }, { revealed: seen }))?.code,
     ).toBe('OUT_OF_BOUNDS')
+  })
+
+  it('never snaps to a vertex beyond the survey, however pathable', () => {
+    // Everything within the survey near the point is blocked; the pathable margin lies beyond.
+    const near = square(-5, 94, 5, 100).filter(([x, y]) => Math.hypot(x, y) <= 100)
+    const disk = blocked(near)
+    expect(base.traversable[at(0, 102)]).toBe(1)
+    expect(snapToPathable(disk, { x: 0, y: 99 }, { revealed: seen })).toEqual({
+      ok: false,
+      reason: 'unpathable',
+    })
   })
 
   it('never snaps to an unseen vertex, however pathable', () => {

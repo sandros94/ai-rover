@@ -9,6 +9,7 @@ import { checkPathClearOfDeaths, checkSubmissionGoal } from './rules'
  *
  * - `unpathable`: no seen vertex near the goal is traversable and reachable from the stop.
  * - `unrevealed`: the rover has seen nothing near the goal.
+ * - `outside`: the goal lies beyond the survey of the stop it is planned from.
  * - `too-near`, `too-far`, `near-death-zone`: the snapped goal breaks a mission rule.
  * - `path-near-death-zone`: the planned route passes too close to a death.
  * - `judged-infeasible`: Jev's verdict is reject.
@@ -26,10 +27,13 @@ export type SubmissionRefusal =
   | 'too-many-attempts'
   | 'round-changed'
 
+/** Why {@link planGoal} refuses a goal. Closed set. */
+export type PlanRefusal = GoalRefusal | 'outside' | 'path-near-death-zone'
+
 /**
- * A snapped goal checked against the rules and the deaths from `start`, then planned over the
- * disk. The server's authoritative assessment and the browser's preview both run this, so the
- * preview refuses and routes exactly as a submission will.
+ * A snapped goal checked against the survey, the rules and the deaths from `start`, then planned
+ * over the disk. The server's authoritative assessment and the browser's preview both run this,
+ * so the preview refuses and routes exactly as a submission will.
  */
 export function planGoal(
   disk: StopDisk,
@@ -42,8 +46,12 @@ export function planGoal(
     rules: MissionRules
     slopeLimitDeg: number
   },
-): { ok: true; plan: SegmentPlan } | { ok: false; reason: GoalRefusal | 'path-near-death-zone' } {
+): { ok: true; plan: SegmentPlan } | { ok: false; reason: PlanRefusal } {
   const { revealed, start, goal, deaths, rules, slopeLimitDeg } = options
+  // A goal submitted from another stop may lie beyond this one's survey.
+  if (Math.hypot(goal.x - disk.center.x, goal.y - disk.center.y) > disk.radius) {
+    return { ok: false, reason: 'outside' }
+  }
   const rule = checkSubmissionGoal(goal, { start, deaths, rules })
   if (!rule.ok) return rule
   const plan = planSegment(disk, { revealed, start, goal, slopeLimitDeg })
