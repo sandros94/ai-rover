@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FOG_FILL } from '#shared/utils/client/scene/palette'
-import {
-  atmosphereColor,
-  DEFAULT_LATITUDE_DEG,
-  skyLighting,
-  sunPosition,
-} from '#shared/utils/client/scene/sun'
+import { DEFAULT_LATITUDE_DEG, skyLighting, sunPosition } from '#shared/utils/client/scene/sun'
 
 describe('sunPosition', () => {
   it('stands above the horizon at noon, due south of a northern site, and below it at midnight', () => {
@@ -93,15 +87,5 @@ describe('skyLighting', () => {
 
   it('holds the night key below its range', () => {
     expect(skyLighting(-80)).toEqual(skyLighting(-18))
-  })
-})
-
-describe('atmosphereColor', () => {
-  it('blends the colour-mode fill into the day sky and leaves the night sky dark', () => {
-    const day = skyLighting(60)
-    expect(atmosphereColor(day, FOG_FILL.light)).not.toBe(day.horizon)
-    const night = skyLighting(-18)
-    const dark = atmosphereColor(night, FOG_FILL.light)
-    expect(Number.parseInt(dark.slice(1, 3), 16)).toBeLessThan(40)
   })
 })

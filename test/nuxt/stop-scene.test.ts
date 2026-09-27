@@ -57,7 +57,7 @@ function grid(size: number) {
 }
 
 describe('StopStage in 3D', () => {
-  it('lights the scene with the sun of its time, under AgX with soft shadows', async () => {
+  it('lights the scene with the sun of its time and hazes it in its sky, under AgX with soft shadows', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const solFraction = 0.3
     const stage = await mountSuspended(StopStage, {
@@ -80,6 +80,9 @@ describe('StopStage in 3D', () => {
     const sun = stage.findComponent({ name: 'SceneSun' })
     expect(sun.exists()).toBe(true)
     expect(sun.props('direction')).toEqual(sunPosition(solFraction).direction)
+    // Haze, sky background and unseen ground are the sky's horizon, whatever the colour mode.
+    const horizon = skyLighting(sunPosition(solFraction).elevationDeg).horizon
+    expect(stage.findComponent({ name: 'SceneAtmosphere' }).props('color')).toBe(horizon)
 
     expect(tres.canvas.at(-1)).toMatchObject({
       toneMapping: CustomToneMapping,

@@ -6,9 +6,8 @@ import type { SkyLighting } from '#shared/utils/client/scene'
 const props = defineProps<{
   /** Unit vector towards the sun, world x east, y north, z up. */
   direction: { x: number; y: number; z: number }
+  /** The sky's colours; its horizon, the sky at and below the horizon, is the fog's colour. */
   lighting: SkyLighting
-  /** The haze colour, `#rrggbb`: the sky at and below the horizon, as the fog. */
-  horizon: string
 }>()
 
 /** Inside the camera's far plane, around the camera wherever it goes. */
@@ -68,7 +67,7 @@ dome.renderOrder = -1
 watchEffect(() => {
   const u = material.uniforms
   const { lighting, direction } = props
-  u.horizon!.value.set(props.horizon)
+  u.horizon!.value.set(lighting.horizon)
   u.zenith!.value.set(lighting.zenith)
   u.glow!.value.set(lighting.glow)
   // The disc is its own colour while the sun is up and fades out as it sets.

@@ -12,8 +12,6 @@ import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'thr
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
-  atmosphereColor,
-  FOG_FILL,
   framePlacement,
   fullModelLedger,
   LOD_FAR_M,
@@ -140,13 +138,11 @@ const lighting = computed(() => skyLighting(sun.value.elevationDeg))
 /** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
 const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
 /**
- * Haze, sky at the horizon and unseen ground in one colour, so what is too far to make out and
- * what has not been seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
+ * Haze, sky at the horizon and unseen ground in one colour, the sky's horizon at the sun's
+ * elevation whatever the page's colour mode, so what is too far to make out and what has not been
+ * seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
  */
-const colorMode = useColorMode()
-const atmosphere = computed(() =>
-  atmosphereColor(lighting.value, FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light']),
-)
+const atmosphere = computed(() => lighting.value.horizon)
 const HAZE = { near: LOD_FAR_M, far: 4 * LOD_FAR_M }
 /** three dropped `PCFSoftShadowMap`; PCF blurs by each light's `shadow.radius` instead. */
 const SHADOW_MAP = PCFShadowMap
@@ -169,7 +165,7 @@ onBeforeUnmount(() => plane.dispose())
     :clear-color="atmosphere"
   >
     <SceneAtmosphere :color="atmosphere" :near="HAZE.near" :far="HAZE.far" />
-    <SceneSky :direction="sun.direction" :lighting="lighting" :horizon="atmosphere" />
+    <SceneSky :direction="sun.direction" :lighting="lighting" />
     <SceneSun
       :direction="sun.direction"
       :lighting="lighting"

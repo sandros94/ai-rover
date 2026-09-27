@@ -74,7 +74,10 @@ export interface SkyLighting {
   sky: { color: string; intensity: number }
   /** Light bounced up from the ground, at the sky's intensity: dimmer than the sky by its colour. */
   ground: string
-  /** Sky colour at the horizon and at the zenith, and of the glow around the sun, as seen. */
+  /**
+   * Sky colour at the horizon and at the zenith, and of the glow around the sun, as seen. The
+   * horizon is also the scene's haze and the colour of the ground the rover has not seen.
+   */
   horizon: string
   zenith: string
   glow: string
@@ -266,24 +269,4 @@ export function skyLighting(elevationDeg: number): SkyLighting {
     exposure: Math.min(MAX_EXPOSURE, (HIGH_SUN_IRRADIANCE / irradiance) ** ADAPTATION),
     shadowRadius: mix(a.shadowRadius, b.shadowRadius, f),
   }
-}
-
-/** Share of the colour-mode fog fill in the scene's atmosphere under a high sun. */
-const FILL_SHARE = 0.3
-/** Skylight at which the fill takes its full share: the high sun's. */
-const FULL_DAY_SKY = KEYS.at(-1)!.skyIntensity
-
-/**
- * The colour of the scene's haze, sky at the horizon and unseen ground: the sky's horizon with
- * the colour mode's fog `fill` blended in by daylight, so unseen ground reads as the same fog on
- * the map and in the scene by day and the scene still darkens at night.
- */
-export function atmosphereColor(lighting: SkyLighting, fill: Readonly<Rgb>): string {
-  const share = FILL_SHARE * Math.min(1, lighting.sky.intensity / FULL_DAY_SKY)
-  return rgbHex(mixRgb(hexRgb(lighting.horizon), fill, share))
-}
-
-function hexRgb(hex: string): Rgb {
-  const n = Number.parseInt(hex.slice(1), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
