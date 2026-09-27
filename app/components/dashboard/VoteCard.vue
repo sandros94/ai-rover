@@ -118,7 +118,10 @@ const route = computed(() => {
       </span>
       <span v-if="route" class="tabular-nums">{{ route }}</span>
       <span v-if="submission.goalInFog" data-test="goal-in-fog">destination unexplored</span>
-      <UTooltip :text="explorationParts">
+      <UTooltip
+        :text="explorationParts"
+        :ui="{ content: 'h-auto max-w-[min(20rem,calc(100vw-2rem))]', text: 'whitespace-normal' }"
+      >
         <span
           data-test="exploration"
           class="tabular-nums underline decoration-dotted underline-offset-2"
