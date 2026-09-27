@@ -64,6 +64,10 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Multi-segment replay: done.
 - Inspectable map objects: done on the live and replay pages.
 
+## Later — Lighting
+
+- Sol-driven sun and sky, shadows, automatic exposure, AgX tone mapping; night-time rover lights if the real rover has any (to verify).
+
 ## Later — Biomes
 
 - Biome regions in the height function (parameter sets selected by low-frequency noise), rover ground analysis surfaced on the map, biome labels in Jev state.
