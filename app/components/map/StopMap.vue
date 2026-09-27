@@ -25,6 +25,7 @@ import {
   fogCover,
   HIT_TOLERANCE_PX,
   hitMapObject,
+  maskChange,
   panBy,
   reliefPixels,
   ROVER_ID,
@@ -32,7 +33,7 @@ import {
   worldToScreen,
   zoomAbout,
 } from '#shared/utils/client'
-import { RELIEF_STOPS, rgbHex } from '#shared/utils/client/scene'
+import { RELIEF_STOPS, rgbHex, SEEN_STOPS } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
@@ -46,6 +47,11 @@ const props = withDefaults(
     terrain?: GroundView
     /** One byte per grid vertex; unseen ground is hidden under fog, and fades in as it grows. */
     seen?: Uint8Array
+    /**
+     * One byte per grid vertex, 1 where the rover has the ground in sight now; revealed ground
+     * out of it, or all of it while there is none, is drawn as seen before.
+     */
+    sight?: Uint8Array
     center: MapPoint
     radius: number
     /** Where picks are measured from, with the allowed distance band around it. */
@@ -74,6 +80,7 @@ const props = withDefaults(
   {
     terrain: undefined,
     seen: undefined,
+    sight: undefined,
     anchor: undefined,
     ring: undefined,
     rover: undefined,
@@ -182,10 +189,18 @@ const painted = ref(0)
 /** How many of the terrain's placed rectangles the relief shows. */
 let shownPlaced = 0
 
+/** The sight when it fits the grid drawn; one that does not is no sight. */
+const shownSight = computed(() => {
+  const grid = props.terrain?.grid
+  return grid && props.sight?.length === grid.width * grid.height ? props.sight : undefined
+})
+
 /** What changed since the last paint; without it everything is repainted. */
 interface ReliefUpdate {
   /** Rectangles the fog changed. */
   changed?: readonly GridRect[]
+  /** Rectangles whose ground came into sight or left it: colours only. */
+  recoloured?: readonly GridRect[]
   /** Rectangles of ground that arrived. */
   arrived?: readonly GridRect[]
   /** The last of the ground arrived. */
@@ -224,7 +239,12 @@ function paint(update?: ReliefUpdate): void {
     }
     update = undefined
   }
-  const fog = frame && { ...frame.fog, rgb: fogRgb.value, origin: terrain.origin }
+  const fog = frame && {
+    ...frame.fog,
+    rgb: fogRgb.value,
+    origin: terrain.origin,
+    sight: shownSight.value,
+  }
   const complete = terrain.complete ?? true
   const tiles = (area: GridRect) => contourTiles(grid, area, { tile: CONTOUR_TILE, complete })
   const whole = { i0: 0, j0: 0, i1: width, j1: height }
@@ -256,6 +276,7 @@ function paint(update?: ReliefUpdate): void {
     buildContours(relief, untraced(rect))
   }
   if (update.completed) buildContours(relief, untraced(whole))
+  for (const rect of update.recoloured ?? []) paintArea(relief, grid, fog, rect)
   painted.value++
 }
 
@@ -306,9 +327,9 @@ function buildContours(image: ReliefImage, tiles: readonly ContourTile[]): void 
 }
 
 watch(
-  [() => props.terrain, fogRgb, heightRange, fade] as const,
+  [() => props.terrain, fogRgb, heightRange, fade, shownSight] as const,
   (next, previous) => {
-    const [terrain, rgb, range, frame] = next
+    const [terrain, rgb, range, frame, sight] = next
     const before = previous?.[0]
     const sameGround =
       !!relief &&
@@ -326,6 +347,13 @@ watch(
     }
     update.arrived = terrain.placed?.slice(shownPlaced) ?? []
     update.completed = (terrain.complete ?? true) && !(before.complete ?? true)
+    const sightBefore = previous[4]
+    if (sight !== sightBefore) {
+      // No sight at all draws as nothing in sight.
+      const none = new Uint8Array(terrain.grid.width * terrain.grid.height)
+      const rect = maskChange(sightBefore ?? none, sight ?? none, terrain.grid.width)
+      if (rect) update.recoloured = [rect]
+    }
     paint(update)
   },
   { immediate: true },
@@ -337,11 +365,13 @@ const CONTOUR_STYLE = { minorPx: 0.6, majorPx: 1.2, minorFrom: 1, minorFull: 2.5
 const legend = computed(() => {
   const range = heightRange.value
   if (!range) return undefined
-  const stops = RELIEF_STOPS.map(
-    (rgb, k) => `${rgbHex(rgb)} ${(100 * k) / (RELIEF_STOPS.length - 1)}%`,
-  )
+  const gradient = (ramp: typeof RELIEF_STOPS) =>
+    `linear-gradient(to right, ${ramp
+      .map((rgb, k) => `${rgbHex(rgb)} ${(100 * k) / (ramp.length - 1)}%`)
+      .join(', ')})`
   return {
-    gradient: `linear-gradient(to right, ${stops.join(', ')})`,
+    gradient: gradient(RELIEF_STOPS),
+    seen: gradient(SEEN_STOPS),
     min: range.min.toFixed(0),
     max: range.max.toFixed(0),
   }
@@ -886,9 +916,17 @@ const focusRing = computed(() => {
       data-test="relief-legend"
       class="pointer-events-none absolute bottom-2 left-2 rounded bg-(--ui-bg)/75 px-1.5 py-1 text-[10px] leading-tight text-muted tabular-nums"
     >
-      <div class="h-1.5 w-20 rounded-sm" :style="{ background: legend.gradient }" />
-      <div class="flex justify-between gap-2">
-        <span>{{ legend.min }} m</span><span>{{ legend.max }} m</span>
+      <div class="flex items-end gap-2">
+        <div class="w-20">
+          <div class="h-1.5 rounded-sm" :style="{ background: legend.gradient }" />
+          <div class="flex justify-between gap-2">
+            <span>{{ legend.min }} m</span><span>{{ legend.max }} m</span>
+          </div>
+        </div>
+        <div v-if="seen" data-test="legend-seen">
+          <div class="h-1.5 w-6 rounded-sm" :style="{ background: legend.seen }" />
+          <span>seen before</span>
+        </div>
       </div>
       <div>
         contours {{ CONTOUR_INTERVAL_M }} m, bold {{ CONTOUR_INTERVAL_M * CONTOUR_MAJOR_EVERY }} m

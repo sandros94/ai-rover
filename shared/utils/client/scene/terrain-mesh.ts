@@ -3,7 +3,7 @@ import type { GridCell, HeightGrid } from '../../terrain/grid'
 import { ClientError } from '../errors'
 import type { FogSurface, GridRect } from '../fog'
 import type { Rgb } from './palette'
-import { hillshadeAt, reliefLight, reliefRgb, srgbToLinear } from './palette'
+import { groundRgb, hillshadeAt, reliefLight, srgbToLinear } from './palette'
 
 /** Vertex strides of the terrain levels: full resolution, then one vertex in four each way. */
 export const LOD_STEPS = [1, 4] as const
@@ -43,6 +43,11 @@ export interface ChunkFog {
   surface: FogSurface
   layout: DiskLayout
   rgb: Readonly<Rgb>
+  /**
+   * One byte per disk vertex, laid out by `layout`, 1 where in the rover's line of sight now;
+   * revealed ground elsewhere, or everywhere without it, takes the seen-before tint.
+   */
+  sight?: Uint8Array
 }
 
 export interface ChunkMesh {
@@ -52,7 +57,10 @@ export interface ChunkMesh {
   side: number
   /** x, y, z per vertex: the surface grid row by row, then the skirt. */
   positions: Float32Array
-  /** Linear r, g, b per vertex: tint × hillshade, blended to the fog colour by the fog amount. */
+  /**
+   * Linear r, g, b per vertex: the tint of the vertex's ground state × hillshade, blended to the
+   * fog colour by the fog amount.
+   */
   colors: Float32Array
   indices: Uint16Array | Uint32Array
 }
@@ -141,15 +149,22 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
 }
 
 /**
- * Writes the height and linear colour of chunk vertex (a, b) to vertex `k`: the tint × hillshade
- * from central differences over the step on the true heights, and, with fog, the drawn height and
- * the blend to the fog colour from the disk's fog surface. The one rule both {@link chunkMesh}
- * and {@link refogChunkMesh} use, so a refogged vertex equals a rebuilt one.
+ * Writes the height (unless `positions` is absent) and linear colour of chunk vertex (a, b) to
+ * vertex `k`: the tint × hillshade from central differences over the step on the true heights,
+ * and, with fog, the drawn height, the tint by the fog's sight and the blend to the fog colour
+ * from the disk's fog surface. The one rule {@link chunkMesh}, {@link refogChunkMesh} and
+ * {@link recolourChunkMesh} use, so a repainted vertex equals a rebuilt one.
  */
 function vertexPainter(
   chunk: TerrainChunk,
   options: ChunkMeshOptions,
-): (positions: Float32Array, colors: Float32Array, k: number, a: number, b: number) => void {
+): (
+  positions: Float32Array | undefined,
+  colors: Float32Array,
+  k: number,
+  a: number,
+  b: number,
+) => void {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
   const { heightRange, step = 1, fog, heightOutside } = options
   const cells = n - 1
@@ -177,13 +192,16 @@ function vertexPainter(
   return (positions, colors, k, a, b) => {
     const d = diskIndex?.(a, b)
     const amount = d === undefined ? 0 : fog!.surface.amount[d]!
-    positions[3 * k + 2] = d === undefined ? heights[b * n + a]! : fog!.surface.heights[d]!
+    if (positions) {
+      positions[3 * k + 2] = d === undefined ? heights[b * n + a]! : fog!.surface.heights[d]!
+    }
     let r = 0
     let g = 0
     let bl = 0
     if (amount < 1) {
       const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
-      const tint = reliefRgb((heights[b * n + a]! - heightRange.min) / span)
+      const inSight = !fog || (d !== undefined && fog.sight?.[d] === 1)
+      const tint = groundRgb((heights[b * n + a]! - heightRange.min) / span, inSight)
       r = srgbToLinear(tint[0] * light)
       g = srgbToLinear(tint[1] * light)
       bl = srgbToLinear(tint[2] * light)
@@ -216,9 +234,12 @@ function diskIndexer(
   }
 }
 
-/** Sets the skirt, hung `skirtM` below the edge, to the edge's heights and colours. */
+/**
+ * Sets the skirt, hung `skirtM` below the edge, to the edge's colours and, unless `positions` is
+ * absent, its heights.
+ */
 function hangSkirt(
-  positions: Float32Array,
+  positions: Float32Array | undefined,
   colors: Float32Array,
   side: number,
   skirtM: number,
@@ -228,7 +249,7 @@ function hangSkirt(
   for (let e = 0; e < edge.length; e++) {
     const from = edge[e]!
     const to = side * side + e
-    positions[3 * to + 2] = positions[3 * from + 2]! - skirtM
+    if (positions) positions[3 * to + 2] = positions[3 * from + 2]! - skirtM
     colors.copyWithin(3 * to, 3 * from, 3 * from + 3)
   }
 }
@@ -250,6 +271,23 @@ export function refogChunkMesh(
     for (let p = 0; p < side; p++)
       paint(mesh.positions, mesh.colors, q * side + p, p * step, q * step)
   hangSkirt(mesh.positions, mesh.colors, side, skirtM)
+}
+
+/**
+ * Rewrites, in place, only the colours of a mesh {@link chunkMesh} built with the same step and
+ * skirt, to `options`: what a change of the rover's sight changes, the fog surface staying put.
+ */
+export function recolourChunkMesh(
+  mesh: ChunkMesh,
+  chunk: TerrainChunk,
+  options: ChunkMeshOptions,
+): void {
+  const { step = 1, skirtM = 0 } = options
+  const side = mesh.side
+  const paint = vertexPainter(chunk, options)
+  for (let q = 0; q < side; q++)
+    for (let p = 0; p < side; p++) paint(undefined, mesh.colors, q * side + p, p * step, q * step)
+  hangSkirt(undefined, mesh.colors, side, skirtM)
 }
 
 /** Whether the fog covers every vertex of the chunk fully, so it may be drawn at {@link FOG_STEP}. */

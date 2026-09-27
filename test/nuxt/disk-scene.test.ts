@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import type { Group, Mesh } from 'three'
+import type { BufferAttribute, Group, Mesh } from 'three'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createDiskGround, groundView } from '#shared/utils/client'
 import { generateChunk, revealedOverDisk } from '#shared/utils/terrain'
@@ -18,13 +18,14 @@ vi.mock('~/components/scene/StopScene.vue', async () => {
   return {
     default: vue.defineComponent({
       name: 'StopScene',
-      props: ['chunks', 'heightRange', 'heightAt', 'fog'],
+      props: ['chunks', 'heightRange', 'heightAt', 'fog', 'sight'],
       setup: (props) => () =>
         vue.h(layer, {
           chunks: props.chunks,
           heightRange: props.heightRange,
           heightAt: props.heightAt,
           fog: props.fog,
+          sight: props.sight,
           focus: { x: 0, y: 0 },
         }),
     }),
@@ -74,5 +75,62 @@ describe('DiskScene over ground still arriving', () => {
     // Not rebuilt either: the meshes in keep the geometry they were drawn with.
     expect(first.map((mesh) => mesh.geometry)).toEqual(geometries)
     expect(first[0]!.geometry).toBe(geometries[0])
+  })
+})
+
+describe("DiskScene as the rover's sight changes", () => {
+  it('recolours the chunks in place: same geometry, colours rewritten, heights untouched', async () => {
+    const { stopManifest, world, mask } = journeyFixture()
+    const ground = createDiskGround(stopManifest)
+    for (const [cx, cy] of [
+      [-1, -1],
+      [0, -1],
+      [-1, 0],
+      [0, 0],
+    ])
+      ground.place(generateChunk(world, { cx: cx!, cy: cy! }))
+    const seen = revealedOverDisk(mask, ground)
+    const sight = shallowRef<Uint8Array>(new Uint8Array(seen.length))
+    const view = groundView(ground, stopManifest.heightRange)
+    const wrapper = await mountSuspended(
+      defineComponent({
+        setup: () => () =>
+          h(DiskScene, {
+            terrain: view,
+            seen,
+            sight: sight.value,
+            chunkVertices: 65,
+            heightAt: () => 0,
+            rest: { x: 0, y: 0, headingRad: 0 },
+          }),
+      }),
+    )
+    await nextTick()
+    const root = (wrapper.findComponent(TerrainChunks).vm as unknown as { root: Group }).root
+    const meshes = [...root.children] as Mesh[]
+    expect(meshes).toHaveLength(4)
+    const geometries = meshes.map((mesh) => mesh.geometry)
+    const attribute = (mesh: Mesh, name: string) =>
+      mesh.geometry.getAttribute(name) as BufferAttribute
+    const colors = meshes.map((mesh) => attribute(mesh, 'color'))
+    const colorsBefore = colors.map((c) => Array.from(c.array))
+    const positionVersions = meshes.map((mesh) => attribute(mesh, 'position').version)
+    const colorVersions = colors.map((c) => c.version)
+
+    // Everything revealed comes into sight.
+    sight.value = seen.slice()
+    await nextTick()
+    await nextTick()
+    expect(meshes.map((mesh) => mesh.geometry)).toEqual(geometries)
+    meshes.forEach((mesh, k) => {
+      expect(mesh.geometry).toBe(geometries[k])
+      expect(attribute(mesh, 'color')).toBe(colors[k])
+      expect(attribute(mesh, 'position').version).toBe(positionVersions[k])
+    })
+    // Every chunk holds revealed ground: each one is recoloured.
+    colors.forEach((c, k) => {
+      expect(c.version).toBeGreaterThan(colorVersions[k]!)
+      expect(Array.from(c.array)).not.toEqual(colorsBefore[k])
+    })
   })
 })

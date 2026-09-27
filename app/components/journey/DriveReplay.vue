@@ -145,6 +145,7 @@ const stage = computed((): StageProps => ({
   loading: { loaded: loaded.value, total: total.value, error: error.value ?? playback.error.value },
   center: manifest.value ? manifest.value.stop : drive.value.from,
   radius: manifest.value?.radius ?? 500,
+  mastHeight: manifest.value?.world.mastHeight,
   rover: rover.value ?? { ...drive.value.from, headingRad: 0 },
   trail: shownTrail.value,
   plan: plan.value,

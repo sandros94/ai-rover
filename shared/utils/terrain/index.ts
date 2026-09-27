@@ -10,6 +10,7 @@ export type {
 } from './world'
 export {
   DEFAULT_CRATERS,
+  DEFAULT_MAST_HEIGHT,
   DEFAULT_REGOLITH,
   DEFAULT_RELIEF,
   defineWorld,

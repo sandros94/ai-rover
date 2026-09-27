@@ -54,7 +54,7 @@ export interface WorldConfig {
   chunkSize?: number
   /** Grid spacing in metres. Default 1. */
   cellSize?: number
-  /** Viewer height above ground for line of sight, metres. Default 2. */
+  /** Viewer height above ground for line of sight, metres. Default {@link DEFAULT_MAST_HEIGHT}. */
   mastHeight?: number
   /** Steepest traversable slope, degrees in (0, 90). Default 16. */
   slopeLimitDeg?: number
@@ -81,6 +81,9 @@ export interface World {
   /** Regolith looseness in [0, 1] at world position (x, y); bit-identical on every IEEE-754 host. */
   readonly looseAt: (x: number, y: number) => number
 }
+
+/** Viewer height above ground for line of sight when a world names none, metres. */
+export const DEFAULT_MAST_HEIGHT = 2
 
 export const DEFAULT_RELIEF: Readonly<ReliefConfig> = Object.freeze({
   octaves: 6,
@@ -382,7 +385,7 @@ function resolveConfig(config: WorldConfig): ResolvedWorldConfig {
     seed: config.seed,
     chunkSize: config.chunkSize ?? 64,
     cellSize: config.cellSize ?? 1,
-    mastHeight: config.mastHeight ?? 2,
+    mastHeight: config.mastHeight ?? DEFAULT_MAST_HEIGHT,
     slopeLimitDeg: config.slopeLimitDeg ?? 16,
     relief: Object.freeze(relief),
     craters: Object.freeze(craters),

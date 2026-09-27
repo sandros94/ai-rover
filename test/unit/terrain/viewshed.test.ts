@@ -119,6 +119,48 @@ describe('viewshed', () => {
     expect(agree / inside).toBeGreaterThanOrEqual(0.985)
   })
 
+  it('with a revealed mask, never reads an unrevealed height and never sees an unrevealed vertex', () => {
+    const size = 41
+    // Revealed: the west half, and a far patch east of a band of unrevealed ground.
+    const revealed = new Uint8Array(size * size)
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++)
+        if (i <= 20 || (i >= 30 && j >= 15 && j <= 25)) revealed[j * size + i] = 1
+    }
+    const flat = gridOf(size, size, () => 0)
+    // The same ground with a wall and pits, and a NaN, where nothing is revealed.
+    const hidden = gridOf(size, size, (i, j) =>
+      revealed[j * size + i] ? 0 : (i + j) % 3 === 0 ? 50 : -50,
+    )
+    hidden.heights[5 * size + 25] = Number.NaN
+    const options = { viewer: { i: 10, j: 20 }, mastHeight: 2, radius: 40, revealed }
+    const a = viewshed(flat, options)
+    const b = viewshed(hidden, options)
+    expect(Array.from(b)).toEqual(Array.from(a))
+    expect(Array.from(a.keys()).filter((k) => a[k] && !revealed[k])).toEqual([])
+    // The far patch shows through the unrevealed band: it blocks nothing.
+    expect(a[20 * size + 35]).toBe(1)
+  })
+
+  it('with a revealed mask, sees nothing from an unrevealed viewer', () => {
+    const revealed = new Uint8Array(81).fill(1)
+    revealed[4 * 9 + 4] = 0
+    const seen = viewshed(
+      gridOf(9, 9, () => 0),
+      { viewer: { i: 4, j: 4 }, mastHeight: 2, radius: 4, revealed },
+    )
+    expect(seen.every((v) => v === 0)).toBe(true)
+  })
+
+  it('refuses a revealed mask of the wrong length', () => {
+    expect(() =>
+      viewshed(
+        gridOf(4, 4, () => 0),
+        { viewer: { i: 1, j: 1 }, mastHeight: 2, radius: 3, revealed: new Uint8Array(15) },
+      ),
+    ).toThrow(expect.objectContaining({ code: 'INVALID_GRID' }))
+  })
+
   it('refuses a viewer outside the grid', () => {
     expect(() =>
       viewshed(

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
 import type { GridRect } from '#shared/utils/client'
+import { maskChange } from '#shared/utils/client'
 import type { ChunkFog, ChunkMesh, LodLevel, TerrainChunk } from '#shared/utils/client/scene'
 import {
   chunkDistance,
@@ -11,6 +12,7 @@ import {
   DEFAULT_SKIRT_M,
   FOG_STEP,
   LOD_STEPS,
+  recolourChunkMesh,
   refogChunkMesh,
 } from '#shared/utils/client/scene'
 
@@ -31,6 +33,12 @@ const props = defineProps<{
    * rectangles of the disk grid; without `rects`, every chunk.
    */
   fog?: ChunkFog & { rects?: GridRect[] }
+  /**
+   * One byte per disk vertex, laid out as the fog, 1 where the rover has the ground in sight
+   * now; revealed ground out of it, or all of it while there is none, takes the seen-before tint.
+   * A new value recolours, in place, only the chunks meeting what changed.
+   */
+  sight?: Uint8Array
 }>()
 
 /** Distance the focus must move before levels are re-evaluated. */
@@ -60,14 +68,21 @@ let lastFocus: { x: number; y: number } | undefined
 
 const keyOf = (chunk: TerrainChunk) => `${chunk.cx},${chunk.cy}`
 
+/** The sight when it fits the fog's disk; one that does not is no sight. */
+function fitSight(sight: Uint8Array | undefined): Uint8Array | undefined {
+  return sight && sight.length === props.fog?.surface.amount.length ? sight : undefined
+}
+
 function meshOptions(chunk: TerrainChunk, level: Level) {
   const heightAt = props.heightAt
   const cells = chunk.vertexCount - 1
+  const fog = props.fog
+  const sight = fitSight(props.sight)
   return {
     heightRange: props.heightRange,
     step: level === FOG_LEVEL && cells % FOG_STEP !== 0 ? cells : STEPS[level],
     skirtM: DEFAULT_SKIRT_M,
-    fog: props.fog,
+    fog: fog && sight ? { ...fog, sight } : fog,
     heightOutside:
       heightAt && ((i: number, j: number) => heightAt(i * chunk.cellSize, j * chunk.cellSize)),
   }
@@ -146,6 +161,24 @@ function repaint(entry: Drawn): void {
   if (level !== entry.level) show(entry, level)
 }
 
+/** Rewrites only the colours of the built levels of chunks whose ground entered or left sight. */
+function applySight(next: Uint8Array | undefined, previous: Uint8Array | undefined): void {
+  const fog = props.fog
+  if (!fog) return
+  const none = new Uint8Array(fog.surface.amount.length)
+  const changed = maskChange(fitSight(previous) ?? none, fitSight(next) ?? none, fog.layout.width)
+  if (!changed) return
+  for (const entry of drawn.values()) {
+    const chunk = entry.source.chunk
+    if (entry.fogged || !meets(chunkRect(chunk, fog.layout), changed)) continue
+    entry.built.forEach((built, level) => {
+      if (!built) return
+      recolourChunkMesh(built.arrays, chunk, meshOptions(chunk, level as Level))
+      built.geometry.getAttribute('color').needsUpdate = true
+    })
+  }
+}
+
 function sync(): void {
   const wanted = new Map(props.chunks.map((source) => [keyOf(source.chunk), source]))
   const arrived: TerrainChunk[] = []
@@ -208,6 +241,7 @@ function sync(): void {
 
 watch(() => props.chunks, sync, { immediate: true })
 watch(() => props.fog, applyFog)
+watch(() => props.sight, applySight)
 watch(
   () => props.heightRange,
   () => {

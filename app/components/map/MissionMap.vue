@@ -175,6 +175,7 @@ const stage = computed((): StageProps => {
       ? { x: manifest.value.stop.x, y: manifest.value.stop.y }
       : { x: stop.x, y: stop.y },
     radius: manifest.value?.radius ?? 500,
+    mastHeight: manifest.value?.world.mastHeight,
     rover,
     trail: trail.value,
     plan: track.plan.value,

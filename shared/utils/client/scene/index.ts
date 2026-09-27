@@ -2,6 +2,7 @@ export type { ColorMode, Rgb } from './palette'
 export {
   FOG_FILL,
   FOG_GRAIN,
+  groundRgb,
   HILLSHADE_EXAGGERATION,
   hillshadeAt,
   HILLSHADE_LIGHT,
@@ -12,6 +13,7 @@ export {
   rgbHex,
   ROVER_TONES,
   SCENE_COLORS,
+  SEEN_STOPS,
   srgbToLinear,
 } from './palette'
 export type {
@@ -35,6 +37,7 @@ export {
   LOD_FAR_M,
   LOD_HYSTERESIS_M,
   LOD_STEPS,
+  recolourChunkMesh,
   refogChunkMesh,
 } from './terrain-mesh'
 export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'

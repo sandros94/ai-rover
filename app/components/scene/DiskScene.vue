@@ -24,6 +24,11 @@ const props = withDefaults(
     terrain: GroundView
     /** The stop's own seen flags, one byte per disk vertex. */
     seen?: Uint8Array
+    /**
+     * One byte per disk vertex, 1 where the rover has the ground in sight now; revealed ground
+     * out of it, or all of it while there is none, is drawn as seen before.
+     */
+    sight?: Uint8Array
     /** Vertices per chunk side, as the chunk cache reports them. */
     chunkVertices: number
     heightAt: (x: number, y: number) => number | undefined
@@ -51,6 +56,7 @@ const props = withDefaults(
   }>(),
   {
     seen: undefined,
+    sight: undefined,
     frame: undefined,
     keyframes: undefined,
     t: 0,
@@ -273,6 +279,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :deaths="ghosts"
       :death-radius-m="deathRadiusM"
       :fog="fog"
+      :sight="sight"
       :drawn-height-at="drawnHeightAt"
       :goals="goals"
       :pickables="pickables"

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
-import { createDiskGround, expandRect, groundView } from '#shared/utils/client'
+import { createDiskGround, expandRect, FOG_FILL, groundView } from '#shared/utils/client'
+import { groundRgb, hillshadeAt, reliefLight } from '#shared/utils/client/scene'
 import { generateChunk } from '#shared/utils/terrain'
 import { journeyFixture } from '../unit/client/helpers'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
@@ -188,5 +189,74 @@ describe('StopMap over ground still arriving', () => {
     expect(puts.slice(3).map((put) => put.dirty)).toEqual([dirty(arrived)])
     expect(alpha(100, 10)).toBe(255)
     expect(alpha(10, 100)).toBe(0)
+  })
+
+  it('paints the three ground states, and recolours only what a new sight changes', async () => {
+    // 60 × 60 flat ground: west third never seen, middle third seen before, east third in sight.
+    const size = 60
+    const flat = { heights: new Float32Array(size * size), width: size, height: size, cellSize: 1 }
+    const seen = new Uint8Array(size * size)
+    const sightOf = (from: number) => {
+      const mask = new Uint8Array(size * size)
+      for (let j = 0; j < size; j++) for (let i = from; i < size; i++) mask[j * size + i] = 1
+      return mask
+    }
+    for (let j = 0; j < size; j++) for (let i = 20; i < size; i++) seen[j * size + i] = 1
+    const sight = shallowRef(sightOf(40))
+    const terrain = { grid: flat, origin: { i: -30, j: -30 } }
+    puts.length = 0
+    const wrapper = await mountSuspended(
+      defineComponent({
+        setup: () => () =>
+          h(StopMap, {
+            terrain,
+            seen,
+            sight: sight.value,
+            center: { x: 0, y: 0 },
+            radius: 30,
+          }),
+      }),
+    )
+    await nextTick()
+    const data = puts.at(-1)!.data.data
+    const light = reliefLight(hillshadeAt(0, 0))
+    const classes = {
+      inSight: groundRgb(0, true).map((c) => c * light),
+      seenBefore: groundRgb(0, false).map((c) => c * light),
+      fogLight: [...FOG_FILL.light],
+      fogDark: [...FOG_FILL.dark],
+    }
+    const count = () => {
+      const counts = { inSight: 0, seenBefore: 0, fog: 0 }
+      for (let p = 0; p < size * size; p++) {
+        const rgb = [data[4 * p]!, data[4 * p + 1]!, data[4 * p + 2]!]
+        let best = ''
+        let bestD = Infinity
+        for (const [name, ref] of Object.entries(classes)) {
+          const d = Math.hypot(rgb[0]! - ref[0]!, rgb[1]! - ref[1]!, rgb[2]! - ref[2]!)
+          if (d < bestD) [best, bestD] = [name, d]
+        }
+        counts[best.startsWith('fog') ? 'fog' : (best as 'inSight' | 'seenBefore')]++
+      }
+      return counts
+    }
+    // The legend names the seen-before tint beside the height ramp.
+    expect(wrapper.find('[data-test=legend-seen]').text()).toBe('seen before')
+    const three = count()
+    expect(three.inSight).toBe(20 * size)
+    // The fog's soft edge lies on the revealed side, over at most two columns of the middle third.
+    expect(three.fog).toBeGreaterThanOrEqual(20 * size)
+    expect(three.fog).toBeLessThanOrEqual(22 * size)
+    expect(three.seenBefore).toBe(size * size - three.inSight - three.fog)
+
+    // The rover moves: the east half is in sight. Only the columns that changed are repainted.
+    const before = puts.length
+    sight.value = sightOf(30)
+    await nextTick()
+    await nextTick()
+    expect(puts.slice(before).map((put) => put.dirty)).toEqual([[30, 0, 10, size]])
+    const moved = count()
+    expect(moved.inSight).toBe(30 * size)
+    expect(moved.fog).toBe(three.fog)
   })
 })

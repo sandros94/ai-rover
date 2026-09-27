@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
-import { createTerrainSampler } from '#shared/utils/client'
+import { useCurrentSight } from '#imports'
+import { createTerrainSampler, liftSeen } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
+import { DEFAULT_MAST_HEIGHT, DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
 import { PLAYGROUND_PROPS, useRevealsUntil } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
@@ -69,6 +71,13 @@ const reveals = useRevealsUntil(
   () => props.record,
   () => t.value,
 )
+/** What the rover has in line of sight at the scrub time, across the whole disk. */
+const sight = useCurrentSight(
+  () => props.disk && liftSeen(props.disk.visible, reveals.value),
+  () => terrain.value,
+  () => ({ x: props.frame[field('x')]!, y: props.frame[field('y')]! }),
+  () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
+)
 
 const deaths = computed(() => {
   const { start, outcome } = props.record
@@ -91,6 +100,7 @@ const deaths = computed(() => {
           class="aspect-square"
           :terrain="terrain"
           :seen="disk.visible"
+          :sight="sight"
           :chunk-vertices="CHUNK_VERTICES"
           :height-at="heightAt"
           :frame="frame"

@@ -9,9 +9,16 @@ import {
   FOG_STEP,
   LOD_FAR_M,
   LOD_HYSTERESIS_M,
+  recolourChunkMesh,
   refogChunkMesh,
 } from '#shared/utils/client/scene/terrain-mesh'
-import { FOG_FILL, reliefLight, reliefRgb, srgbToLinear } from '#shared/utils/client/scene/palette'
+import {
+  FOG_FILL,
+  groundRgb,
+  reliefLight,
+  reliefRgb,
+  srgbToLinear,
+} from '#shared/utils/client/scene/palette'
 import { fogSurface, revealTimes, updateRevealTimes } from '#shared/utils/client/fog'
 
 const RANGE = { min: 0, max: 10 }
@@ -132,7 +139,10 @@ describe('chunkMesh', () => {
     for (let b = 0; b < 5; b++) seen[b * 5] = 1
     const surface = fogSurface(grid, { seen })
     const layout = { width: 5, origin: { i: 0, j: 0 } }
-    const mesh = chunkMesh(c, { heightRange: RANGE, fog: { surface, layout, rgb: FOG_FILL.dark } })
+    const mesh = chunkMesh(c, {
+      heightRange: RANGE,
+      fog: { surface, layout, rgb: FOG_FILL.dark, sight: seen },
+    })
     const plain = chunkMesh(c, { heightRange: RANGE })
     const fogLinear = FOG_FILL.dark.map(srgbToLinear)
     const at = (array: Float32Array, k: number, c: number) => array[3 * k + c]!
@@ -274,5 +284,48 @@ describe('fog on chunks', () => {
       fog: { surface: done, layout, rgb: FOG_FILL.light },
     })
     expect(mesh.positions[3 * (4 * 9 + 4) + 2]).toBe(c.heights[4 * 9 + 4])
+  })
+
+  const everywhere = new Uint8Array(17 * 9).fill(1)
+  const flat = chunk(3, () => 5, 1, 0)
+  const flatLayout = { width: 5, origin: { i: 0, j: 0 } }
+  const flatDisk = { heights: new Float32Array(15).fill(5), width: 5, height: 3, cellSize: 1 }
+
+  it('tints revealed ground in sight by the relief ramp and out of it by the seen ramp', () => {
+    const surface = fogSurface(flatDisk, { seen: new Uint8Array(15).fill(1) })
+    // In sight: the chunk's west column (disk column 2).
+    const sight = new Uint8Array(15)
+    for (let j = 0; j < 3; j++) sight[j * 5 + 2] = 1
+    const mesh = chunkMesh(flat, {
+      heightRange: RANGE,
+      fog: { surface, layout: flatLayout, rgb: FOG_FILL.dark, sight },
+    })
+    const light = reliefLight(Math.sin(Math.PI / 4))
+    const linear = (inSight: boolean) =>
+      groundRgb(0.5, inSight).map((channel) => srgbToLinear(channel * light))
+    for (let k = 0; k < 9; k++) {
+      const expected = linear(k % 3 === 0)
+      for (let ch = 0; ch < 3; ch++) expect(mesh.colors[3 * k + ch]).toBeCloseTo(expected[ch]!, 6)
+    }
+    expect(linear(true)).not.toEqual(linear(false))
+  })
+
+  it('recolours in place to a fresh build for a new sight, heights untouched', () => {
+    const surface = fogSurface(disk, { seen: everywhere })
+    const before = new Uint8Array(17 * 9)
+    const after = new Uint8Array(17 * 9)
+    for (let j = 0; j < 9; j++) for (let i = 10; i < 17; i++) after[j * 17 + i] = 1
+    for (const step of [1, 4, 8]) {
+      const options = { heightRange: RANGE, step, skirtM: 3 }
+      const fog = { surface, layout, rgb: FOG_FILL.light }
+      const mesh = chunkMesh(c, { ...options, fog: { ...fog, sight: before } })
+      const positions = mesh.positions.slice()
+      const colors = mesh.colors.slice()
+      recolourChunkMesh(mesh, c, { ...options, fog: { ...fog, sight: after } })
+      const fresh = chunkMesh(c, { ...options, fog: { ...fog, sight: after } })
+      expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
+      expect(Array.from(mesh.colors)).not.toEqual(Array.from(colors))
+      expect(mesh.positions).toEqual(positions)
+    }
   })
 })

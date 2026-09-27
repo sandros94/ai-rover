@@ -10,6 +10,7 @@ import {
   reliefPixels,
 } from '#shared/utils/client/relief'
 import { REVEAL_FADE_MS, revealTimes } from '#shared/utils/client/fog'
+import { groundRgb } from '#shared/utils/client/scene/palette'
 
 function grid(size: number, heightAt: (i: number, j: number) => number): HeightGrid {
   const heights = new Float32Array(size * size)
@@ -94,7 +95,7 @@ describe('reliefPixels', () => {
     for (let j = 0; j < 16; j++) for (let i = 0; i < 8; i++) seen[j * 16 + i] = 1
     const bumpy = grid(16, (i, j) => Math.sin(i) * 4 + Math.cos(j * 1.3) * 3)
     const flat = grid(16, () => 0)
-    const fog = { seen, rgb: FOG_FILL.dark, seed: 7 }
+    const fog = { seen, sight: seen, rgb: FOG_FILL.dark, seed: 7 }
     const a = reliefPixels(bumpy, { fog })
     const b = reliefPixels(flat, { fog })
     for (let j = 0; j < 16; j++) {
@@ -137,11 +138,46 @@ describe('reliefPixels', () => {
       4,
       4,
     )
-    const fog = { seen, revealedAt, rgb: FOG_FILL.dark, seed: 3 }
+    const fog = { seen, sight: seen, revealedAt, rgb: FOG_FILL.dark, seed: 3 }
     const mid = pixel(reliefPixels(g, { fog: { ...fog, now: 2000 + REVEAL_FADE_MS / 2 } }), g, 4, 4)
     for (let c = 0; c < 3; c++) expect(mid[c]).toBeCloseTo((clear[c]! + fogged[c]!) / 2, -0.5)
     const done = pixel(reliefPixels(g, { fog: { ...fog, now: 2000 + REVEAL_FADE_MS } }), g, 4, 4)
     expect(done).toEqual(clear)
+  })
+
+  it('paints the three ground states: in sight, seen before, never seen', () => {
+    // West third unseen, middle third seen before, east third in sight.
+    const g = grid(12, (i, j) => i * 0.3 + j * 0.1)
+    const seen = new Uint8Array(144)
+    const sight = new Uint8Array(144)
+    for (let j = 0; j < 12; j++) {
+      for (let i = 4; i < 12; i++) seen[j * 12 + i] = 1
+      for (let i = 8; i < 12; i++) sight[j * 12 + i] = 1
+    }
+    const heightRange = { min: 0, max: 5 }
+    const fog = { seen, sight, rgb: FOG_FILL.dark, seed: 5 }
+    const pixels = reliefPixels(g, { heightRange, fog, hillshade: false })
+    const tint = (i: number, j: number, inSight: boolean) =>
+      groundRgb((i * 0.3 + j * 0.1) / 5, inSight).map(Math.round)
+    for (let j = 0; j < 12; j++) {
+      const unseen = pixel(pixels, g, 0, j)
+      for (let c = 0; c < 3; c++)
+        expect(Math.abs(unseen[c]! - FOG_FILL.dark[c]!)).toBeLessThanOrEqual(
+          FOG_FILL.dark[c]! * FOG_GRAIN + 1,
+        )
+      // Past the soft edge, fog no longer mixes in.
+      expect(pixel(pixels, g, 7, j).slice(0, 3)).toEqual(tint(7, j, false))
+      expect(pixel(pixels, g, 10, j).slice(0, 3)).toEqual(tint(10, j, true))
+    }
+    // Without a sight, revealed ground is all seen before; without fog, all of it is in sight.
+    const blind = reliefPixels(g, {
+      heightRange,
+      fog: { ...fog, sight: undefined },
+      hillshade: false,
+    })
+    expect(pixel(blind, g, 10, 3).slice(0, 3)).toEqual(tint(10, 3, false))
+    const open = reliefPixels(g, { heightRange, hillshade: false })
+    expect(pixel(open, g, 0, 3).slice(0, 3)).toEqual(tint(0, 3, true))
   })
 
   it('paints only the asked rectangle into an existing buffer', () => {

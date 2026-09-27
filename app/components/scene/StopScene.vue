@@ -50,6 +50,8 @@ const props = withDefaults(
     deathRadiusM?: number
     /** The stop disk's fog over `chunks`; without it every chunk shows its true ground. */
     fog?: ChunkFog & { rects?: GridRect[] }
+    /** What of the disk the rover has in sight now, laid out as the fog; see `TerrainChunks`. */
+    sight?: Uint8Array
     /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
     roverVariant?: RoverVariant
     /** The open round's goals, on the ground, flagged. */
@@ -75,6 +77,7 @@ const props = withDefaults(
     deaths: () => [],
     deathRadiusM: undefined,
     fog: undefined,
+    sight: undefined,
     roverVariant: undefined,
     goals: () => [],
     pickables: () => [],
@@ -162,6 +165,7 @@ onBeforeUnmount(() => plane.dispose())
       :focus="focus"
       :height-at="heightAt"
       :fog="fog"
+      :sight="sight"
     />
     <primitive v-else :object="plane" />
     <RouteLine v-if="route.length > 1" :route="route" :height-at="drawnHeightAt ?? heightAt" />

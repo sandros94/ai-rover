@@ -3,7 +3,7 @@ import { deriveSeed } from '../terrain/seed'
 import type { FogState, GridRect } from './fog'
 import { fogCover } from './fog'
 import type { Rgb } from './scene/palette'
-import { FOG_FILL, FOG_GRAIN, hillshadeAt, reliefLight, reliefRgb } from './scene/palette'
+import { FOG_FILL, FOG_GRAIN, groundRgb, hillshadeAt, reliefLight } from './scene/palette'
 
 export { FOG_FILL, FOG_GRAIN, HILLSHADE_EXAGGERATION, LUMA } from './scene/palette'
 
@@ -30,8 +30,16 @@ function shadeAt(grid: HeightGrid, i: number, j: number, exaggeration?: number):
   return hillshadeAt(gx, gy, exaggeration)
 }
 
-/** The fog as the 2D map draws it: {@link FogState} with its fill and texture seed. */
+/**
+ * The fog as the 2D map draws it: {@link FogState} with its fill and texture seed, and what of
+ * the revealed ground the rover has in sight now.
+ */
 export interface ReliefFog extends FogState {
+  /**
+   * One byte per vertex, 1 where in the rover's line of sight now; revealed ground elsewhere,
+   * or everywhere without it, is drawn as seen before.
+   */
+  sight?: Uint8Array
   /** Fill of unseen ground; default the dark-mode fill. */
   rgb?: Readonly<Rgb>
   seed?: number
@@ -43,8 +51,9 @@ export interface ReliefFog extends FogState {
  * The grid as RGBA pixels, one per vertex, image rows running north to south (grid row
  * `height − 1` first) so the picture is north up: the height tint over `heightRange` (default
  * the grid's own span) times the hillshade unless `hillshade` is false; NaN heights transparent.
- * With `fog`, unseen vertices are opaque fog texture, never relief, and revealed ground blends
- * into it by {@link fogCover}. With `rect`, only those vertices are painted, into `into` when
+ * With `fog`, unseen vertices are opaque fog texture, never relief, revealed ground out of the
+ * fog's `sight` takes the seen-before tint, and revealed ground blends into the fog by
+ * {@link fogCover}. With `rect`, only those vertices are painted, into `into` when
  * given (a full-size buffer), so a reveal repaints only what it changed.
  */
 export function reliefPixels(
@@ -85,7 +94,7 @@ export function reliefPixels(
       let g = 0
       let b = 0
       if (c < 1) {
-        const tint = reliefRgb((h - range.min) / span)
+        const tint = groundRgb((h - range.min) / span, !fog || fog.sight?.[k] === 1)
         const s = shaded ? shadeAt(grid, i, j) : Number.NaN
         // Vertices bordering missing heights have no normal; they stay unshaded.
         const light = Number.isNaN(s) ? 1 : reliefLight(s)

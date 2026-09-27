@@ -1,6 +1,7 @@
 /**
- * The relief colours shared by the 2D map and the 3D scene: a hypsometric height tint, a
- * hillshade light and the fill of ground the rover has not seen. Channels are sRGB 0–255 unless
+ * The relief colours shared by the 2D map and the 3D scene: a hypsometric height tint for ground
+ * in the rover's sight, a desaturated one for ground seen before, a hillshade light and the fill
+ * of ground the rover has not seen. Channels are sRGB 0–255 unless
  * a name says linear.
  */
 
@@ -36,14 +37,39 @@ export const RELIEF_STOPS: readonly Readonly<Rgb>[] = Object.freeze([
   [236, 206, 160],
 ])
 
+/**
+ * Tint stops of ground seen before but out of the rover's sight now: the relief ramp's order of
+ * lightness in a desaturated grey-brown, its ends kept off both fog fills, so known but unwatched
+ * ground still reads as relief without passing for the watched ground or for fog.
+ */
+export const SEEN_STOPS: readonly Readonly<Rgb>[] = Object.freeze([
+  [80, 66, 56],
+  [108, 92, 80],
+  [138, 122, 106],
+  [166, 150, 130],
+  [190, 174, 150],
+])
+
 /** The tint at `t`, 0 the lowest ground of the range and 1 the highest; clamped. */
 export function reliefRgb(t: number): Rgb {
-  const last = RELIEF_STOPS.length - 1
+  return rampRgb(RELIEF_STOPS, t)
+}
+
+/**
+ * The tint of revealed ground at `t` as {@link reliefRgb} takes it: the relief ramp where the
+ * rover has it in sight, {@link SEEN_STOPS} where it was seen before.
+ */
+export function groundRgb(t: number, inSight: boolean): Rgb {
+  return rampRgb(inSight ? RELIEF_STOPS : SEEN_STOPS, t)
+}
+
+function rampRgb(stops: readonly Readonly<Rgb>[], t: number): Rgb {
+  const last = stops.length - 1
   const u = Math.min(1, Math.max(0, t)) * last
   const k = Math.min(last - 1, Math.floor(u))
   const f = u - k
-  const a = RELIEF_STOPS[k]!
-  const b = RELIEF_STOPS[k + 1]!
+  const a = stops[k]!
+  const b = stops[k + 1]!
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]
 }
 

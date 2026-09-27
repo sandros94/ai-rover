@@ -52,6 +52,7 @@ export {
   unionRect,
   updateRevealTimes,
 } from './fog'
+export { currentSight, EYE_SNAP_CELLS, maskChange } from './sight'
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'
 export { serverClockOffset } from './server-clock'

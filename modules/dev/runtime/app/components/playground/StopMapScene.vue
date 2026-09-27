@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { usePlanPreview } from '#imports'
+import { useCurrentSight, usePlanPreview } from '#imports'
 import { liftSeen } from '#shared/utils/client'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
-import { DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
+import { DEFAULT_MAST_HEIGHT, DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
 import PickPreview from '~/components/map/PickPreview.vue'
 import StopMap from '~/components/map/StopMap.vue'
 import type { PlanGround } from '~/workers/plan-protocol'
@@ -35,6 +35,14 @@ const rover = computed(() => {
 /** One object per disk: a new one each frame would redraw all of the ground each frame. */
 const terrain = computed(() => props.disk && { grid: props.disk.grid, origin: props.disk.origin })
 
+/** What the rover has in line of sight at the scrub time, across the whole disk. */
+const sight = useCurrentSight(
+  () => seen.value,
+  () => terrain.value,
+  () => rover.value,
+  () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
+)
+
 const anchor = computed(() => ({ x: props.record.start.x, y: props.record.start.y }))
 
 /* The dev disk route serves the world's default slope limit and mast height. */
@@ -49,7 +57,7 @@ const ground = computed<PlanGround | undefined>(() => {
     center: disk.center,
     radius: DEFAULT_STOP_RADIUS,
     chunks: [],
-    mastHeight: 2,
+    mastHeight: DEFAULT_MAST_HEIGHT,
     slopeLimitDeg: 16,
   }
 })
@@ -72,6 +80,7 @@ function onHover(point: MapPoint | null): void {
       class="aspect-square rounded-lg"
       :terrain="terrain"
       :seen="seen"
+      :sight="sight"
       :center="disk.center"
       :radius="DEFAULT_STOP_RADIUS"
       :anchor="anchor"

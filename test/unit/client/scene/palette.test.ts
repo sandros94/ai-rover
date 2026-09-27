@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FOG_FILL,
+  groundRgb,
   HILLSHADE_EXAGGERATION,
   hillshadeAt,
   LUMA,
@@ -8,6 +9,7 @@ import {
   reliefRgb,
   rgbHex,
   SCENE_COLORS,
+  SEEN_STOPS,
   srgbToLinear,
 } from '#shared/utils/client/scene/palette'
 import type { Rgb } from '#shared/utils/client/scene/palette'
@@ -104,7 +106,8 @@ const rgb = (hex: string): Rgb => [1, 3, 5].map((k) => parseInt(hex.slice(k, k +
 describe('SCENE_COLORS.marker', () => {
   const { marker } = SCENE_COLORS
   const grounds = [
-    ...Array.from({ length: 41 }, (_, k) => reliefRgb(k / 40)),
+    ...Array.from({ length: 41 }, (_, k) => groundRgb(k / 40, true)),
+    ...Array.from({ length: 41 }, (_, k) => groundRgb(k / 40, false)),
     FOG_FILL.light,
     FOG_FILL.dark,
   ]
@@ -127,5 +130,42 @@ describe('SCENE_COLORS.marker', () => {
 
   it('draws the contact disc darker than any ground', () => {
     for (const ground of grounds) expect(luma(rgb(marker.contact))).toBeLessThan(luma(ground))
+  })
+})
+
+describe('groundRgb', () => {
+  const ramp = (inSight: boolean) =>
+    Array.from({ length: 41 }, (_, k) => groundRgb(k / 40, inSight))
+  const chroma = (rgb: readonly number[]) => Math.hypot(lab(rgb)[1], lab(rgb)[2])
+
+  it('is the relief ramp in sight and the seen ramp out of it', () => {
+    for (const t of [0, 0.3, 0.5, 1]) expect(groundRgb(t, true)).toEqual(reliefRgb(t))
+    expect(groundRgb(0, false)).toEqual([...SEEN_STOPS[0]!])
+    expect(groundRgb(1, false)).toEqual([...SEEN_STOPS.at(-1)!])
+  })
+
+  it('keeps the seen ramp in order of lightness, so it still reads as relief', () => {
+    const seen = ramp(false)
+    for (let k = 1; k < seen.length; k++) expect(luma(seen[k]!)).toBeGreaterThan(luma(seen[k - 1]!))
+  })
+
+  it('desaturates ground seen before well below the ground in sight', () => {
+    const inSight = ramp(true)
+    const seen = ramp(false)
+    for (let k = 0; k < seen.length; k++) {
+      expect(chroma(seen[k]!)).toBeLessThan(chroma(inSight[k]!))
+      expect(chroma(seen[k]!)).toBeLessThan(16)
+    }
+  })
+
+  it('tells each ground state apart: in sight, seen before and fog', () => {
+    const inSight = ramp(true)
+    const seen = ramp(false)
+    for (let k = 0; k < seen.length; k++) {
+      expect(deltaE(seen[k]!, inSight[k]!)).toBeGreaterThan(15)
+      for (const fog of [FOG_FILL.light, FOG_FILL.dark]) {
+        expect(deltaE(seen[k]!, fog)).toBeGreaterThan(14)
+      }
+    }
   })
 })
