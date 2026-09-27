@@ -183,7 +183,9 @@ export function diagnoseRuntime(settings: AdminSettings): RuntimeDiagnosis {
     node: process.version,
     ...(region && { region }),
     hasSessionKey: settings.sessionKey !== '',
-    hasTypesafeToken: settings.typesafeToken !== '',
+    hasTypesafeToken:
+      settings.typesafeToken !== '' ||
+      Boolean(process.env.TYPESAFE_API_KEY && process.env.TYPESAFE_BASE_URL),
     originsConfigured: settings.origins.trim() !== '',
   }
 }
