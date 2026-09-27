@@ -60,3 +60,12 @@ export {
   STOP_MARKER,
   stopMarkerInstances,
 } from './markers'
+export type { SkyLighting, SunPosition } from './sun'
+export {
+  atmosphereColor,
+  DEFAULT_LATITUDE_DEG,
+  MARS_OBLIQUITY_DEG,
+  SCENE_LS_DEG,
+  skyLighting,
+  sunPosition,
+} from './sun'
