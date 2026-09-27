@@ -137,6 +137,8 @@ const currentStop = computed(() => props.stops.find((stop) => stop.current))
 /** The sun at the scene's time, and the light, sky and exposure that go with it. */
 const sun = computed(() => sunPosition(props.solFraction))
 const lighting = computed(() => skyLighting(sun.value.elevationDeg))
+/** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
+const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
 /**
  * Haze, sky at the horizon and unseen ground in one colour, so what is too far to make out and
  * what has not been seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
@@ -212,6 +214,7 @@ onBeforeUnmount(() => plane.dispose())
       :geometry="geometry"
       :variant="roverVariant"
       :ledger="ledger"
+      :lamp="lamp"
       @ready="emit('roverReady', $event)"
     />
     <ScenePicker

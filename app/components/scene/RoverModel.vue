@@ -16,6 +16,7 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   Quaternion,
+  SpotLight,
   Vector3,
 } from 'three'
 import { frameAttitude } from '#shared/utils/client/instruments'
@@ -49,6 +50,8 @@ const props = withDefaults(
     variant?: RoverVariant
     /** Who may draw a full model in this scene; without one, nobody waits. */
     ledger?: FullModelLedger
+    /** Brightness of the arm turret's white LEDs, 0 off to 1 full; the rover's only lamp. */
+    lamp?: number
   }>(),
   {
     geometry: () => DEFAULT_ROVER_GEOMETRY,
@@ -56,6 +59,7 @@ const props = withDefaults(
     detailed: false,
     variant: 'model',
     ledger: undefined,
+    lamp: 0,
   },
 )
 
@@ -100,6 +104,20 @@ for (const mesh of [boxes, cylinders]) {
   placeholder.add(mesh)
 }
 
+/**
+ * The arm turret's white LEDs (WATSON and PIXL's), the only light the rover carries: a short
+ * warm pool on the ground below where the stowed turret sits, at the front of the body. The
+ * model has no arm, so the lamp stands where it would be. Always in the scene, at zero by day,
+ * so switching it never changes the lit shaders.
+ */
+const LAMP_CANDELA = 1.2
+const turretLamp = props.ghost ? undefined : new SpotLight('#ffe8cc', 0, 1.6, Math.PI / 4, 0.7, 2)
+if (turretLamp) {
+  turretLamp.position.set(1.25, 0, 0.55)
+  turretLamp.target.position.set(1.45, 0, 0)
+  root.add(turretLamp, turretLamp.target)
+  watchEffect(() => (turretLamp.intensity = LAMP_CANDELA * props.lamp))
+}
 const proceduralTriangles =
   (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
 if (!props.ghost) {
@@ -327,6 +345,7 @@ onBeforeUnmount(() => {
   unitCylinder.dispose()
   material.dispose()
   detailMaterial?.dispose()
+  turretLamp?.dispose()
 })
 </script>
 
