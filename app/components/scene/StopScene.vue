@@ -10,6 +10,8 @@ import {
   HILLSHADE_LIGHT,
   LOD_FAR_M,
   rgbHex,
+  routeApproach,
+  routeDestination,
 } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
@@ -37,7 +39,8 @@ const props = withDefaults(
     heightAt?: (x: number, y: number) => number | undefined
     /** Height of the ground as drawn, fog included, for the route; by default `heightAt`. */
     drawnHeightAt?: (x: number, y: number) => number | undefined
-    stops?: { x: number; y: number }[]
+    /** The stops shown, the one the rover stands at or left from `current`. */
+    stops?: { x: number; y: number; current?: boolean }[]
     keyframes?: KeyframeBlock
     /** Sim seconds, for the path driven so far. */
     t?: number
@@ -97,6 +100,16 @@ const rover = computed(() => framePlacement(props.frame).position)
 const focus = computed(() => ({ x: rover.value.x, y: rover.value.y }))
 /** Camera target: the body's middle rather than its ground-level origin, or the focused object. */
 const target = computed(() => props.focusTarget ?? { ...rover.value, z: rover.value.z + 1 })
+
+/** The route's destination, flagged on the ground as drawn until a stop stands there. */
+const destination = computed(() => {
+  const end = routeDestination(props.route, props.stops)
+  if (!end) return null
+  const z = (props.drawnHeightAt ?? props.heightAt)?.(end.x, end.y) ?? 0
+  return { ...end, z, approach: routeApproach(props.route) }
+})
+/** The open round's goals were picked around the current stop. */
+const currentStop = computed(() => props.stops.find((stop) => stop.current))
 
 /**
  * Lighting for the rover only (the terrain's shading is baked): the hillshade's sun from the
@@ -162,7 +175,13 @@ onBeforeUnmount(() => plane.dispose())
       :focused-id="focusedId"
       :ledger="ledger"
     />
-    <GoalMarkers v-if="goals.length > 0" :goals="goals" :focused-id="focusedId" />
+    <GoalMarkers
+      v-if="goals.length > 0 || destination"
+      :goals="goals"
+      :focused-id="focusedId"
+      :from="currentStop"
+      :destination="destination"
+    />
     <RoverModel
       :frame="frame"
       :geometry="geometry"

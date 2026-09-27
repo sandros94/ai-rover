@@ -74,6 +74,10 @@ const shown = computed(() =>
     playback.index.value,
   ),
 )
+/** The stops shown, the playing drive's from-stop current; apart from the per-frame stage. */
+const shownTrail = computed(() =>
+  shown.value.trail.map((s) => ({ x: s.x, y: s.y, current: s.index === drive.value.from.index })),
+)
 /** What can be inspected: the stops and deaths shown; the rover is added where it moves. */
 const objects = computed(() =>
   mapObjects({
@@ -134,7 +138,7 @@ const stage = computed((): StageProps => ({
   center: manifest.value ? manifest.value.stop : drive.value.from,
   radius: manifest.value?.radius ?? 500,
   rover: rover.value ?? { ...drive.value.from, headingRad: 0 },
-  trail: shown.value.trail,
+  trail: shownTrail.value,
   plan: plan.value,
   driven: driven.value,
   deaths: deathObjects.value,

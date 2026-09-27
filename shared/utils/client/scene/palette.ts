@@ -98,17 +98,28 @@ export function srgbToLinear(channel: number): number {
 /**
  * Overlay colours of the 3D scene, the hex values of the Nuxt UI tokens the 2D map draws the
  * same things with (WebGL cannot read CSS variables): route `--ui-info`, driven path
- * `--ui-primary`, past stops `--ui-text-toned`, deaths `--ui-error`.
+ * `--ui-primary`, deaths `--ui-error`.
  */
 export const SCENE_COLORS = Object.freeze({
   route: '#38bdf8',
   driven: '#fb923c',
-  stop: '#d6d3d1',
   death: '#ef4444',
-  /** A submission's goal flag. */
-  goal: '#e7e5e4',
   /** Whatever is focused. */
   focus: '#f59e0b',
+  /**
+   * Stop posts and flags, lit in the scene: artificial against the warm ground, told apart from
+   * the relief tint and the fog fill of either colour mode by hue as much as lightness. The accent
+   * is `--ui-primary` in light mode, saturated enough to hold on the palest dust.
+   */
+  marker: Object.freeze({
+    /** Every post and pole: a warm white. */
+    post: '#fbf8f1',
+    /** A stop's sphere and the band under it, which one instanced mesh draws in one colour. */
+    sphere: Object.freeze({ current: '#f97316', past: '#a8b8cc' }),
+    flag: Object.freeze({ destination: '#f97316', goal: '#a8b8cc' }),
+    /** The disc where a post meets the ground, drawn faint. */
+    contact: '#1c1917',
+  }),
 })
 
 /** Rover part colours by tone (see `PartTone`): white body, grey links, aluminium wheels. */

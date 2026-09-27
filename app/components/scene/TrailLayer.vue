@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import {
+  CircleGeometry,
+  Color,
   CylinderGeometry,
   Group,
   InstancedMesh,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  MeshLambertMaterial,
+  MeshStandardMaterial,
   Quaternion,
+  SphereGeometry,
   Vector3,
 } from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { Point3 } from '#shared/utils/rover'
-import { ribbonMesh, SCENE_COLORS } from '#shared/utils/client/scene'
+import {
+  ribbonMesh,
+  SCENE_COLORS,
+  STOP_MARKER,
+  stopMarkerInstances,
+} from '#shared/utils/client/scene'
 import { overlayGeometry } from '~/utils/scene-geometry'
 
 const props = withDefaults(
   defineProps<{
-    /** Past stops, drawn as posts. */
-    stops?: { x: number; y: number }[]
+    /** The stops shown, the one the rover stands at or left from `current`; drawn as posts. */
+    stops?: { x: number; y: number; current?: boolean }[]
     /** The segment's keyframes; the path is drawn up to `t`. */
     keyframes?: KeyframeBlock
     /** Sim seconds. */
@@ -29,15 +38,49 @@ const props = withDefaults(
   { stops: () => [], keyframes: undefined, t: 0, heightAt: undefined },
 )
 
-/** Posts: metres. */
-const POST = { radius: 0.12, height: 3 }
 /** Path points closer than this to the last kept one are skipped. */
 const PATH_SPACING_M = 0.5
 const PATH = { widthM: 0.7, liftM: 0.06 }
+/** The contact disc: just above the ground, and faint enough to read as its shadow. */
+const CONTACT = { liftM: 0.02, opacity: 0.35 }
 
+const { marker } = SCENE_COLORS
+const M = STOP_MARKER
 const root = new Group()
-const postGeometry = new CylinderGeometry(POST.radius, POST.radius, POST.height, 10)
-const postMaterial = new MeshLambertMaterial({ color: SCENE_COLORS.stop })
+// Cylinders stand along their local y; the scene is z-up. Each part is placed from the foot.
+const postGeometry = new CylinderGeometry(M.postRadiusM, M.postRadiusM, M.postHeightM, 10)
+  .rotateX(Math.PI / 2)
+  .translate(0, 0, M.postHeightM / 2)
+const sphere = new SphereGeometry(M.sphereRadiusM, 20, 14).translate(0, 0, M.headZ)
+const band = new CylinderGeometry(M.bandRadiusM, M.bandRadiusM, M.bandHeightM, 16)
+  .rotateX(Math.PI / 2)
+  .translate(0, 0, M.bandZ)
+const headGeometry = mergeGeometries([sphere, band])!
+sphere.dispose()
+band.dispose()
+const contactGeometry = new CircleGeometry(M.contactRadiusM, 24).translate(0, 0, CONTACT.liftM)
+const postMaterial = new MeshStandardMaterial({
+  color: marker.post,
+  roughness: 0.85,
+  metalness: 0,
+})
+// Instance colours tint the head; a faint glow and no fog keep it readable far off.
+const headMaterial = new MeshStandardMaterial({
+  color: '#ffffff',
+  roughness: 0.3,
+  metalness: 0,
+  emissive: '#ffffff',
+  emissiveIntensity: 0.08,
+  fog: false,
+})
+const contactMaterial = new MeshBasicMaterial({
+  color: marker.contact,
+  transparent: true,
+  opacity: CONTACT.opacity,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+})
 const pathMaterial = new MeshBasicMaterial({
   color: SCENE_COLORS.driven,
   transparent: true,
@@ -46,30 +89,50 @@ const pathMaterial = new MeshBasicMaterial({
   polygonOffset: true,
   polygonOffsetFactor: -2,
 })
-let posts: InstancedMesh | undefined
+const headColors = {
+  current: new Color(marker.sphere.current),
+  past: new Color(marker.sphere.past),
+}
+/** Posts, their heads and their contact discs: one instance per stop in each. */
+let markers: InstancedMesh[] = []
 let path: Mesh | undefined
 /** Keyframe time of each ribbon point, for the draw range at `t`. */
 let pathTimes: number[] = []
 
 function drawPosts(): void {
-  if (posts) {
-    root.remove(posts)
-    posts.dispose()
+  for (const mesh of markers) {
+    root.remove(mesh)
+    mesh.dispose()
   }
-  posts = undefined
-  if (props.stops.length === 0) return
-  posts = new InstancedMesh(postGeometry, postMaterial, props.stops.length)
+  markers = []
+  const instances = stopMarkerInstances(props.stops, props.heightAt ?? (() => undefined))
+  if (instances.length === 0) return
+  const posts = new InstancedMesh(postGeometry, postMaterial, instances.length)
+  const heads = new InstancedMesh(headGeometry, headMaterial, instances.length)
+  const contacts = new InstancedMesh(contactGeometry, contactMaterial, instances.length)
+  posts.name = 'posts'
+  heads.name = 'heads'
+  contacts.name = 'contacts'
   const matrix = new Matrix4()
-  // The cylinder stands along its local y; turned to world z.
-  const upright = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Math.PI / 2)
+  const position = new Vector3()
+  const upright = new Quaternion()
+  const tilt = new Quaternion()
   const one = new Vector3(1, 1, 1)
-  props.stops.forEach((stop, k) => {
-    const z = props.heightAt?.(stop.x, stop.y) ?? 0
-    matrix.compose(new Vector3(stop.x, stop.y, z + POST.height / 2), upright, one)
-    posts!.setMatrixAt(k, matrix)
+  instances.forEach((instance, k) => {
+    position.set(instance.base.x, instance.base.y, instance.base.z)
+    matrix.compose(position, upright, one)
+    posts.setMatrixAt(k, matrix)
+    heads.setMatrixAt(k, matrix)
+    heads.setColorAt(k, instance.current ? headColors.current : headColors.past)
+    const q = instance.contact
+    matrix.compose(position, tilt.set(q.x, q.y, q.z, q.w), one)
+    contacts.setMatrixAt(k, matrix)
   })
-  posts.computeBoundingSphere()
-  root.add(posts)
+  markers = [contacts, posts, heads]
+  for (const mesh of markers) {
+    mesh.computeBoundingSphere()
+    root.add(mesh)
+  }
 }
 
 function drawPath(): void {
@@ -119,11 +182,12 @@ watch(() => [props.keyframes, props.heightAt], drawPath, { immediate: true })
 watch(() => props.t, reveal)
 
 onBeforeUnmount(() => {
-  posts?.dispose()
+  for (const mesh of markers) mesh.dispose()
   path?.geometry.dispose()
-  postGeometry.dispose()
-  postMaterial.dispose()
-  pathMaterial.dispose()
+  for (const geometry of [postGeometry, headGeometry, contactGeometry]) geometry.dispose()
+  for (const material of [postMaterial, headMaterial, contactMaterial, pathMaterial]) {
+    material.dispose()
+  }
 })
 </script>
 

@@ -33,7 +33,8 @@ const props = withDefaults(
     /** Sim seconds, for the path driven so far. */
     t?: number
     route?: MapPoint[]
-    stops?: MapPoint[]
+    /** The stops shown, the one the rover stands at or left from `current`. */
+    stops?: (MapPoint & { current?: boolean })[]
     /**
      * Death positions; a ghost faces `headingRad` when known, else north-east. A death with an
      * `id` is the death object of that id: focused, its ghost gains the full model.

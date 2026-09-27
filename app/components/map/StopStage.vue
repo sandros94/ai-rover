@@ -38,7 +38,8 @@ const props = withDefaults(
     center: MapPoint
     radius: number
     rover: { x: number; y: number; headingRad: number }
-    trail?: MapPoint[]
+    /** The stops shown, the one the rover stands at or left from `current`. */
+    trail?: (MapPoint & { current?: boolean })[]
     plan?: MapPoint[]
     driven?: MapPoint[]
     deaths?: MapPoint[]

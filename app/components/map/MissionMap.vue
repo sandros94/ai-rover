@@ -142,6 +142,11 @@ const { picked, submitting, refusal, onHover, onPick, cancel, confirm } = usePic
 
 const deathObjects = computed(() => props.objects.filter((o) => o.kind === 'death'))
 
+/** The trail with its current stop marked; apart from the stage, which changes every frame. */
+const trail = computed(() =>
+  props.state.trail.map((s) => ({ x: s.x, y: s.y, current: s.index === stop.index })),
+)
+
 const submissions = computed(() =>
   (props.state.round?.submissions ?? []).map((s) => ({ id: s.id, goal: s.goal })),
 )
@@ -164,7 +169,7 @@ const stage = computed((): StageProps => {
       : { x: stop.x, y: stop.y },
     radius: manifest.value?.radius ?? 500,
     rover,
-    trail: props.state.trail,
+    trail: trail.value,
     plan: track.plan.value,
     driven: track.driven.value,
     // The deaths as objects: the 3D view knows each ghost by its id.

@@ -19,6 +19,14 @@ const DiskScene = defineAsyncComponent(
 const CHUNK_VERTICES = 65
 /** A made-up death behind the start so the ghost shows on every fixture, metres from the start. */
 const DEMO_DEATH_M = 35
+/**
+ * Made-up earlier stops behind the start so past posts show beside the current one: metres from
+ * the start and radians off straight behind it, clear of the demo death.
+ */
+const DEMO_STOPS = [
+  { distanceM: 12, offRad: 0.5 },
+  { distanceM: 24, offRad: -0.4 },
+]
 
 const field = (name: (typeof KEYFRAME_FIELDS)[number]) => KEYFRAME_FIELDS.indexOf(name)
 
@@ -42,7 +50,19 @@ const heightAt = computed(() => {
 const terrain = computed(() => props.disk && { grid: props.disk.grid, origin: props.disk.origin })
 
 const t = computed(() => props.frame[field('t')]!)
-const stops = computed(() => [{ x: props.record.start.x, y: props.record.start.y }])
+/** Straight back from the goal through the start. */
+const away = computed(() => {
+  const { start, goal } = props.record
+  return Math.atan2(start.y - goal.y, start.x - goal.x)
+})
+const stops = computed(() => {
+  const { start } = props.record
+  const earlier = DEMO_STOPS.map(({ distanceM, offRad }) => ({
+    x: start.x + distanceM * Math.cos(away.value + offRad),
+    y: start.y + distanceM * Math.sin(away.value + offRad),
+  })).reverse()
+  return [...earlier, { x: start.x, y: start.y, current: true }]
+})
 const rest = computed(() => ({ ...props.record.start }))
 /** What the drive has revealed by the scrub time, lifting the fog as it goes. */
 const reveals = useRevealsUntil(
@@ -51,12 +71,11 @@ const reveals = useRevealsUntil(
 )
 
 const deaths = computed(() => {
-  const { start, goal, outcome } = props.record
-  const away = Math.atan2(start.y - goal.y, start.x - goal.x)
+  const { start, outcome } = props.record
   const demo = {
-    x: start.x + DEMO_DEATH_M * Math.cos(away),
-    y: start.y + DEMO_DEATH_M * Math.sin(away),
-    headingRad: away + Math.PI,
+    x: start.x + DEMO_DEATH_M * Math.cos(away.value),
+    y: start.y + DEMO_DEATH_M * Math.sin(away.value),
+    headingRad: away.value + Math.PI,
   }
   const out = [demo]
   if (outcome.kind === 'failed') out.push({ ...outcome.endPose })
@@ -88,7 +107,7 @@ const deaths = computed(() => {
     <p class="text-xs text-muted">
       {{ cut.length }} chunks · {{ reveals.length }} / {{ record.reveals.length }} reveals · drag to
       orbit, wheel or pinch to zoom · the red ghost {{ DEMO_DEATH_M }} m behind the start is a demo
-      death, not from the record.
+      death and the two grey-headed posts are demo earlier stops, none from the record.
     </p>
   </div>
   <p v-else class="text-muted">This scene needs the stop disk.</p>

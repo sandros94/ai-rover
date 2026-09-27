@@ -194,7 +194,7 @@ function aboutAxis(axis: 'x' | 'y' | 'z', angle: number): Quat {
  * The shortest rotation taking unit vector `a` onto unit vector `b`. For opposite vectors it
  * turns half a revolution about an axis perpendicular to `a`.
  */
-function fromTo(a: Point3, b: Point3): Quat {
+export function fromTo(a: Point3, b: Point3): Quat {
   const dot = a.x * b.x + a.y * b.y + a.z * b.z
   if (dot < -1 + 1e-12) {
     const axis = Math.abs(a.x) < 0.9 ? { x: 0, y: a.z, z: -a.y } : { x: -a.z, y: 0, z: a.x }
