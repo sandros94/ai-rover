@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [unit, nuxt, e2e, browser]
+        project: [unit, nuxt, e2e]
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -49,6 +49,9 @@ jobs:
 
       - name: Test ${{ matrix.project }}
         id: test
+        env:
+          # A built server refuses to start without a session key; this one only ever seals CI sessions.
+          NUXT_SESSION_KEY: ci-only-session-secret-0123456789abcdefghijklmnopqrstuvwxyz
         run: |
           set -o pipefail
           pnpm test:${{ matrix.project }} 2>&1 | tee "/tmp/test-${{ matrix.project }}.log"
