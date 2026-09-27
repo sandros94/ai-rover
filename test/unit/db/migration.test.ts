@@ -6,7 +6,7 @@ import { sql as raw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import { describe, expect, it } from 'vitest'
 import { relations } from '#server/database/schema'
-import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import { DEFAULT_MISSION_RULES, MissionError, parseMissionRules } from '#shared/utils/mission'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 import { JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
 
@@ -164,6 +164,41 @@ describe('the ai_judgment migration', () => {
       expect(keys.rows).toEqual([{ conname: 'ai_judgment_pkey' }])
       const old = await db.execute(raw`select to_regclass('jev_judgment') is null as gone`)
       expect(old.rows).toEqual([{ gone: true }])
+    } finally {
+      await connection.pool.end()
+      await server.stop()
+    }
+  })
+})
+
+describe('the segment_time_band migration', () => {
+  it('gives stored rules the time band and removes the distance band, so they parse', async () => {
+    const server = new NetlifyDB({ logger: () => {} })
+    const connection = getDatabase({ connectionString: await server.start() })
+    const db = drizzle({ client: connection, relations })
+    try {
+      const names = readdirSync(MIGRATIONS_DIR).toSorted()
+      const at = names.findIndex((name) => name.endsWith('_segment_time_band'))
+      expect(at).toBeGreaterThan(0)
+      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      const { segmentTimeBand: _band, ...current } = DEFAULT_MISSION_RULES
+      const { stopRadiusM: _radius, ...unsized } = current
+      const older = { ...unsized, segmentDistanceBand: { minM: 50, maxM: 250 } }
+      const tuned = { ...current, segmentTimeBand: { minS: 60, maxS: 600 } }
+      const config = (rules: unknown) => JSON.stringify({ world: {}, rules })
+      await db.execute(raw`
+        insert into mission (id, seed, world_hash, config) values
+          ('01900000-0000-7000-8000-000000000001', 'mars', '0123456789abcdef', ${config(older)}),
+          ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${config(tuned)})`)
+      expect(() => parseMissionRules(older)).toThrow(MissionError)
+
+      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      const missions = await db.execute(raw`select config from mission order by id`)
+      const [migrated, kept] = (missions.rows as { config: { rules: unknown } }[]).map((row) =>
+        parseMissionRules(row.config.rules),
+      )
+      expect(migrated).toEqual(DEFAULT_MISSION_RULES)
+      expect(kept).toEqual(tuned)
     } finally {
       await connection.pool.end()
       await server.stop()

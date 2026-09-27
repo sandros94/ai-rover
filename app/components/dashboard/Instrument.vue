@@ -34,9 +34,8 @@ export const DRIVE_GROUPS: readonly InstrumentGroup[] = [
 
 <script setup lang="ts">
 import type { RevealGroup, RoundSubmission, SlopeProfile } from '#shared/utils/client/instruments'
-import type { DriveEvent, KeyframeBlock } from '#shared/utils/drive'
+import type { DriveEvent, KeyframeBlock, PublishedPlanMetrics } from '#shared/utils/drive'
 import type { MissionRules } from '#shared/utils/mission'
-import type { NavMetrics } from '#shared/utils/nav'
 import EventFeed from '~/components/instruments/EventFeed.vue'
 import type { JourneyTally } from '~/components/instruments/JourneyStats.vue'
 import JourneyStats from '~/components/instruments/JourneyStats.vue'
@@ -68,7 +67,7 @@ withDefaults(
       t: number
       startedAt: Instant
       /** The segment's opening plan. */
-      metrics: NavMetrics
+      metrics: PublishedPlanMetrics
       /** The plan's slope over seen ground, when the stop's ground is loaded. */
       profile?: SlopeProfile
       /** Ground distance of the journey before this segment, metres. */

@@ -7,6 +7,7 @@ import {
   DEFAULT_MISSION_RULES,
   formatDriveTime,
   MissionError,
+  parseMissionRules,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,
@@ -34,6 +35,41 @@ describe('DEFAULT_MISSION_RULES', () => {
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
     expect(Object.isFrozen(rules.notMoving)).toBe(true)
+  })
+})
+
+describe('parseMissionRules', () => {
+  const plain = () => structuredClone(DEFAULT_MISSION_RULES) as MissionRules
+
+  it('accepts the stored rules in the current shape', () => {
+    expect(parseMissionRules(plain())).toEqual(DEFAULT_MISSION_RULES)
+  })
+
+  it('refuses rules still carrying the distance band, or missing the time band', () => {
+    const { segmentTimeBand: _band, ...rest } = plain()
+    const withBand = { ...plain(), segmentDistanceBand: { minM: 50, maxM: 250 } }
+    for (const stored of [
+      rest,
+      withBand,
+      { ...rest, segmentDistanceBand: { minM: 50, maxM: 250 } },
+    ]) {
+      const error = (() => {
+        try {
+          parseMissionRules(stored)
+        } catch (caught) {
+          return caught
+        }
+      })()
+      expect(error).toBeInstanceOf(MissionError)
+      expect((error as MissionError).code).toBe('INVALID_INPUT')
+    }
+  })
+
+  it('refuses a band whose minimum exceeds its maximum, or an unknown tie-break', () => {
+    expect(() => parseMissionRules({ ...plain(), segmentTimeBand: { minS: 10, maxS: 5 } })).toThrow(
+      MissionError,
+    )
+    expect(() => parseMissionRules({ ...plain(), tieBreak: 'likes' })).toThrow(MissionError)
   })
 })
 

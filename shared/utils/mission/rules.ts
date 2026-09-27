@@ -1,3 +1,4 @@
+import * as v from 'valibot'
 import { DEFAULT_STOP_RADIUS } from '../terrain/disk'
 import { MissionError } from './errors'
 
@@ -71,6 +72,50 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
     backstopMs: 15 * 60_000,
   }),
 })
+
+const seconds = v.pipe(v.number(), v.finite(), v.minValue(0))
+const metres = v.pipe(v.number(), v.finite(), v.minValue(0))
+const milliseconds = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+const count = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+
+/** Mission rules as stored with a mission; nothing else is accepted, extra fields included. */
+export const MissionRulesSchema = v.strictObject({
+  stopRadiusM: v.pipe(v.number(), v.finite(), v.gtValue(0)),
+  segmentTimeBand: v.pipe(
+    v.strictObject({ minS: seconds, maxS: seconds }),
+    v.check((band) => band.minS <= band.maxS, 'segmentTimeBand.minS exceeds maxS'),
+  ),
+  failureZone: v.strictObject({
+    destinationRadiusM: metres,
+    pathRadiusM: metres,
+    clusterRadiusM: metres,
+    strikes: count,
+  }),
+  graceWindowMs: milliseconds,
+  maxJudgedPerRound: count,
+  tieBreak: v.picklist(['risk', 'confidence']),
+  notMoving: v.strictObject({
+    quorumMax: count,
+    quorumMin: count,
+    windowMs: milliseconds,
+    progressM: metres,
+    backstopMs: milliseconds,
+  }),
+}) satisfies v.GenericSchema<unknown, MissionRules>
+
+/** Stored mission rules, checked against {@link MissionRulesSchema}; throws `INVALID_INPUT`. */
+export function parseMissionRules(value: unknown): MissionRules {
+  const parsed = v.safeParse(MissionRulesSchema, value)
+  if (!parsed.success) {
+    const [issue] = parsed.issues
+    throw new MissionError(
+      'INVALID_INPUT',
+      `Mission rules are invalid: ${v.getDotPath(issue) ?? '(root)'} ${issue.message}. Migrate the stored rules to the current shape.`,
+      { cause: new v.ValiError(parsed.issues) },
+    )
+  }
+  return parsed.output
+}
 
 export interface MapPoint {
   x: number

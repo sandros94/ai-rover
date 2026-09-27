@@ -80,8 +80,10 @@ export const SegmentManifestSchema = v.strictObject({
       maxSlopeDeg: finite,
       meanSlopeDeg: finite,
       unrevealedFraction: finite,
-      goalInFog: v.boolean(),
-      estimatedDriveS: finite,
+      // Absent from segments published before plans carried them: blobs are immutable, so
+      // those segments stay readable forever and these stay optional.
+      goalInFog: v.optional(v.boolean()),
+      estimatedDriveS: v.optional(finite),
       turnCount: count,
       expansions: count,
       computeMs: finite,
@@ -92,6 +94,9 @@ export const SegmentManifestSchema = v.strictObject({
 })
 
 export type SegmentManifest = v.InferOutput<typeof SegmentManifestSchema>
+
+/** A published segment's opening plan metrics: `NavMetrics`, older segments lacking some. */
+export type PublishedPlanMetrics = SegmentManifest['plan']['metrics']
 
 /** A manifest as published: the segment's id and its wall-clock start, epoch milliseconds. */
 export const StoredSegmentManifestSchema = v.strictObject({

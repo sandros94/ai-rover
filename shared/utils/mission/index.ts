@@ -7,6 +7,8 @@ export {
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
   formatDriveTime,
+  MissionRulesSchema,
+  parseMissionRules,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,

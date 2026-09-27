@@ -35,7 +35,12 @@ export {
   segmentManifestKey,
   segmentSliceKey,
 } from './keys'
-export type { SegmentManifest, SegmentSlice, StoredSegmentManifest } from './slices'
+export type {
+  PublishedPlanMetrics,
+  SegmentManifest,
+  SegmentSlice,
+  StoredSegmentManifest,
+} from './slices'
 export {
   DEFAULT_SLICE_SECONDS,
   decodeSlice,
