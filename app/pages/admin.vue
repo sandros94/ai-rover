@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Diagnosis } from '#shared/utils/admin'
+
 const { data: status } = await useFetch('/api/admin/status', {
   default: () => ({ configured: false }),
 })
@@ -12,20 +14,81 @@ interface Landed {
   roundId: string
 }
 const landed = ref<Landed | null>(null)
-const error = ref('')
+const error = ref<{ title: string; message: string } | null>(null)
 
 async function seed() {
   pending.value = true
-  error.value = ''
+  error.value = null
   landed.value = null
   try {
     landed.value = await $fetch<Landed>('/api/admin/seed', { method: 'POST', body: state })
   } catch (caught) {
-    error.value = requestErrorOf(caught).message
+    error.value = { title: 'Not seeded', message: requestErrorOf(caught).message }
   } finally {
     pending.value = false
   }
 }
+
+const diagnosing = ref(false)
+const diagnosis = ref<Diagnosis | null>(null)
+
+async function diagnose() {
+  diagnosing.value = true
+  error.value = null
+  diagnosis.value = null
+  try {
+    diagnosis.value = await $fetch<Diagnosis>('/api/admin/diagnose', {
+      method: 'POST',
+      body: { token: state.token },
+    })
+  } catch (caught) {
+    error.value = { title: 'No diagnostics', message: requestErrorOf(caught).message }
+  } finally {
+    diagnosing.value = false
+  }
+}
+
+const yesNo = (value: boolean) => (value ? 'yes' : 'no')
+
+/** One line per section, green when everything it checks is in place. */
+const sections = computed(() => {
+  const found = diagnosis.value
+  if (!found) return []
+  const { database, blobs, runtime } = found
+  const tables = Object.entries(database.tables)
+  return [
+    {
+      key: 'database',
+      label: 'Database',
+      ok: database.ok,
+      lines: [
+        ...(database.error ? [`Error: ${database.error}`] : []),
+        `Migrations: ${database.migrations.length ? database.migrations.join(', ') : 'none'}`,
+        `Tables: ${tables.length ? tables.map(([name, n]) => `${name} ${n}`).join(', ') : 'none'}`,
+      ],
+    },
+    {
+      key: 'blobs',
+      label: 'Blobs',
+      ok: blobs.ok,
+      lines: [
+        ...(blobs.error ? [`Error: ${blobs.error}`] : []),
+        `Keys: ${blobs.keys >= 1000 ? '1000 or more' : blobs.keys}`,
+      ],
+    },
+    {
+      key: 'runtime',
+      label: 'Runtime',
+      ok: runtime.hasSessionKey && runtime.hasTypesafeToken && runtime.originsConfigured,
+      lines: [
+        `Node ${runtime.node}${runtime.region ? `, region ${runtime.region}` : ''}`,
+        `Session key: ${yesNo(runtime.hasSessionKey)}`,
+        `TypeSafe token: ${yesNo(runtime.hasTypesafeToken)}`,
+        `Sign-in origins: ${yesNo(runtime.originsConfigured)}`,
+      ],
+    },
+  ]
+})
 </script>
 
 <template>
@@ -58,9 +121,22 @@ async function seed() {
           <UInputNumber v-model="state.y" class="w-full" />
         </UFormField>
 
-        <UButton type="submit" :loading="pending" :disabled="!state.token" block>
-          Seed the mission
-        </UButton>
+        <div class="flex gap-2">
+          <UButton type="submit" :loading="pending" :disabled="!state.token" class="flex-1" block>
+            Seed the mission
+          </UButton>
+          <UButton
+            type="button"
+            data-test="admin-diagnose"
+            color="neutral"
+            variant="outline"
+            :loading="diagnosing"
+            :disabled="!state.token"
+            @click="diagnose"
+          >
+            Run diagnostics
+          </UButton>
+        </div>
 
         <UAlert
           v-if="landed"
@@ -75,9 +151,33 @@ async function seed() {
           data-test="admin-error"
           color="error"
           variant="subtle"
-          title="Not seeded"
-          :description="error"
+          :title="error.title"
+          :description="error.message"
         />
+
+        <ul v-if="sections.length" class="flex flex-col gap-3 text-sm">
+          <li
+            v-for="section in sections"
+            :key="section.key"
+            :data-test="`diagnosis-${section.key}`"
+            :data-ok="String(section.ok)"
+            class="flex gap-2"
+          >
+            <UIcon
+              :name="section.ok ? 'i-lucide-circle-check' : 'i-lucide-circle-x'"
+              :class="section.ok ? 'text-success' : 'text-error'"
+              class="mt-0.5 size-4 shrink-0"
+            />
+            <div class="min-w-0">
+              <p class="font-medium" :class="section.ok ? 'text-success' : 'text-error'">
+                {{ section.label }}
+              </p>
+              <p v-for="line in section.lines" :key="line" class="break-words text-muted">
+                {{ line }}
+              </p>
+            </div>
+          </li>
+        </ul>
       </UForm>
     </UCard>
   </UContainer>

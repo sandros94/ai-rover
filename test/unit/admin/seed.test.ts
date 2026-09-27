@@ -4,7 +4,7 @@ import type { DB } from '#server/database/db'
 import { getMission } from '#server/repositories/missions'
 import { getOpenRound } from '#server/repositories/rounds'
 import { listStops } from '#server/repositories/stops'
-import type { AdminContext } from '#server/utils/admin/seed'
+import type { AdminContext } from '#server/utils/admin/access'
 import { defineAdminSeedHandlerWith, defineAdminStatusHandlerWith } from '#server/utils/admin/seed'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import { stopManifestKey } from '#shared/utils/terrain'
@@ -23,7 +23,12 @@ afterAll(() => close())
 const { store, blobs } = memoryStore()
 
 function appWith(token: string) {
-  const context: AdminContext = { token: () => token, db: () => db, store: () => store }
+  const context: AdminContext = {
+    token: () => token,
+    db: () => db,
+    store: () => store,
+    settings: () => ({ sessionKey: '', typesafeToken: '', origins: '' }),
+  }
   return new H3()
     .post('/api/admin/seed', defineAdminSeedHandlerWith(context))
     .get('/api/admin/status', defineAdminStatusHandlerWith(context))

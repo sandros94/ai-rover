@@ -5,7 +5,7 @@ import type { AuthContext } from '../context'
 import type { AtprotoFlow } from '../flow'
 import { fetchPublic, publicHttpsUrl, readJsonObject } from '../http'
 import type { OAuthHandlerOptions, OAuthResult } from '../oauth'
-import { confirmLink, startFields, withOAuthErrors } from '../oauth'
+import { confirmLink, oauthError, startFields, withOAuthErrors } from '../oauth'
 import { isLoopbackOrigin } from '../origins'
 import { pkceVerifier, randomToken } from '../random'
 import { resolveIdentity } from './identity'
@@ -109,11 +109,20 @@ async function start(
     return redirect(target.href, 302)
   }
   if (typeof query.handle !== 'string' || !query.handle.trim()) {
-    throw new HTTPError({ status: 400, message: 'Name the account: ?handle=<handle or DID>.' })
+    throw oauthError('handle', {
+      status: 400,
+      message: 'Name the account: ?handle=<handle or DID>.',
+    })
   }
   const loginHint = query.handle.trim()
   const fields = await startFields(event, auth, query, randomToken())
-  const identity = await resolveIdentity(loginHint, auth.fetch)
+  const identity = await resolveIdentity(loginHint, auth.fetch).catch((error: unknown) => {
+    // Resolution answers 400 exactly when the identifier leads to no usable account.
+    if (error instanceof HTTPError && error.status === 400) {
+      throw oauthError('handle', { status: 400, message: error.message, cause: error })
+    }
+    throw error
+  })
   const server = await discoverAuthorizationServer(auth.fetch, identity.pds)
 
   const verifier = pkceVerifier()
@@ -169,7 +178,7 @@ async function callback(
     flow?.provider !== 'atproto' ||
     !secureCompare(flow.state, typeof query.state === 'string' ? query.state : '')
   ) {
-    throw new HTTPError({
+    throw oauthError('state-mismatch', {
       status: 400,
       message: 'The sign-in expired or did not start here; try again.',
     })
@@ -181,7 +190,7 @@ async function callback(
     })
   }
   if (typeof query.code !== 'string') {
-    throw new HTTPError({
+    throw oauthError('refused', {
       status: 400,
       message: `The sign-in was refused: ${String(query.error)}.`,
     })

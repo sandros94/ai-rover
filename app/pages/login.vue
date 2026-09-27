@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AuthProvider } from '#auth'
+import { signInErrorSentence } from '#shared/utils/sign-in'
 
 const route = useRoute()
 const { loggedIn } = useUserSession()
@@ -9,6 +10,12 @@ const redirect = computed(() =>
     ? route.query.redirect
     : '/',
 )
+
+/** Set when a sign-in route sent the user back with a failure code. */
+const failure = computed(() => {
+  const code = route.query.error
+  return typeof code === 'string' ? signInErrorSentence(code) : ''
+})
 
 if (loggedIn.value) await navigateTo(redirect.value)
 
@@ -37,6 +44,15 @@ async function signInWithAtproto() {
       </template>
 
       <div class="flex flex-col gap-6">
+        <UAlert
+          v-if="failure"
+          data-test="login-error"
+          color="error"
+          variant="subtle"
+          title="Not signed in"
+          :description="failure"
+        />
+
         <UButton
           v-if="offers('github')"
           :to="signInUrl('github')"

@@ -1,10 +1,11 @@
 import { H3 } from 'nitro/h3'
 import { base64Parse } from 'unsecure/utils'
 import { verify } from 'unjwt/jws'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import { findUserByIdentity } from '#server/repositories/users'
-import { completeSignIn } from '#server/utils/sign-in'
+import type { OAuthResult } from '~~/modules/auth/runtime/server/lib/oauth'
+import { completeSignIn, failSignIn } from '#server/utils/sign-in'
 import {
   atprotoClient,
   createAtprotoHandler,
@@ -114,13 +115,19 @@ function network(options: NetworkOptions = {}) {
   })
 }
 
-function appOver(auth: AuthContext) {
+function appOver(
+  auth: AuthContext,
+  options: { complete?: (result: OAuthResult) => unknown; redirectErrors?: boolean } = {},
+) {
   return new H3()
     .get(
       '/api/auth/atproto',
       createAtprotoHandler(auth, {
         onSuccess: (event, result) =>
-          completeSignIn(event, { db, sessions: auth.sessions }, result),
+          options.complete
+            ? options.complete(result)
+            : completeSignIn(event, { db, sessions: auth.sessions }, result),
+        ...(options.redirectErrors && { onError: failSignIn }),
       }),
     )
     .get('/api/auth/atproto/client-metadata.json', createClientMetadataHandler(auth))
@@ -469,6 +476,76 @@ describe('AT Protocol sign-in', () => {
       { headers: { cookie: cookieHeader(res) } },
     )
     expect(response.status).toBe(302)
+  })
+})
+
+describe('sign-in failures', () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  afterEach(() => logged.mockClear())
+
+  const ISS = encodeURIComponent('https://auth.test')
+
+  async function failedCallback(
+    options: { complete?: (result: OAuthResult) => unknown } = {},
+    query: (state: string) => string = (state) => `code=c&state=${state}&iss=${ISS}`,
+  ) {
+    const app = appOver(testAuth(network().fetch), { ...options, redirectErrors: true })
+    const { res } = await start(app)
+    const flow = await openCookie(setCookies(res)['__Host-jev-oauth']!.value)
+    return app.request(`${ORIGIN}/api/auth/atproto?${query(flow.state as string)}`, {
+      headers: { cookie: cookieHeader(res) },
+    })
+  }
+
+  it('redirects a failing sign-in completion with a code, logging the cause', async () => {
+    const cause = new Error('relation "user_identity" is locked by secret-host:5432')
+    const response = await failedCallback({
+      complete: () => {
+        throw cause
+      },
+    })
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe('/login?error=sign-in-failed')
+    expect(logged).toHaveBeenCalled()
+    expect(logged.mock.calls.flat().some((arg) => arg === cause || arg?.cause === cause)).toBe(true)
+  })
+
+  it('names a database failure without its message', async () => {
+    const response = await failedCallback({
+      complete: () => {
+        throw new Error('Failed query', {
+          cause: Object.assign(new Error('connection to secret-host refused'), { code: '08006' }),
+        })
+      },
+    })
+    expect(response.headers.get('location')).toBe('/login?error=database')
+  })
+
+  it('names a callback whose state does not match the sealed one', async () => {
+    const response = await failedCallback({}, () => `code=c&state=forged&iss=${ISS}`)
+    expect(response.headers.get('location')).toBe('/login?error=state-mismatch')
+  })
+
+  it('names an authorization the server refused', async () => {
+    const response = await failedCallback(
+      {},
+      (state) => `error=access_denied&state=${state}&iss=${ISS}`,
+    )
+    expect(response.headers.get('location')).toBe('/login?error=refused')
+  })
+
+  it('names a handle that does not resolve', async () => {
+    const app = appOver(testAuth(network().fetch), { redirectErrors: true })
+    for (const handle of ['nobody.test', 'not a handle', '']) {
+      const response = await app.request(
+        `${ORIGIN}/api/auth/atproto?handle=${encodeURIComponent(handle)}`,
+      )
+      expect({ handle, location: response.headers.get('location') }).toEqual({
+        handle,
+        location: '/login?error=handle',
+      })
+    }
   })
 })
 

@@ -4,7 +4,7 @@ import { secureCompare } from 'unsecure/compare'
 import type { AuthContext } from './context'
 import { fetchPublic, readJsonObject } from './http'
 import type { OAuthHandlerOptions } from './oauth'
-import { confirmLink, startFields, withOAuthErrors } from './oauth'
+import { confirmLink, oauthError, startFields, withOAuthErrors } from './oauth'
 import { randomToken } from './random'
 
 export interface GitHubConfig {
@@ -79,7 +79,7 @@ async function callback(
     flow?.provider !== 'github' ||
     !secureCompare(flow.state, typeof query.state === 'string' ? query.state : '')
   ) {
-    throw new HTTPError({
+    throw oauthError('state-mismatch', {
       status: 400,
       message: 'The sign-in expired or did not start here; try again.',
     })

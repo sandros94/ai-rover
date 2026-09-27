@@ -53,3 +53,12 @@ export function isMissingUserViolation(error: unknown): boolean {
   }
   return false
 }
+
+/** The SQLSTATE of the first Postgres error along the `cause` chain, if any. */
+export function postgresErrorOf(error: unknown): { error: Error; code: string } | undefined {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    const { code } = current as Error & { code?: unknown }
+    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return { error: current, code }
+  }
+  return undefined
+}

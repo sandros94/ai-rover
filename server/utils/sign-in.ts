@@ -1,10 +1,16 @@
-import type { H3Event } from 'nitro/h3'
-import { HTTPError, redirect } from 'nitro/h3'
+import type { H3Event, HTTPError } from 'nitro/h3'
+import { redirect } from 'nitro/h3'
 import type { AuthProvider } from '#auth'
+import type { SignInErrorCode } from '#shared/utils/sign-in'
 import type { OAuthResult } from '../../modules/auth/runtime/server/lib/oauth'
+import {
+  oauthCauseOf,
+  oauthError,
+  oauthFailureOf,
+} from '../../modules/auth/runtime/server/lib/oauth'
 import type { UserSessions } from '../../modules/auth/runtime/server/lib/session'
 import type { DB } from '../database/db'
-import { DbError } from '../database/errors'
+import { DbError, postgresErrorOf } from '../database/errors'
 import { createUser, findUserByIdentity, linkIdentity } from '../repositories/users'
 
 /**
@@ -20,7 +26,7 @@ export async function completeSignIn(
   const identity = { provider: result.provider, subject: result.subject }
   let user = await findUserByIdentity(db, identity)
   if (user && result.linkTo && user.id !== result.linkTo) {
-    throw new HTTPError({
+    throw oauthError('account-taken', {
       status: 409,
       message: `This ${result.provider} account already belongs to another user; sign in with it instead.`,
     })
@@ -30,7 +36,9 @@ export async function completeSignIn(
     try {
       await linkIdentity(db, userId, identity)
     } catch (error) {
-      if (error instanceof DbError) throw new HTTPError({ status: 409, message: error.message })
+      if (error instanceof DbError) {
+        throw oauthError('account-taken', { status: 409, message: error.message, cause: error })
+      }
       throw error
     }
     user = (await findUserByIdentity(db, identity))!
@@ -59,4 +67,25 @@ function profileRow({ profile }: OAuthResult) {
     avatarUrl: profile.avatarUrl ?? null,
     handle: profile.handle ?? null,
   }
+}
+
+/** The code a failed sign-in redirects with; the failure's own message never leaves the server. */
+export function signInErrorCode(error: HTTPError): SignInErrorCode {
+  const reason: SignInErrorCode | undefined = oauthFailureOf(error)
+  if (reason) return reason
+  if (postgresErrorOf(oauthCauseOf(error))) return 'database'
+  if (error.status === 502 || error.status === 504) return 'provider'
+  return 'sign-in-failed'
+}
+
+/** `onError` of the sign-in routes: logs the failure and lands on the login page with its code. */
+export function failSignIn(event: H3Event, error: HTTPError) {
+  const code = signInErrorCode(error)
+  const log = error.status >= 500 ? console.error : console.warn
+  const cause = oauthCauseOf(error)
+  log(
+    `[auth] sign-in failed (${code}): ${error.status} ${error.message}`,
+    ...(cause ? [cause] : []),
+  )
+  return redirect(`/login?${new URLSearchParams({ error: code })}`, 302)
 }
