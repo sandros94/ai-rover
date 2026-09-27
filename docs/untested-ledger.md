@@ -29,8 +29,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 25. Chunk blobs carry the true heights and traversable bits of unrevealed ground, so a script combining them with the public plan can anticipate where a drive stops short. Accepted as a known limitation: the views hide fogged ground, and only the served chunks expose it.
 26. The attempt cap is checked before an insert without being atomic with it; concurrent submits can exceed it by a few.
 27. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
-28. The reachability flood fill crosses unseen ground, so whether a seen vertex is pathable can depend on hidden terrain.
-29. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
-30. The end-to-end flow has been exercised locally with scripted browsers (two users, plan, submit, LGTM, flag, drive, settlement, replay, phone width); the failure path (not-moving cut, three strikes, reset) is covered by unit tests only, never by a scripted browser run.
-31. A denied GitHub consent (callback with `error=` and no `code`) is treated as a fresh start and bounces back to GitHub instead of showing `refused`.
-32. The Neon WebSocket pool inside Functions: works on the first deploy; cold-start cost and connection reuse across invocations unmeasured.
+28. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
+29. The end-to-end flow has been exercised locally with scripted browsers (two users, plan, submit, LGTM, flag, drive, settlement, replay, phone width); the failure path (not-moving cut, three strikes, reset) is covered by unit tests only, never by a scripted browser run.
+30. A denied GitHub consent (callback with `error=` and no `code`) is treated as a fresh start and bounces back to GitHub instead of showing `refused`.
+31. The Neon WebSocket pool inside Functions: works on the first deploy; cold-start cost and connection reuse across invocations unmeasured.
