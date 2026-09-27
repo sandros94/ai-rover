@@ -9,6 +9,8 @@ export {
   DEFAULT_PREFETCH_CONCURRENCY,
   loadOrder,
 } from './chunks'
+export type { ContourTile, DiskGround, GroundView } from './ground'
+export { chunkVerticesOf, contourTiles, createDiskGround, groundView } from './ground'
 export type { DiskTerrain, TerrainSampler } from './terrain-sampler'
 export { createTerrainSampler } from './terrain-sampler'
 export type { PlaybackClock, PlaybackMode, PlaybackRate } from './playback'

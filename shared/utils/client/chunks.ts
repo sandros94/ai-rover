@@ -6,8 +6,11 @@ import type { JourneyClient } from './journey'
 /** Chunks a cache keeps when none is given: a 500 m stop disk lists 224. */
 export const DEFAULT_CHUNK_CACHE_SIZE = 300
 
-/** Chunk requests {@link ChunkCache.prefetch} keeps open when none is given. */
-export const DEFAULT_PREFETCH_CONCURRENCY = 6
+/**
+ * Chunk requests {@link ChunkCache.prefetch} keeps open when none is given: over HTTP/2 they share
+ * one connection, so more in flight hide more round trips.
+ */
+export const DEFAULT_PREFETCH_CONCURRENCY = 12
 
 /** Vertex layout shared by every chunk of a world. */
 export interface ChunkGeometry {
@@ -36,6 +39,15 @@ export interface ChunkCache {
     coords: readonly ChunkCoords[],
     options?: { concurrency?: number; onChunk?: (chunk: Chunk) => void },
   ): Promise<void>
+  /**
+   * Holds every chunk of the stop's disk pack, calling `onChunk` as each is decoded; false, with
+   * nothing loaded, when the stop has no pack.
+   */
+  loadPack(
+    missionId: string,
+    stopIndex: number,
+    options?: { onChunk?: (chunk: Chunk) => void },
+  ): Promise<boolean>
 }
 
 /** Decoded chunks of one world, least recently used evicted past `max`. */
@@ -123,6 +135,21 @@ export function createChunkCache(options: {
     if (failure) throw failure.error
   }
 
+  async function loadPack(
+    missionId: string,
+    stopIndex: number,
+    packOptions: { onChunk?: (chunk: Chunk) => void } = {},
+  ): Promise<boolean> {
+    const pack = await client.getStopPack(missionId, stopIndex)
+    if (!pack) return false
+    for await (const chunk of pack) {
+      accept(chunk)
+      hold(`${chunk.cx},${chunk.cy}`, chunk)
+      packOptions.onChunk?.(chunk)
+    }
+    return true
+  }
+
   return {
     worldHash,
     get size() {
@@ -134,6 +161,7 @@ export function createChunkCache(options: {
     get,
     peek: (cx, cy) => held.get(`${cx},${cy}`),
     prefetch,
+    loadPack,
   }
 }
 

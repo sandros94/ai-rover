@@ -4,7 +4,7 @@
  * - `INVALID_CONFIG`: a world configuration field is out of range.
  * - `INVALID_GRID`: grid dimensions, cell size or array lengths do not agree.
  * - `OUT_OF_BOUNDS`: a cell or chunk coordinate lies outside what the call accepts.
- * - `INVALID_MAGIC`: bytes handed to a binary decoder (chunk, revealed mask) are not that format.
+ * - `INVALID_MAGIC`: bytes handed to a binary decoder (chunk, disk pack, revealed mask) are not that format.
  * - `UNSUPPORTED_VERSION`: a binary format version or flags are unknown to its decoder.
  * - `TRUNCATED`: a binary buffer ends before its declared content.
  * - `TRAILING_DATA`: a binary buffer continues past its declared content.

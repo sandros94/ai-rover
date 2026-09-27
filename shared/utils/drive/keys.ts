@@ -26,20 +26,20 @@ export function segmentSliceKey(segmentId: string, sliceIndex: number): string {
 export type JourneyKey =
   /** A chunk of a world's terrain. */
   | { kind: 'terrain' }
-  /** A mission's stop manifest or revealed mask. */
+  /** A mission's stop manifest, disk pack or revealed mask. */
   | { kind: 'stop' }
   | { kind: 'segment-manifest'; segmentId: string }
   | { kind: 'segment-slice'; segmentId: string; index: number }
 
 const TERRAIN_KEY = /^terrain\/[0-9a-f]{16}\/chunks\/-?\d{1,10}_-?\d{1,10}\.bin$/
 const STOP_KEY =
-  /^missions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:revealed\/(?:0|[1-9]\d{0,14})\.bin|stops\/(?:0|[1-9]\d{0,14})\.json)$/
+  /^missions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:revealed\/(?:0|[1-9]\d{0,14})\.bin|stops\/(?:0|[1-9]\d{0,14})\.(?:json|pack))$/
 const SEGMENT_KEY =
   /^segments\/([A-Za-z0-9_-]{1,64})\/(?:(manifest\.json)|slices\/(0|[1-9]\d{0,6})\.bin)$/
 
 /**
- * Classifies a key built by `chunkKey`, `revealedKey`, `stopManifestKey`, `segmentManifestKey`
- * or `segmentSliceKey`; null for anything else, including paths with `..` or a leading `/`.
+ * Classifies a key built by `chunkKey`, `revealedKey`, `stopManifestKey`, `stopPackKey`,
+ * `segmentManifestKey` or `segmentSliceKey`; null for anything else, including paths with `..` or a leading `/`.
  */
 export function parseJourneyKey(key: string): JourneyKey | null {
   if (TERRAIN_KEY.test(key)) return { kind: 'terrain' }

@@ -11,13 +11,14 @@ import {
   segmentSliceKey,
   sliceRecord,
 } from '#shared/utils/drive'
-import type { RevealedMask, StopDisk, StopManifest, World } from '#shared/utils/terrain'
+import type { RevealedMask, StopDisk, StopManifestV3, World } from '#shared/utils/terrain'
 import {
   buildStopManifest,
   computeStopDisk,
   createRevealedMask,
   defineWorld,
   encodeChunk,
+  encodeDiskPack,
   encodeRevealedMask,
   generateChunk,
   revealDisk,
@@ -25,7 +26,8 @@ import {
 } from '#shared/utils/terrain'
 
 /**
- * Radius 60 m keeps the disk to the four chunks around the origin (about 85 KB), so every blob
+ * Radius 60 m keeps the disk to the four chunks around the origin (about 85 KB, and as much again
+ * for their pack), so every blob
  * the manifest names is on disk; a 30 m drive keeps the slices near 160 KB. Production uses a
  * 500 m disk and 50–250 m drives, which would weigh megabytes.
  */
@@ -45,7 +47,7 @@ export interface JourneyFixture {
   world: World
   disk: StopDisk
   mask: RevealedMask
-  stopManifest: StopManifest
+  stopManifest: StopManifestV3
   record: SegmentRecord
   segmentManifest: StoredSegmentManifest
   slices: SegmentSlice[]
@@ -70,9 +72,9 @@ export function buildJourneyFixture(): JourneyFixture {
 
   const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
   const files = new Map<string, Uint8Array>()
-  for (const { cx, cy, key } of stopManifest.chunks) {
-    files.set(key, encodeChunk(generateChunk(world, { cx, cy })))
-  }
+  const chunks = stopManifest.chunks.map(({ cx, cy }) => generateChunk(world, { cx, cy }))
+  for (const [n, { key }] of stopManifest.chunks.entries()) files.set(key, encodeChunk(chunks[n]!))
+  files.set(stopManifest.packKey, encodeDiskPack(chunks))
   files.set(stopManifest.revealedKey, encodeRevealedMask(mask))
   files.set(stopManifestKey(missionId, stopIndex), json(stopManifest))
   for (const slice of slices) files.set(segmentSliceKey(segmentId, slice.index), encodeSlice(slice))

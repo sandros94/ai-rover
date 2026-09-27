@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
-import { mapObjects, replayedStopsAndDeaths, ROVER_ID, roverObject } from '#shared/utils/client'
+import {
+  chunkVerticesOf,
+  mapObjects,
+  replayedStopsAndDeaths,
+  ROVER_ID,
+  roverObject,
+} from '#shared/utils/client'
 import { slopeProfile } from '#shared/utils/client/instruments'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { PanelId } from '#shared/utils/client/hud'
@@ -58,7 +64,8 @@ const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 /** Playlist time at the instruments' rate: the controls and the status need no more. */
 const time = useThrottled(() => playback.time.value, INSTRUMENT_HZ)
 
-const { manifest, mask, cache, sampler, loaded, total, terrain, revealed, error } = playback.terrain
+const { manifest, mask, sampler, loaded, total, ground, terrain, revealed, error } =
+  playback.terrain
 const view = useMapView()
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
@@ -130,9 +137,10 @@ onBeforeUnmount(() => clearInterval(ticker))
 /** The stage's props: changes every animation frame, so it is read where the stage draws. */
 const stage = computed((): StageProps => ({
   terrain: terrain.value,
+  ground: ground.value,
   seen: revealed.value,
   reveals: snapshot.value.reveals,
-  chunkVertices: cache.value?.geometry?.vertexCount,
+  chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
   heightAt,
   loading: { loaded: loaded.value, total: total.value, error: error.value ?? playback.error.value },
   center: manifest.value ? manifest.value.stop : drive.value.from,

@@ -23,7 +23,9 @@ export { viewshed } from './viewshed'
 export { CHUNK_FORMAT_VERSION, CHUNK_HEADER_BYTES, decodeChunk, encodeChunk } from './encode'
 export type { SnapRefusal, StopDisk } from './disk'
 export {
+  chunksByRow,
   chunksCoveringDisk,
+  chunksNearestFirst,
   completeStopDisk,
   computeStopDisk,
   DEFAULT_SNAP_RADIUS,
@@ -44,7 +46,7 @@ export {
   revealedVertexCount,
   revealVertices,
 } from './revealed'
-export type { StopManifest } from './manifest'
+export type { StopManifest, StopManifestV3 } from './manifest'
 export {
   buildStopManifest,
   chunkKey,
@@ -53,6 +55,15 @@ export {
   revealedKey,
   STOP_MANIFEST_VERSION,
   StopManifestSchema,
+  StopManifestV3Schema,
   stopManifestKey,
+  stopPackKey,
   worldHash,
 } from './manifest'
+export {
+  decodeDiskPack,
+  DISK_PACK_FORMAT_VERSION,
+  DISK_PACK_HEADER_BYTES,
+  encodeDiskPack,
+  readDiskPack,
+} from './pack'

@@ -3,9 +3,11 @@ import {
   computeStopDisk,
   createRevealedMask,
   decodeChunk,
+  decodeDiskPack,
   decodeRevealedMask,
   defineWorld,
   encodeRevealedMask,
+  generateChunk,
   parseStopManifest,
   revealDisk,
   stopManifestKey,
@@ -29,18 +31,19 @@ const mask = revealDisk(createRevealedMask(world), disk)
 const missionId = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
 
 describe('publishStop', () => {
-  it('writes every chunk, the mask, then the manifest', async () => {
+  it('writes every chunk, the pack, the mask, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
     const manifestKey = stopManifestKey(missionId, 0)
     expect(result.manifestKey).toBe(manifestKey)
-    expect(blobs.writes).toHaveLength(disk.chunks.length + 2)
+    expect(blobs.writes).toHaveLength(disk.chunks.length + 3)
     expect(blobs.writes.at(-1)).toBe(manifestKey)
     const manifest = parseStopManifest(await store.getJson(manifestKey))
     expect(manifest).toMatchObject({ missionId, worldHash: worldHash(world) })
     expect(blobs.writes.slice(0, -1)).toEqual([
       ...manifest.chunks.map((c) => c.key),
+      manifest.packKey,
       manifest.revealedKey,
     ])
     const first = decodeChunk((await store.getInflated(manifest.chunks[0]!.key))!)
@@ -52,6 +55,22 @@ describe('publishStop', () => {
     expect(result.skipped).toEqual([])
   })
 
+  it('packs exactly the listed chunks, in manifest order, as the chunk blobs hold them', async () => {
+    const store = createJourneyStore({ store: new MemoryBlobs() })
+    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
+    const manifest = parseStopManifest(await store.getJson(result.manifestKey))
+    const packKey = manifest.packKey!
+    const packed = decodeDiskPack((await store.getInflated(packKey))!)
+    expect(packed.map(({ cx, cy }) => ({ cx, cy }))).toEqual(
+      manifest.chunks.map(({ cx, cy }) => ({ cx, cy })),
+    )
+    expect(packed[3]).toEqual(generateChunk(world, manifest.chunks[3]!))
+    // Deflate's 32 KB window reaches across no chunk, so the pack weighs what the chunks do.
+    const stored = new Map(result.written.map((w) => [w.key, w.storedLength]))
+    const chunkBytes = manifest.chunks.reduce((sum, c) => sum + stored.get(c.key)!, 0)
+    expect(stored.get(packKey)! / chunkBytes).toBeCloseTo(1, 1)
+  })
+
   it('skips chunks already stored on a later stop', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
@@ -59,8 +78,11 @@ describe('publishStop', () => {
     blobs.writes.length = 0
     const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 1 })
     expect(result.skipped).toHaveLength(disk.chunks.length)
+    const manifest = parseStopManifest(await store.getJson(stopManifestKey(missionId, 1)))
+    // Each stop has its own pack, even when every chunk it holds is stored already.
     expect(blobs.writes).toEqual([
-      parseStopManifest(await store.getJson(stopManifestKey(missionId, 1))).revealedKey,
+      manifest.packKey,
+      manifest.revealedKey,
       stopManifestKey(missionId, 1),
     ])
   })

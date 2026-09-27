@@ -1,7 +1,7 @@
 import { slopeAt } from '../terrain/analysis'
 import type { ChunkCoords } from '../terrain/chunk'
 import type { StopDisk } from '../terrain/disk'
-import { completeStopDisk, snapToPathable } from '../terrain/disk'
+import { chunksByRow, completeStopDisk, snapToPathable } from '../terrain/disk'
 import type { StopManifest } from '../terrain/manifest'
 import type { MapPoint, MissionRules, SubmissionRefusal } from '../mission'
 import { estimatedDriveMinutes } from '../drive/estimate'
@@ -51,7 +51,7 @@ export function diskFromTerrain(
   return completeStopDisk(terrain, {
     center: { x: manifest.stop.x, y: manifest.stop.y },
     radius: manifest.radius,
-    chunks: manifest.chunks,
+    chunks: chunksByRow(manifest.chunks),
     mastHeight: manifest.world.mastHeight,
   })
 }

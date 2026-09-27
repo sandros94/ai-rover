@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { nextTick } from 'vue'
+import { defineComponent, h, nextTick, shallowRef } from 'vue'
+import { createDiskGround, expandRect, groundView } from '#shared/utils/client'
+import { generateChunk } from '#shared/utils/terrain'
+import { journeyFixture } from '../unit/client/helpers'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopMap from '~/components/map/StopMap.vue'
 
@@ -99,5 +102,91 @@ describe('StopMap', () => {
     expect(hovers[0]![0]!.x).toBeCloseTo(0, 9)
     expect(hovers[0]![0]!.y).toBeCloseTo(-10, 9)
     expect(hovers[1]![0]).toBeNull()
+  })
+})
+
+describe('StopMap over ground still arriving', () => {
+  /** Every `putImageData` on a relief canvas: the image and its dirty rectangle. */
+  const puts: { data: ImageData; dirty: number[] }[] = []
+
+  beforeAll(() => {
+    if (typeof ImageData === 'undefined') {
+      vi.stubGlobal(
+        'ImageData',
+        class {
+          readonly data: Uint8ClampedArray
+          constructor(
+            readonly width: number,
+            readonly height: number,
+          ) {
+            this.data = new Uint8ClampedArray(width * height * 4)
+          }
+        },
+      )
+    }
+    // No canvas in the test DOM: a context that records the relief's writes and ignores the rest.
+    const context = new Proxy(
+      {
+        putImageData: (data: ImageData, _x: number, _y: number, ...dirty: number[]) =>
+          puts.push({ data, dirty }),
+      },
+      { get: (target, prop) => Reflect.get(target, prop) ?? (() => {}) },
+    )
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      context as unknown as CanvasRenderingContext2D,
+    )
+  })
+  afterAll(() => vi.unstubAllGlobals())
+
+  it('paints the chunks in, then only the rectangle of each arrival', async () => {
+    const { stopManifest, world } = journeyFixture()
+    const ground = createDiskGround(stopManifest)
+    const [southWest, southEast, northEast] = [
+      [-1, -1],
+      [0, -1],
+      [0, 0],
+    ].map(([cx, cy]) => generateChunk(world, { cx: cx!, cy: cy! }))
+    ground.place(southWest!)
+    ground.place(northEast!)
+    puts.length = 0
+    // Rendered by a parent, as the stage does: the views keep their identity on the way in.
+    const view = shallowRef(groundView(ground, stopManifest.heightRange))
+    await mountSuspended(
+      defineComponent({
+        setup: () => () =>
+          h(StopMap, {
+            terrain: view.value,
+            center: { x: 0, y: 0 },
+            radius: 60,
+            rover: { x: 0, y: 0, headingRad: 0 },
+          }),
+      }),
+    )
+    await nextTick()
+    const { width, height } = ground.grid
+    const dirty = (rect: { i0: number; j0: number; i1: number; j1: number }) => {
+      // The chunk's vertices and the one vertex around it, clamped to the grid.
+      const { i0, j0, i1, j1 } = expandRect(rect, 1, ground.grid)
+      return [i0, height - j1, i1 - i0, j1 - j0]
+    }
+    // Cleared once, then only the two chunks that are in.
+    expect(puts.map((put) => put.dirty)).toEqual([
+      [],
+      dirty(ground.placed[0]!),
+      dirty(ground.placed[1]!),
+    ])
+    const { data } = puts[0]!
+    const alpha = (i: number, j: number) => data.data[((height - 1 - j) * width + i) * 4 + 3]
+    expect(alpha(10, 10)).toBe(255)
+    expect(alpha(100, 100)).toBe(255)
+    expect(alpha(100, 10)).toBe(0)
+    expect(alpha(10, 100)).toBe(0)
+
+    const arrived = ground.place(southEast!)!
+    view.value = groundView(ground, stopManifest.heightRange)
+    await nextTick()
+    expect(puts.slice(3).map((put) => put.dirty)).toEqual([dirty(arrived)])
+    expect(alpha(100, 10)).toBe(255)
+    expect(alpha(10, 100)).toBe(0)
   })
 })

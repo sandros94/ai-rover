@@ -12,6 +12,7 @@ import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import {
   buildStopManifest,
   encodeChunk,
+  encodeDiskPack,
   encodeRevealedMask,
   generateChunk,
   stopManifestKey,
@@ -22,8 +23,9 @@ const BINARY = { contentType: 'application/octet-stream' }
 
 /**
  * Publishes a mission's stop: every chunk of its disk not yet stored (chunks are immutable per
- * world), the revealed mask as of this stop, then the stop manifest, so a reader that finds the
- * manifest finds everything it names.
+ * world), the disk's chunks again as one pack, the revealed mask as of this stop, then the stop
+ * manifest, so a reader that finds the manifest finds everything it names. The pack holds exactly
+ * the chunks the manifest lists, all of them public once the stop is.
  */
 export async function publishStop(
   store: JourneyStore,
@@ -39,15 +41,15 @@ export async function publishStop(
   const manifest = buildStopManifest(world, disk, { missionId, stopIndex })
   const written: PutResult[] = []
   const skipped: string[] = []
-  for (const { cx, cy, key } of manifest.chunks) {
+  const chunks = manifest.chunks.map(({ cx, cy }) => generateChunk(world, { cx, cy }))
+  for (const [n, { key }] of manifest.chunks.entries()) {
     if (await store.has(key)) {
       skipped.push(key)
       continue
     }
-    written.push(
-      await store.putImmutable(key, encodeChunk(generateChunk(world, { cx, cy })), BINARY),
-    )
+    written.push(await store.putImmutable(key, encodeChunk(chunks[n]!), BINARY))
   }
+  written.push(await store.putImmutable(manifest.packKey, encodeDiskPack(chunks), BINARY))
   written.push(await store.putImmutable(manifest.revealedKey, encodeRevealedMask(mask), BINARY))
   const manifestKey = stopManifestKey(missionId, stopIndex)
   written.push(await store.putJson(manifestKey, manifest))

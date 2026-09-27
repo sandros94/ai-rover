@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type {
+  ContourTile,
   GridRect,
+  GroundView,
   MapBounds,
   MapObject,
   MapView,
@@ -13,6 +15,7 @@ import {
   CONTOUR_INTERVAL_M,
   CONTOUR_MAJOR_EVERY,
   contourLines,
+  contourTiles,
   easeFocus,
   expandRect,
   fitView,
@@ -31,13 +34,16 @@ import {
 } from '#shared/utils/client'
 import { RELIEF_STOPS, rgbHex } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
-import type { GridCell, HeightGrid } from '#shared/utils/terrain'
+import type { HeightGrid } from '#shared/utils/terrain'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** The stop disk's stitched grid; the relief is drawn once it is present. */
-    terrain?: { grid: HeightGrid; origin: GridCell }
+    /**
+     * The stop disk's stitched grid, whole or still arriving; the relief is drawn as it arrives,
+     * each chunk's rectangle as it lands.
+     */
+    terrain?: GroundView
     /** One byte per grid vertex; unseen ground is hidden under fog, and fades in as it grows. */
     seen?: Uint8Array
     center: MapPoint
@@ -136,8 +142,9 @@ function measure(): void {
   if (rect) size.value = { width: rect.width, height: rect.height }
 }
 
-/** Fixed for the disk, so tints do not shift as ground is revealed. */
+/** Fixed for the disk, so tints do not shift as ground is revealed or arrives. */
 const heightRange = computed(() => {
+  if (props.terrain?.heightRange) return props.terrain.heightRange
   let min = Infinity
   let max = -Infinity
   for (const h of props.terrain?.grid.heights ?? []) {
@@ -172,10 +179,22 @@ interface ReliefImage {
  */
 let relief: ReliefImage | undefined
 const painted = ref(0)
+/** How many of the terrain's placed rectangles the relief shows. */
+let shownPlaced = 0
 
-/** Repaints the rectangles given, or everything without them. */
-function paint(changed?: readonly GridRect[]): void {
+/** What changed since the last paint; without it everything is repainted. */
+interface ReliefUpdate {
+  /** Rectangles the fog changed. */
+  changed?: readonly GridRect[]
+  /** Rectangles of ground that arrived. */
+  arrived?: readonly GridRect[]
+  /** The last of the ground arrived. */
+  completed?: boolean
+}
+
+function paint(update?: ReliefUpdate): void {
   const terrain = props.terrain
+  shownPlaced = terrain?.placed?.length ?? 0
   if (!terrain || typeof document === 'undefined' || typeof ImageData === 'undefined') {
     relief = undefined
     painted.value++
@@ -203,17 +222,44 @@ function paint(changed?: readonly GridRect[]): void {
       clear: new Uint8Array(width * height),
       contours: new Map(),
     }
-    changed = undefined
+    update = undefined
   }
   const fog = frame && { ...frame.fog, rgb: fogRgb.value, origin: terrain.origin }
+  const complete = terrain.complete ?? true
+  const tiles = (area: GridRect) => contourTiles(grid, area, { tile: CONTOUR_TILE, complete })
+  const whole = { i0: 0, j0: 0, i1: width, j1: height }
+  if (!update) {
+    relief.contours.clear()
+    if (complete) paintArea(relief, grid, fog, whole)
+    else {
+      // Only what has arrived: fog and relief over the rest would be computed for nothing.
+      relief.data.data.fill(0)
+      relief.clear.fill(0)
+      relief.context.putImageData(relief.data, 0, 0)
+      for (const rect of terrain.placed ?? [])
+        paintArea(relief, grid, fog, expandRect(rect, 1, grid))
+    }
+    buildContours(relief, tiles(whole))
+    painted.value++
+    return
+  }
   // The soft edge moves with a reveal: repaint that far around each change.
-  const areas = changed
-    ? changed.map((rect) => expandRect(rect, FOG_EDGE_CELLS + 1, grid))
-    : [{ i0: 0, j0: 0, i1: width, j1: height }]
-  for (const area of areas) paintArea(relief, grid, fog, area)
+  for (const rect of update.changed ?? []) {
+    const area = expandRect(rect, FOG_EDGE_CELLS + 1, grid)
+    paintArea(relief, grid, fog, area)
+    buildContours(relief, tiles(area))
+  }
+  // New ground shades the vertex beside it too; tiles already traced keep their lines.
+  const untraced = (area: GridRect) => tiles(area).filter((t) => !relief!.contours.has(t.index))
+  for (const rect of update.arrived ?? []) {
+    paintArea(relief, grid, fog, expandRect(rect, 1, grid))
+    buildContours(relief, untraced(rect))
+  }
+  if (update.completed) buildContours(relief, untraced(whole))
   painted.value++
 }
 
+/** Pixels and the fog-free flags of `area`. */
 function paintArea(
   image: ReliefImage,
   grid: HeightGrid,
@@ -239,46 +285,48 @@ function paintArea(
     areaWidth,
     area.j1 - area.j0,
   )
-  buildContours(image, area)
 }
 
-function buildContours(image: ReliefImage, area: GridRect): void {
+function buildContours(image: ReliefImage, tiles: readonly ContourTile[]): void {
   const terrain = props.terrain
   if (!terrain || typeof Path2D === 'undefined') return
-  const { width, height } = terrain.grid
-  const tilesX = Math.ceil((width - 1) / CONTOUR_TILE)
-  // A tile holds cells [t·T, (t+1)·T): the vertices up to (t+1)·T inclusive.
-  const first = (v: number) => Math.max(0, Math.floor((v - 1) / CONTOUR_TILE))
-  const last = (v: number, size: number) =>
-    Math.min(Math.ceil((size - 1) / CONTOUR_TILE), Math.ceil(v / CONTOUR_TILE)) - 1
-  for (let ty = first(area.j0); ty <= last(area.j1, height); ty++) {
-    for (let tx = first(area.i0); tx <= last(area.i1, width); tx++) {
-      const rect = {
-        i0: tx * CONTOUR_TILE,
-        j0: ty * CONTOUR_TILE,
-        i1: Math.min(width, (tx + 1) * CONTOUR_TILE + 1),
-        j1: Math.min(height, (ty + 1) * CONTOUR_TILE + 1),
+  for (const { index, rect } of tiles) {
+    const minor = new Path2D()
+    const major = new Path2D()
+    for (const level of contourLines(terrain.grid, { mask: image.clear, rect })) {
+      const path = level.major ? major : minor
+      const s = level.segments
+      for (let k = 0; k < s.length; k += 4) {
+        path.moveTo(s[k]!, s[k + 1]!)
+        path.lineTo(s[k + 2]!, s[k + 3]!)
       }
-      const minor = new Path2D()
-      const major = new Path2D()
-      for (const level of contourLines(terrain.grid, { mask: image.clear, rect })) {
-        const path = level.major ? major : minor
-        const s = level.segments
-        for (let k = 0; k < s.length; k += 4) {
-          path.moveTo(s[k]!, s[k + 1]!)
-          path.lineTo(s[k + 2]!, s[k + 3]!)
-        }
-      }
-      image.contours.set(ty * tilesX + tx, { minor, major })
     }
+    image.contours.set(index, { minor, major })
   }
 }
 
 watch(
   [() => props.terrain, fogRgb, heightRange, fade] as const,
   (next, previous) => {
-    const onlyFade = previous?.slice(0, 3).every((value, k) => value === next[k])
-    paint(onlyFade ? next[3]?.rects : undefined)
+    const [terrain, rgb, range, frame] = next
+    const before = previous?.[0]
+    const sameGround =
+      !!relief &&
+      !!terrain &&
+      before?.grid === terrain.grid &&
+      before.origin === terrain.origin &&
+      previous?.[1] === rgb &&
+      previous[2] === range
+    if (!sameGround) return paint()
+    const update: ReliefUpdate = {}
+    if (frame !== previous[3]) {
+      // A frame without rectangles is a fog to draw afresh.
+      if (!frame?.rects) return paint()
+      update.changed = frame.rects
+    }
+    update.arrived = terrain.placed?.slice(shownPlaced) ?? []
+    update.completed = (terrain.complete ?? true) && !(before.complete ?? true)
+    paint(update)
   },
   { immediate: true },
 )

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChunkCoords, World } from '#shared/utils/terrain'
 import {
+  chunksNearestFirst,
   chunksCoveringDisk,
   computeStopDisk,
   defineWorld,
@@ -70,6 +71,40 @@ describe('worldToVertex', () => {
     expect(terrainErrorOf(() => worldToVertex(world, { x: Number.NaN, y: 0 }))?.code).toBe(
       'OUT_OF_BOUNDS',
     )
+  })
+})
+
+describe('chunksNearestFirst', () => {
+  const world = defineWorld({ seed: 'mars' })
+  const size = world.config.chunkSize
+  const center = { x: 100, y: -30 }
+  const listed = chunksCoveringDisk(world, { center, radius: 500 })
+  const ordered = chunksNearestFirst(listed, { center, chunkSize: size })
+  const distance = ({ cx, cy }: ChunkCoords) =>
+    Math.hypot((cx + 0.5) * size - center.x, (cy + 0.5) * size - center.y)
+
+  it('puts the stop’s own chunk first, then the rest by growing distance', () => {
+    expect(ordered[0]).toEqual({ cx: Math.floor(center.x / size), cy: Math.floor(center.y / size) })
+    for (let k = 1; k < ordered.length; k++) {
+      expect(distance(ordered[k]!)).toBeGreaterThanOrEqual(distance(ordered[k - 1]!))
+    }
+    const key = ({ cx, cy }: ChunkCoords) => `${cx},${cy}`
+    expect(ordered.map(key).toSorted()).toEqual(listed.map(key).toSorted())
+  })
+
+  it('breaks ties by cx, then cy', () => {
+    const tied = [
+      { cx: 0, cy: 0 },
+      { cx: 0, cy: -1 },
+      { cx: -1, cy: 0 },
+      { cx: -1, cy: -1 },
+    ]
+    expect(chunksNearestFirst(tied, { center: { x: 0, y: 0 }, chunkSize: 64 })).toEqual([
+      { cx: -1, cy: -1 },
+      { cx: -1, cy: 0 },
+      { cx: 0, cy: -1 },
+      { cx: 0, cy: 0 },
+    ])
   })
 })
 

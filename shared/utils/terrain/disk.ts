@@ -72,6 +72,30 @@ export function chunksCoveringDisk(
 }
 
 /**
+ * `chunks` nearest `center` first, measured to chunk centres, ties by `cx` then `cy`: the order a
+ * stop's chunks are published in, so a reader streaming them gets the ground around the rover
+ * first.
+ */
+export function chunksNearestFirst(
+  chunks: readonly ChunkCoords[],
+  options: { center: { x: number; y: number }; chunkSize: number },
+): ChunkCoords[] {
+  const { center, chunkSize } = options
+  assertPoint(center, 'chunksNearestFirst')
+  const distance = ({ cx, cy }: ChunkCoords) =>
+    Math.hypot((cx + 0.5) * chunkSize - center.x, (cy + 0.5) * chunkSize - center.y)
+  return chunks
+    .map(({ cx, cy }) => ({ cx, cy, d: distance({ cx, cy }) }))
+    .sort((p, q) => p.d - q.d || p.cx - q.cx || p.cy - q.cy)
+    .map(({ cx, cy }) => ({ cx, cy }))
+}
+
+/** `chunks` sorted by (cy, cx), as a stop disk lists them. */
+export function chunksByRow(chunks: readonly ChunkCoords[]): ChunkCoords[] {
+  return chunks.map(({ cx, cy }) => ({ cx, cy })).sort((p, q) => p.cy - q.cy || p.cx - q.cx)
+}
+
+/**
  * Computes the disk around a stop. Heights and traversability come from {@link generateChunk}, so
  * the grid agrees bit for bit with the chunk blobs stored for it.
  */

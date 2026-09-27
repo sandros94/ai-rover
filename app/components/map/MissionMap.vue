@@ -30,7 +30,7 @@ export interface MapTrack {
 
 <script setup lang="ts">
 import type { MapObject } from '#shared/utils/client'
-import { roverObject, roverStatus } from '#shared/utils/client'
+import { chunkVerticesOf, roverObject, roverStatus } from '#shared/utils/client'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
@@ -79,14 +79,20 @@ const stop = props.state.currentStop
 const anchor = computed<MapPoint>(() => props.state.round?.anchor ?? { x: stop.x, y: stop.y })
 const rules = computed(() => props.state.mission.rules)
 
-const { manifest, mask, cache, sampler, loaded, total, terrain, revealed, error } = useStopTerrain(
-  props.state.mission.id,
-  stop.index,
-  {
-    center: anchor.value,
-    ring: rules.value.segmentDistanceBand,
-  },
-)
+const {
+  manifest,
+  mask,
+  sampler,
+  loaded,
+  total,
+  ground: arriving,
+  terrain,
+  revealed,
+  error,
+} = useStopTerrain(props.state.mission.id, stop.index, {
+  center: anchor.value,
+  ring: rules.value.segmentDistanceBand,
+})
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 watch(
@@ -159,9 +165,10 @@ const stage = computed((): StageProps => {
   const motion = status === 'driving' ? track.motion.value : undefined
   return {
     terrain: terrain.value,
+    ground: arriving.value,
     seen: revealed.value,
     reveals: track.reveals.value,
-    chunkVertices: cache.value?.geometry?.vertexCount,
+    chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
     heightAt,
     loading: { loaded: loaded.value, total: total.value, error: error.value },
     center: manifest.value

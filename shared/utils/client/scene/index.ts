@@ -28,6 +28,7 @@ export {
   chunkLevel,
   chunkMesh,
   chunkRect,
+  chunkFromGrid,
   chunksFromGrid,
   DEFAULT_SKIRT_M,
   FOG_STEP,

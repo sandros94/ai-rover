@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildStopManifest,
+  chunksNearestFirst,
   chunkKey,
   computeStopDisk,
   defineWorld,
@@ -8,6 +9,7 @@ import {
   revealedKey,
   STOP_MANIFEST_VERSION,
   stopManifestKey,
+  stopPackKey,
   TerrainError,
   worldHash,
 } from '#shared/utils/terrain'
@@ -60,17 +62,20 @@ describe('blob keys', () => {
     )
     expect(revealedKey(MISSION, 4)).toBe(`missions/${MISSION}/revealed/4.bin`)
     expect(stopManifestKey(MISSION, 4)).toBe(`missions/${MISSION}/stops/4.json`)
+    expect(stopPackKey(MISSION, 4)).toBe(`missions/${MISSION}/stops/4.pack`)
   })
 
   it('refuses a negative or fractional stop index', () => {
     expect(terrainErrorOf(() => revealedKey(MISSION, -1))?.code).toBe('OUT_OF_BOUNDS')
     expect(terrainErrorOf(() => stopManifestKey(MISSION, 1.5))?.code).toBe('OUT_OF_BOUNDS')
+    expect(terrainErrorOf(() => stopPackKey(MISSION, -1))?.code).toBe('OUT_OF_BOUNDS')
   })
 
   it('refuses a mission id that is not a lowercase UUID', () => {
     for (const id of ['', '0123456789abcdef', MISSION.toUpperCase(), `${MISSION}/..`]) {
       expect(terrainErrorOf(() => revealedKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
       expect(terrainErrorOf(() => stopManifestKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
+      expect(terrainErrorOf(() => stopPackKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
     }
   })
 
@@ -88,17 +93,46 @@ describe('stop manifest', () => {
   const hash = worldHash(world)
 
   it('describes the disk with its blob keys', () => {
-    expect(STOP_MANIFEST_VERSION).toBe(2)
+    expect(STOP_MANIFEST_VERSION).toBe(3)
     expect(manifest).toEqual({
-      version: 2,
+      version: 3,
       missionId: MISSION,
       worldHash: hash,
       world: { chunkSize: 64, cellSize: 1, mastHeight: 2, slopeLimitDeg: 16 },
       stop: { index: 3, x: 12.5, y: -3 },
       radius: 70,
-      chunks: disk.chunks.map((c) => ({ cx: c.cx, cy: c.cy, key: chunkKey(hash, c) })),
+      heightRange: manifest.heightRange,
+      chunks: chunksNearestFirst(disk.chunks, { center: disk.center, chunkSize: 64 }).map((c) => ({
+        cx: c.cx,
+        cy: c.cy,
+        key: chunkKey(hash, c),
+      })),
+      packKey: stopPackKey(MISSION, 3),
       revealedKey: revealedKey(MISSION, 3),
     })
+  })
+
+  it('spans the heights of every listed chunk', () => {
+    const present = disk.grid.heights.filter((h) => !Number.isNaN(h))
+    expect(manifest.heightRange).toEqual({
+      min: Math.min(...present),
+      max: Math.max(...present),
+    })
+    expect(manifest.heightRange.min).toBeLessThan(manifest.heightRange.max)
+  })
+
+  it('refuses a height range whose min exceeds its max, naming the field', () => {
+    const { min, max } = manifest.heightRange
+    const error = terrainErrorOf(() =>
+      parseStopManifest({ ...manifest, heightRange: { min: max, max: min } }),
+    )
+    expect(error?.code).toBe('INVALID_MANIFEST')
+    expect(error?.message).toContain('heightRange')
+  })
+
+  it('refuses a manifest without its pack key, naming the field', () => {
+    const { packKey: _packKey, ...v2 } = manifest
+    expect(terrainErrorOf(() => parseStopManifest(v2))?.message).toContain('packKey')
   })
 
   it('carries the geometry of a non-default world', () => {
@@ -119,11 +153,20 @@ describe('stop manifest', () => {
   })
 
   it('refuses another version, naming the field', () => {
-    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 3 }))
+    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 4 }))
     expect(error?.code).toBe('INVALID_MANIFEST')
     expect(error?.message).toContain('version')
     expect(error?.cause).toBeInstanceOf(Error)
-    expect(terrainErrorOf(() => parseStopManifest({ version: 3 }))?.message).toContain('version')
+    expect(terrainErrorOf(() => parseStopManifest({ version: 4 }))?.message).toContain('version')
+  })
+
+  it('reads a version 2 manifest, written before packs, without a pack or a height range', () => {
+    const { packKey: _packKey, heightRange: _heightRange, ...rest } = manifest
+    const v2 = { ...rest, version: 2 }
+    const parsed = parseStopManifest(JSON.parse(JSON.stringify(v2)))
+    expect(parsed).toEqual(v2)
+    expect(parsed.packKey).toBeUndefined()
+    expect(parsed.heightRange).toBeUndefined()
   })
 
   it('refuses a version 1 manifest, which carries no world geometry', () => {

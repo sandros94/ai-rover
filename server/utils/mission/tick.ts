@@ -27,6 +27,7 @@ import {
   reviseSubmission,
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
+import { primeStop } from '../journey/prime'
 import { publishSegment, publishStop } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { SegmentRecord } from '#shared/utils/drive'
@@ -74,6 +75,8 @@ interface TickContext {
   store: JourneyStore
   mission: Mission
   now: Date
+  /** Index of the stop the tick published, set once it is; primed after the commit. */
+  published?: number
 }
 
 type Assessment = Awaited<ReturnType<typeof assessGoal>>
@@ -99,7 +102,8 @@ interface PreparedSettlement {
  * and opens the next round from the same stop, anchored on the winner's goal, and (3) records
  * when the next tick has something to do. Safe to call from every request; a second call at the
  * same `now` changes nothing. `jev` re-judges the submissions waiting beside a drive that stopped
- * short, before the lock is taken so no Jev request holds it.
+ * short, before the lock is taken so no Jev request holds it. A stop published by the tick is
+ * primed in the CDN once the transaction commits, without waiting for it (see `primeStop`).
  */
 export async function tickMission(
   db: DB,
@@ -107,7 +111,8 @@ export async function tickMission(
 ): Promise<TickResult> {
   const { store, jev, missionId, now } = options
   const prepared = await prepareSettlement(db, { store, jev, missionId, now })
-  return db.transaction(async (tx) => {
+  let published: number | undefined
+  const ticked = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${missionId}))`)
     const result: TickResult = { settled: null, closed: null, started: null, opened: null }
     const mission = await getMission(tx, missionId)
@@ -138,8 +143,11 @@ export async function tickMission(
       Object.assign(result, await closeIfDue(tx, context, open))
     }
     await recordNextDue(tx, mission, now)
+    published = context.published
     return result
   })
+  if (published !== undefined) void primeStop(missionId, published)
+  return ticked
 }
 
 /**
@@ -249,6 +257,7 @@ async function settle(
   // name exist.
   const { disk, mask } = prepared
   await publishStop(store, { world, disk, mask, missionId: mission.id, stopIndex: index })
+  context.published = index
   await settleSegment(tx, driving.id, { status: outcome.kind, toStopId: reached.id, now })
   await setCurrentStop(tx, mission.id, reached.id)
   return { settled: { segmentId: driving.id, status: outcome.kind }, opened: null }

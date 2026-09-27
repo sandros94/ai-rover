@@ -4,7 +4,15 @@ import { segmentManifestKey, segmentSliceKey } from '../drive/keys'
 import type { Chunk } from '../terrain/chunk'
 import { decodeChunk } from '../terrain/encode'
 import type { StopManifest } from '../terrain/manifest'
-import { chunkKey, parseStopManifest, revealedKey, stopManifestKey } from '../terrain/manifest'
+import {
+  chunkKey,
+  parseStopManifest,
+  revealedKey,
+  stopManifestKey,
+  stopPackKey,
+} from '../terrain/manifest'
+import { readDiskPack } from '../terrain/pack'
+import { TerrainError } from '../terrain/errors'
 import type { RevealedMask } from '../terrain/revealed'
 import { decodeRevealedMask } from '../terrain/revealed'
 import { ClientError } from './errors'
@@ -24,6 +32,12 @@ export interface JourneyClient {
   getStopManifest(missionId: string, stopIndex: number): Promise<StopManifest>
   getRevealedMask(missionId: string, stopIndex: number): Promise<RevealedMask>
   getChunk(worldHash: string, cx: number, cy: number): Promise<Chunk>
+  /**
+   * The stop's disk pack as a stream of chunks, decoded as the bytes arrive; null when the stop
+   * has no pack, as stops published before packs existed. Breaking off the iteration cancels the
+   * download.
+   */
+  getStopPack(missionId: string, stopIndex: number): Promise<AsyncIterable<Chunk> | null>
   getSegmentManifest(segmentId: string): Promise<StoredSegmentManifest>
   getSlice(segmentId: string, sliceIndex: number): Promise<SliceResult>
 }
@@ -118,6 +132,28 @@ export function createJourneyClient(
         )
       }
       return chunk
+    },
+
+    async getStopPack(missionId, stopIndex) {
+      const key = stopPackKey(missionId, stopIndex)
+      const response = await request(key)
+      if (response.status === 404) return null
+      // A body-less answer reads as an empty pack, which the decoder refuses as truncated.
+      const body = response.body ?? new Blob([]).stream()
+      return (async function* () {
+        try {
+          yield* readDiskPack(body.getReader())
+        } catch (error) {
+          if (error instanceof TerrainError) {
+            throw new ClientError('DECODE', `Disk pack "${key}" did not decode: ${error.message}`, {
+              cause: error,
+            })
+          }
+          throw new ClientError('NETWORK', `Journey response for "${key}" broke off; retry.`, {
+            cause: error,
+          })
+        }
+      })()
     },
 
     async getSegmentManifest(segmentId) {

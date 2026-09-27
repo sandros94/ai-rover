@@ -169,6 +169,31 @@ describe('createChunkCache', () => {
     expect(cache.peek(-1, 0)).toBeDefined()
   })
 
+  it('loads a stop from its pack in one request, holding and reporting every chunk', async () => {
+    const { cache, calls } = setup()
+    const { missionId, stop, packKey, chunks } = journeyFixture().stopManifest
+    const seen: string[] = []
+    expect(
+      await cache.loadPack(missionId, stop.index, {
+        onChunk: (c) => seen.push(`${c.cx},${c.cy}`),
+      }),
+    ).toBe(true)
+    expect(calls).toEqual([`/journey/${packKey}`])
+    expect(seen).toEqual(chunks.map((c) => `${c.cx},${c.cy}`))
+    expect(cache.size).toBe(4)
+    expect(cache.geometry).toEqual({ vertexCount: 65, cellSize: 1 })
+    await cache.prefetch(chunks)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('answers false and loads nothing when the stop has no pack', async () => {
+    const { cache, calls } = setup()
+    const { missionId } = journeyFixture().stopManifest
+    expect(await cache.loadPack(missionId, 9)).toBe(false)
+    expect(cache.size).toBe(0)
+    expect(calls).toHaveLength(1)
+  })
+
   it('refuses a chunk whose grid differs from the chunks already loaded with DECODE', async () => {
     const odd = encodeChunk({
       cx: -1,

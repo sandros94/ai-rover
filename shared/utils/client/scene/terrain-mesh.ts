@@ -327,38 +327,50 @@ export function chunksFromGrid(
   origin: GridCell,
   vertexCount: number,
 ): { chunk: TerrainChunk }[] {
+  const cells = checkChunkOrigin(origin, vertexCount, 'chunksFromGrid')
+  const out: { chunk: TerrainChunk }[] = []
+  for (let gy = 0; gy + cells < grid.height; gy += cells) {
+    for (let gx = 0; gx + cells < grid.width; gx += cells) {
+      const coords = { cx: (origin.i + gx) / cells, cy: (origin.j + gy) / cells }
+      const chunk = chunkFromGrid(grid, origin, vertexCount, coords)
+      if (chunk) out.push({ chunk })
+    }
+  }
+  return out
+}
+
+/**
+ * The chunk (`cx`, `cy`) of `vertexCount` vertices cut from a stitched grid; undefined when any
+ * of its heights is missing or it lies outside the grid.
+ */
+export function chunkFromGrid(
+  grid: HeightGrid,
+  origin: GridCell,
+  vertexCount: number,
+  coords: { cx: number; cy: number },
+): TerrainChunk | undefined {
   const { heights, width, height, cellSize } = grid
+  const cells = checkChunkOrigin(origin, vertexCount, 'chunkFromGrid')
+  const gx = coords.cx * cells - origin.i
+  const gy = coords.cy * cells - origin.j
+  if (gx < 0 || gy < 0 || gx + cells >= width || gy + cells >= height) return undefined
+  const chunkHeights = new Float32Array(vertexCount * vertexCount)
+  for (let b = 0; b < vertexCount; b++) {
+    const from = (gy + b) * width + gx
+    const row = heights.subarray(from, from + vertexCount)
+    if (row.some(Number.isNaN)) return undefined
+    chunkHeights.set(row, b * vertexCount)
+  }
+  return { cx: coords.cx, cy: coords.cy, vertexCount, cellSize, heights: chunkHeights }
+}
+
+function checkChunkOrigin(origin: GridCell, vertexCount: number, caller: string): number {
   const cells = vertexCount - 1
   if (origin.i % cells !== 0 || origin.j % cells !== 0) {
     throw new ClientError(
       'INVALID_INPUT',
-      `chunksFromGrid: grid origin (${origin.i}, ${origin.j}) is not on a corner of ${cells}-cell chunks; pass a grid stitched from whole chunks.`,
+      `${caller}: grid origin (${origin.i}, ${origin.j}) is not on a corner of ${cells}-cell chunks; pass a grid stitched from whole chunks.`,
     )
   }
-  const cx0 = origin.i / cells
-  const cy0 = origin.j / cells
-  const out: { chunk: TerrainChunk }[] = []
-  for (let gy = 0; gy + cells < height; gy += cells) {
-    for (let gx = 0; gx + cells < width; gx += cells) {
-      const chunkHeights = new Float32Array(vertexCount * vertexCount)
-      let complete = true
-      for (let b = 0; b < vertexCount && complete; b++) {
-        const from = (gy + b) * width + gx
-        const row = heights.subarray(from, from + vertexCount)
-        if (row.some(Number.isNaN)) complete = false
-        chunkHeights.set(row, b * vertexCount)
-      }
-      if (!complete) continue
-      out.push({
-        chunk: {
-          cx: cx0 + gx / cells,
-          cy: cy0 + gy / cells,
-          vertexCount,
-          cellSize,
-          heights: chunkHeights,
-        },
-      })
-    }
-  }
-  return out
+  return cells
 }

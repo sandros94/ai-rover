@@ -4,6 +4,7 @@ import type { Mission, Round, Stop } from '../../database/schema'
 import { createMission, setCurrentStop } from '../../repositories/missions'
 import { openRound } from '../../repositories/rounds'
 import { createStop } from '../../repositories/stops'
+import { primeStop } from '../journey/prime'
 import { publishStop } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { MissionRules } from '#shared/utils/mission'
@@ -43,7 +44,7 @@ export interface MissionAtStop {
  * Lands a mission: publishes stop 0 (its disk, the viewshed from it as the first revealed mask,
  * its manifest), then creates the mission, stop 0 made current and round 0 open from it and
  * anchored on it, in one transaction. Blobs go first so a stop row never names a blob that is not
- * there.
+ * there; once the rows are written the stop is primed in the CDN, without waiting for it.
  */
 export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Promise<MissionAtStop> {
   const { store, seed, at, now = new Date() } = input
@@ -55,7 +56,7 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
   const missionId = uuidv7()
   const published = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
 
-  return db.transaction(async (tx) => {
+  const landed = await db.transaction(async (tx) => {
     await createMission(tx, {
       id: missionId,
       seed,
@@ -81,4 +82,6 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
     const mission = await setCurrentStop(tx, missionId, stop.id)
     return { mission, stop, round, published }
   })
+  void primeStop(missionId, 0)
+  return landed
 }

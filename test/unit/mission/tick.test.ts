@@ -11,6 +11,7 @@ import { createMissionAtStop } from '#server/utils/mission/create'
 import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
+import { stopPrimeKeys } from '#server/utils/journey/prime'
 import { decodeSlice, DriveError, segmentSliceKey } from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
 import { forced, stopShortAt } from './forced'
@@ -33,8 +34,8 @@ vi.setConfig({ testTimeout: 60_000 })
 
 /** SQL of every query run, in order; tests slice it around the call they look at. */
 const queries: string[] = []
-/** Top-level transactions and Jev requests, in the order they happened. */
-const events: ('begin' | 'end' | 'jev')[] = []
+/** Top-level transactions, Jev requests and CDN priming requests, in the order they happened. */
+const events: ('begin' | 'end' | 'jev' | 'prime')[] = []
 
 let raw: DB
 let db: DB
@@ -105,6 +106,36 @@ async function stoppingShort(judge?: Judge) {
   expect(east.accepted && west.accepted).toBe(true)
   return { ...m, driving, beside, east: east.submission!, west: west.submission! }
 }
+
+describe('priming the CDN', () => {
+  it('requests the stop reached once its settlement commits, and nothing of a drive', async () => {
+    const primed: string[] = []
+    vi.stubEnv('URL', 'https://rover.example')
+    vi.stubGlobal('fetch', async (url: string) => {
+      events.push('prime')
+      primed.push(url)
+      return new Response(null)
+    })
+    try {
+      const m = await stoppingShort()
+      // Landing primes stop 0; starting a drive primes nothing.
+      expect(primed).toEqual(
+        stopPrimeKeys(m.missionId, 0).map((key) => `https://rover.example/journey/${key}`),
+      )
+      primed.length = 0
+      events.length = 0
+      await m.tick(m.driving.endsAt)
+      await vi.waitFor(() => expect(primed).toHaveLength(3))
+      expect(primed).toEqual(
+        stopPrimeKeys(m.missionId, 1).map((key) => `https://rover.example/journey/${key}`),
+      )
+      expect(events.indexOf('prime')).toBeGreaterThan(events.lastIndexOf('end'))
+    } finally {
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+    }
+  })
+})
 
 describe('settling a drive that stopped short', () => {
   it('asks Jev nothing inside a transaction', async () => {

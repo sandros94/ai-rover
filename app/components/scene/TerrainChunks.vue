@@ -15,7 +15,10 @@ import {
 } from '#shared/utils/client/scene'
 
 const props = defineProps<{
-  /** The chunks to draw; a new array or entry redraws what changed. */
+  /**
+   * The chunks to draw. A new array adds the entries not drawn yet and drops those gone; an entry
+   * kept as the same object keeps its mesh, one replaced is drawn again.
+   */
   chunks: { chunk: TerrainChunk }[]
   /** Height mapped to the ends of the colour ramp, fixed for the scene so colours do not shift. */
   heightRange: { min: number; max: number }
@@ -45,6 +48,8 @@ interface Drawn {
   built: ({ geometry: BufferGeometry; arrays: ChunkMesh } | undefined)[]
   /** Whether the fog covers the whole chunk, as of the fog last applied. */
   fogged: boolean
+  /** The fog its built levels show. */
+  fog: ChunkFog | undefined
 }
 
 const root = new Group()
@@ -105,29 +110,40 @@ const meets = (a: GridRect, b: GridRect) => a.i0 < b.i1 && b.i0 < a.i1 && a.j0 <
 function applyFog(): void {
   const fog = props.fog
   const rects = fog?.rects
-  if (!fog || !rects) {
-    for (const entry of drawn.values()) {
+  for (const entry of drawn.values()) {
+    // Built since this fog came in: it shows it already.
+    if (entry.fog === fog) continue
+    if (!fog || !rects) {
       drop(entry)
       entry.fogged = isFogged(entry.source.chunk)
       show(entry, levelOf(entry, entry.level))
+      entry.fog = fog
+      continue
     }
-    return
-  }
-  for (const entry of drawn.values()) {
     const chunk = entry.source.chunk
     const area = chunkRect(chunk, fog.layout)
     if (!rects.some((rect) => meets(area, rect))) continue
-    entry.built.forEach((built, level) => {
-      if (!built) return
-      refogChunkMesh(built.arrays, chunk, meshOptions(chunk, level as Level))
-      built.geometry.getAttribute('position').needsUpdate = true
-      built.geometry.getAttribute('color').needsUpdate = true
-      built.geometry.computeBoundingSphere()
-    })
-    entry.fogged = isFogged(chunk)
-    const level = levelOf(entry, entry.level)
-    if (level !== entry.level) show(entry, level)
+    repaint(entry)
   }
+}
+
+/**
+ * Rewrites heights and colours of the levels built so far to the current fog and neighbours,
+ * keeping their geometry, and moves to the fog level or back as the fog now asks.
+ */
+function repaint(entry: Drawn): void {
+  const chunk = entry.source.chunk
+  entry.fog = props.fog
+  entry.built.forEach((built, level) => {
+    if (!built) return
+    refogChunkMesh(built.arrays, chunk, meshOptions(chunk, level as Level))
+    built.geometry.getAttribute('position').needsUpdate = true
+    built.geometry.getAttribute('color').needsUpdate = true
+    built.geometry.computeBoundingSphere()
+  })
+  entry.fogged = isFogged(chunk)
+  const level = levelOf(entry, entry.level)
+  if (level !== entry.level) show(entry, level)
 }
 
 function sync(): void {
@@ -149,10 +165,18 @@ function sync(): void {
       mesh.updateMatrix()
       mesh.matrixAutoUpdate = false
       root.add(mesh)
-      entry = { source, level: 0, mesh, built: [], fogged: isFogged(source.chunk) }
+      entry = {
+        source,
+        level: 0,
+        mesh,
+        built: [],
+        fogged: isFogged(source.chunk),
+        fog: undefined,
+      }
       drawn.set(key, entry)
       arrived.push(source.chunk)
       show(entry, levelOf(entry))
+      entry.fog = props.fog
       continue
     }
     if (entry.source !== source) {
@@ -160,6 +184,7 @@ function sync(): void {
       entry.source = source
       entry.fogged = isFogged(source.chunk)
       show(entry, levelOf(entry, entry.level))
+      entry.fog = props.fog
       continue
     }
     const level = levelOf(entry, entry.level)
@@ -173,8 +198,7 @@ function sync(): void {
           const neighbour = drawn.get(`${chunk.cx + dx},${chunk.cy + dy}`)
           if (!neighbour || (dx === 0 && dy === 0) || arrived.includes(neighbour.source.chunk))
             continue
-          drop(neighbour)
-          show(neighbour, neighbour.level)
+          repaint(neighbour)
         }
       }
     }

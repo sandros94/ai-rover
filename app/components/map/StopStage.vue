@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MapObject, PreviewResult, RoverObject } from '#shared/utils/client'
+import type { GroundView, MapObject, PreviewResult, RoverObject } from '#shared/utils/client'
 import { liftSeen } from '#shared/utils/client'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
@@ -27,11 +27,13 @@ const props = withDefaults(
     view: MapViewMode
     /** The disk once every chunk is in; loading progress shows until then. */
     terrain?: { grid: HeightGrid; origin: GridCell }
+    /** The disk as it arrives, which both views draw chunk by chunk; by default `terrain`. */
+    ground?: GroundView
     /** The stop's own seen flags, one byte per disk vertex. */
     seen?: Uint8Array
     /** What the playing drive has seen so far, as disk-grid indices, lifted from the fog. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
-    /** Vertices per chunk side; the 3D view needs it with `terrain`. */
+    /** Vertices per chunk side; the 3D view needs it with the ground. */
     chunkVertices?: number
     heightAt: (x: number, y: number) => number | undefined
     loading: { loaded: number; total: number; error: unknown }
@@ -63,6 +65,7 @@ const props = withDefaults(
   }>(),
   {
     terrain: undefined,
+    ground: undefined,
     seen: undefined,
     reveals: () => [],
     chunkVertices: undefined,
@@ -95,7 +98,7 @@ const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveal
   <div class="relative h-full w-full">
     <StopMap
       v-if="view === '2d'"
-      :terrain="terrain"
+      :terrain="ground ?? terrain"
       :seen="shownSeen"
       :center="center"
       :radius="radius"
@@ -119,8 +122,8 @@ const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveal
       <TerrainProgress :ready="!!terrain" v-bind="loading" />
     </StopMap>
     <DiskScene
-      v-else-if="terrain && chunkVertices"
-      :terrain="terrain"
+      v-else-if="(ground ?? terrain) && chunkVertices"
+      :terrain="(ground ?? terrain)!"
       :seen="seen"
       :chunk-vertices="chunkVertices"
       :height-at="heightAt"
@@ -139,5 +142,10 @@ const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveal
     <div v-else :class="['relative', BLANK]">
       <TerrainProgress :ready="false" v-bind="loading" />
     </div>
+    <TerrainProgress
+      v-if="view !== '2d' && ground && chunkVertices"
+      :ready="!!terrain"
+      v-bind="loading"
+    />
   </div>
 </template>

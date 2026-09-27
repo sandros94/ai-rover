@@ -17,7 +17,7 @@ async function clientErrorOf(promise: Promise<unknown>): Promise<ClientError | u
 describe('recorded journey fixture', () => {
   it('matches the generator byte for byte', () => {
     const { files } = journeyFixture()
-    expect(files.size).toBe(42)
+    expect(files.size).toBe(43)
     for (const [key, bytes] of files)
       expect({ key, bytes: readRecord(key) }).toEqual({ key, bytes })
   })
@@ -50,6 +50,40 @@ describe('createJourneyClient over the recorded journey', () => {
       expect(chunk.heights).toEqual(heights)
       expect(chunk.masks).toEqual(masks)
     }
+  })
+
+  it('streams the disk pack: every listed chunk, in manifest order, from one request', async () => {
+    const { fetch, calls } = recordsFetch()
+    const client = createJourneyClient({ fetch })
+    const pack = await client.getStopPack(missionId, stopIndex)
+    const chunks = []
+    for await (const chunk of pack!) chunks.push(chunk)
+    expect(chunks.map(({ cx, cy }) => ({ cx, cy }))).toEqual(
+      fixture.stopManifest.chunks.map(({ cx, cy }) => ({ cx, cy })),
+    )
+    const { heights, masks } = chunkOf(chunks[2]!.cx, chunks[2]!.cy)
+    expect(chunks[2]).toMatchObject({ heights, masks })
+    expect(calls).toEqual([`/journey/${fixture.stopManifest.packKey}`])
+  })
+
+  it('answers no pack on a 404, and refuses a broken pack with DECODE', async () => {
+    const client = createJourneyClient({ fetch: recordsFetch().fetch })
+    expect(await client.getStopPack(missionId, 9)).toBeNull()
+    const packKey = fixture.stopManifest.packKey
+    const cut = readRecord(packKey)!.subarray(0, 30_000)
+    const broken = createJourneyClient({
+      fetch: recordsFetch({
+        override: (key) =>
+          key === packKey ? new Response(cut as Uint8Array<ArrayBuffer>) : undefined,
+      }).fetch,
+    })
+    const pack = (await broken.getStopPack(missionId, stopIndex))!
+    const read = (async () => {
+      for await (const _ of pack) void _
+    })()
+    const error = await clientErrorOf(read)
+    expect(error?.code).toBe('DECODE')
+    expect(error?.message).toContain('Disk pack')
   })
 
   it('decodes the segment manifest and every slice once released', async () => {
