@@ -34,3 +34,4 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 30. The reachability flood fill crosses unseen ground, so whether a seen vertex is pathable can depend on hidden terrain.
 31. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
 32. The end-to-end flow has been exercised locally with scripted browsers (two users, plan, submit, LGTM, flag, drive, settlement, replay, phone width); the failure path (not-moving cut, three strikes, reset) is covered by unit tests only, never by a scripted browser run.
+33. A denied GitHub consent (callback with `error=` and no `code`) is treated as a fresh start and bounces back to GitHub instead of showing `refused`.
