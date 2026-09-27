@@ -62,12 +62,17 @@ describe('skyLighting', () => {
   })
 
   it('keeps dusk dim and night dark after exposure', () => {
+    // Light on level ground times exposure: what the camera makes of the ground.
     const seen = (e: number) => {
       const l = skyLighting(e)
-      return (l.sun.intensity + l.sky.intensity) * l.exposure
+      return (
+        (l.sun.intensity * Math.max(0, Math.sin((e * Math.PI) / 180)) + l.sky.intensity) *
+        l.exposure
+      )
     }
-    expect(seen(0)).toBeLessThan(seen(45) / 2)
-    expect(seen(-18)).toBeLessThan(seen(45) / 20)
+    expect(seen(0)).toBeLessThan(seen(45) / 1.5)
+    expect(seen(0)).toBeGreaterThan(seen(-6))
+    expect(seen(-18)).toBeLessThan(seen(45) / 4)
     expect(seen(-18)).toBeGreaterThan(0)
   })
 
@@ -86,9 +91,8 @@ describe('skyLighting', () => {
     )
   })
 
-  it('holds its end keys outside their range', () => {
+  it('holds the night key below its range', () => {
     expect(skyLighting(-80)).toEqual(skyLighting(-18))
-    expect(skyLighting(120)).toEqual(skyLighting(90))
   })
 })
 

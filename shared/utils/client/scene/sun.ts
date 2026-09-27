@@ -65,17 +65,23 @@ export function sunPosition(
 }
 
 export interface SkyLighting {
-  /** Direct sunlight: colour and irradiance, 1 for the sun high in a clear sky. */
+  /**
+   * Direct sunlight: colour and irradiance, 1 for the sun high in a clear sky. Light colours are
+   * hues at full brightness (the largest channel 255): the intensity alone carries the amount.
+   */
   sun: { color: string; intensity: number }
   /** Diffuse skylight from above, on the same scale. */
   sky: { color: string; intensity: number }
-  /** Light bounced up from the ground, at the sky's intensity. */
+  /** Light bounced up from the ground, at the sky's intensity: dimmer than the sky by its colour. */
   ground: string
   /** Sky colour at the horizon and at the zenith, and of the glow around the sun, as seen. */
   horizon: string
   zenith: string
   glow: string
-  /** Camera exposure the eye would settle on under this light: 1 at noon, more as light fades. */
+  /**
+   * Camera exposure the eye settles on under this light: 1 under a high sun, more as the light
+   * on level ground fades, compensating part of the loss so dusk looks dim and night dark.
+   */
   exposure: number
   /** Shadow edge blur, in shadow-map texels: dust scatters a low sun's light over a wider disc. */
   shadowRadius: number
@@ -91,7 +97,6 @@ interface Key {
   horizon: Rgb
   zenith: Rgb
   glow: Rgb
-  exposure: number
   shadowRadius: number
 }
 
@@ -101,34 +106,31 @@ interface Key {
  * share of the light is diffuse, so shadows are soft and never black; near the horizon the sun
  * dims and reddens through the long dusty path while forward scattering turns the sky around it
  * blue and the rest a darker pinkish brown; by night the sky is near black with a faint band
- * along the horizon. Exposure rises as the light fades, but less than the light does, so dusk
- * looks dim and night dark.
+ * along the horizon.
  */
 const KEYS: readonly Key[] = [
   {
     elevationDeg: -18,
     sun: [255, 170, 110],
     sunIntensity: 0,
-    sky: [60, 64, 90],
-    skyIntensity: 0.012,
+    sky: [74, 74, 88],
+    skyIntensity: 0.03,
     ground: [30, 26, 24],
     horizon: [24, 22, 28],
     zenith: [7, 7, 11],
     glow: [24, 22, 28],
-    exposure: 3.2,
     shadowRadius: 8,
   },
   {
     elevationDeg: -9,
     sun: [255, 170, 110],
     sunIntensity: 0,
-    sky: [70, 80, 120],
-    skyIntensity: 0.025,
+    sky: [80, 84, 108],
+    skyIntensity: 0.045,
     ground: [40, 34, 30],
     horizon: [48, 42, 50],
     zenith: [14, 14, 22],
     glow: [52, 70, 110],
-    exposure: 3.0,
     shadowRadius: 8,
   },
   {
@@ -136,12 +138,11 @@ const KEYS: readonly Key[] = [
     sun: [255, 170, 110],
     sunIntensity: 0,
     sky: [110, 112, 140],
-    skyIntensity: 0.07,
+    skyIntensity: 0.08,
     ground: [70, 56, 48],
     horizon: [104, 82, 84],
     zenith: [40, 34, 42],
     glow: [96, 132, 184],
-    exposure: 2.4,
     shadowRadius: 8,
   },
   {
@@ -154,7 +155,6 @@ const KEYS: readonly Key[] = [
     horizon: [136, 104, 98],
     zenith: [70, 56, 58],
     glow: [132, 170, 214],
-    exposure: 2.0,
     shadowRadius: 7,
   },
   {
@@ -167,7 +167,6 @@ const KEYS: readonly Key[] = [
     horizon: [170, 132, 110],
     zenith: [112, 88, 76],
     glow: [168, 190, 214],
-    exposure: 1.6,
     shadowRadius: 5,
   },
   {
@@ -180,7 +179,6 @@ const KEYS: readonly Key[] = [
     horizon: [204, 168, 130],
     zenith: [170, 134, 102],
     glow: [222, 212, 200],
-    exposure: 1.2,
     shadowRadius: 3.5,
   },
   {
@@ -193,7 +191,6 @@ const KEYS: readonly Key[] = [
     horizon: [212, 176, 136],
     zenith: [192, 152, 114],
     glow: [236, 224, 206],
-    exposure: 1.05,
     shadowRadius: 2.5,
   },
   {
@@ -206,12 +203,32 @@ const KEYS: readonly Key[] = [
     horizon: [214, 180, 140],
     zenith: [200, 162, 122],
     glow: [240, 230, 214],
-    exposure: 1,
     shadowRadius: 2,
   },
 ]
 
+/** Share of a fall in light the exposure makes up, on a log scale: 0 none, 1 all of it. */
+const ADAPTATION = 0.7
+/** Most the exposure rises over the high sun's: past it, night stays dark. */
+const MAX_EXPOSURE = 8
+
+/** Irradiance on level ground: the sun's at its elevation and the sky's. */
+const levelIrradiance = (sun: number, sky: number, elevationDeg: number) =>
+  sun * Math.max(0, Math.sin(elevationDeg * RAD)) + sky
+
+const HIGH_SUN = KEYS.at(-1)!
+const HIGH_SUN_IRRADIANCE = levelIrradiance(
+  HIGH_SUN.sunIntensity,
+  HIGH_SUN.skyIntensity,
+  HIGH_SUN.elevationDeg,
+)
+
 const mix = (a: number, b: number, f: number) => a + (b - a) * f
+/** The colour scaled so its largest channel is 255. */
+const hue = (rgb: Rgb): Rgb => {
+  const top = Math.max(...rgb) || 1
+  return rgb.map((c) => (c * 255) / top) as Rgb
+}
 const mixRgb = (a: Readonly<Rgb>, b: Readonly<Rgb>, f: number): Rgb => [
   mix(a[0], b[0], f),
   mix(a[1], b[1], f),
@@ -235,16 +252,18 @@ export function skyLighting(elevationDeg: number): SkyLighting {
     1,
     Math.max(0, (elevationDeg - a.elevationDeg) / (b.elevationDeg - a.elevationDeg)),
   )
-  const hex = (key: 'sun' | 'sky' | 'ground' | 'horizon' | 'zenith' | 'glow') =>
-    rgbHex(mixRgb(a[key], b[key], f))
+  const sun = mix(a.sunIntensity, b.sunIntensity, f)
+  const sky = mix(a.skyIntensity, b.skyIntensity, f)
+  const irradiance = levelIrradiance(sun, sky, elevationDeg)
+  const hex = (key: 'ground' | 'horizon' | 'zenith' | 'glow') => rgbHex(mixRgb(a[key], b[key], f))
   return {
-    sun: { color: hex('sun'), intensity: mix(a.sunIntensity, b.sunIntensity, f) },
-    sky: { color: hex('sky'), intensity: mix(a.skyIntensity, b.skyIntensity, f) },
+    sun: { color: rgbHex(hue(mixRgb(a.sun, b.sun, f))), intensity: sun },
+    sky: { color: rgbHex(hue(mixRgb(a.sky, b.sky, f))), intensity: sky },
     ground: hex('ground'),
     horizon: hex('horizon'),
     zenith: hex('zenith'),
     glow: hex('glow'),
-    exposure: mix(a.exposure, b.exposure, f),
+    exposure: Math.min(MAX_EXPOSURE, (HIGH_SUN_IRRADIANCE / irradiance) ** ADAPTATION),
     shadowRadius: mix(a.shadowRadius, b.shadowRadius, f),
   }
 }

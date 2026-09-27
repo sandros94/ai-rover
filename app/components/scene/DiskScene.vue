@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ToneMapping } from 'three'
 import type { FogSurface, GridRect, GroundView, MapObject, RoverObject } from '#shared/utils/client'
 import { fogSurface, gridHeightAt, liftSeen, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
@@ -57,6 +58,8 @@ const props = withDefaults(
     objects?: readonly MapObject[]
     /** The rover, inspectable. */
     roverObject?: RoverObject
+    /** The time of the sol, an exposure offset and a tone mapping to compare, as `StopScene` takes them. */
+    lighting?: { solFraction?: number; exposureBias?: number; toneMapping?: ToneMapping }
   }>(),
   {
     seen: undefined,
@@ -71,6 +74,7 @@ const props = withDefaults(
     reveals: () => [],
     objects: () => [],
     roverObject: undefined,
+    lighting: () => ({}),
   },
 )
 
@@ -273,6 +277,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
     class="relative h-full w-full touch-none overflow-hidden bg-(--ui-bg-muted)"
   >
     <StopScene
+      v-bind="lighting"
       :frame="frame"
       :chunks="chunks"
       :height-range="heightRange"

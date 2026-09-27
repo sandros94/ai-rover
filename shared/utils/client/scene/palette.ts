@@ -124,7 +124,8 @@ export function srgbToLinear(channel: number): number {
 /**
  * Overlay colours of the 3D scene, the hex values of the Nuxt UI tokens the 2D map draws the
  * same things with (WebGL cannot read CSS variables): route `--ui-info`, driven path
- * `--ui-primary`, deaths `--ui-error`.
+ * `--ui-primary`, deaths `--ui-error`. The unlit overlays (route, path, deaths) are not tone
+ * mapped, so they keep the tokens' colours at any exposure.
  */
 export const SCENE_COLORS = Object.freeze({
   route: '#38bdf8',

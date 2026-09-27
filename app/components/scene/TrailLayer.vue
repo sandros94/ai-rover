@@ -83,6 +83,7 @@ const contactMaterial = new MeshBasicMaterial({
 })
 const pathMaterial = new MeshBasicMaterial({
   color: SCENE_COLORS.driven,
+  toneMapped: false,
   transparent: true,
   opacity: 0.8,
   depthWrite: false,

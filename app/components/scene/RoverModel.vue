@@ -84,6 +84,7 @@ const CROSSFADE_MS = 150
 const material = props.ghost
   ? new MeshBasicMaterial({
       color: SCENE_COLORS.death,
+      toneMapped: false,
       transparent: true,
       opacity: GHOST_OPACITY.silhouette,
       depthWrite: false,
@@ -95,8 +96,10 @@ const cylinders = new InstancedMesh(unitCylinder, material, cylinderCount)
 for (const mesh of [boxes, cylinders]) {
   // The instances move every frame; a stale bounding sphere would cull them.
   mesh.frustumCulled = false
+  mesh.castShadow = mesh.receiveShadow = !props.ghost
   placeholder.add(mesh)
 }
+
 const proceduralTriangles =
   (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
 if (!props.ghost) {
@@ -182,6 +185,10 @@ function showModel(object: Object3D | undefined): void {
   placeholder.visible = !object && !detail
   if (object) {
     if (props.ghost) paint(object, material)
+    else
+      object.traverse((child) => {
+        child.castShadow = child.receiveShadow = true
+      })
     root.add(object)
   }
   pose(props.frame)

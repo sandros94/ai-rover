@@ -15,6 +15,7 @@ const DRAPE_SPACING_M = 1
 
 const material = new MeshBasicMaterial({
   color: SCENE_COLORS.route,
+  toneMapped: false,
   polygonOffset: true,
   polygonOffsetFactor: -3,
 })

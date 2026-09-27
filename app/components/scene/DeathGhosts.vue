@@ -26,6 +26,7 @@ const frames = computed(() => props.deaths.map((death) => flatFrame(death)))
 const discs = new Group()
 const material = new MeshBasicMaterial({
   color: SCENE_COLORS.death,
+  toneMapped: false,
   transparent: true,
   opacity: 0.35,
   depthWrite: false,

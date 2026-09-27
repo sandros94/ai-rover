@@ -8,8 +8,11 @@ export interface AgXLook {
   saturation: number
 }
 
-/** The scene's look: Blender's "Punchy". */
-export const SCENE_LOOK: Readonly<AgXLook> = Object.freeze({ power: 1.35, saturation: 1.4 })
+/**
+ * The scene's look: the contrast of Blender's "Punchy" (power 1.35) without its saturation boost
+ * (1.4), which turns the relief tints, already saturated, from rust to crimson.
+ */
+export const SCENE_LOOK: Readonly<AgXLook> = Object.freeze({ power: 1.35, saturation: 1 })
 
 /** three's placeholder body for `CustomToneMapping`, which {@link installAgXLook} replaces. */
 const CUSTOM_HOOK = 'vec3 CustomToneMapping( vec3 color ) { return color; }'
