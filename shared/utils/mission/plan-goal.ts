@@ -8,7 +8,7 @@ import { checkDriveTime, checkPathClearOfDeaths, checkSubmissionGoal } from './r
  * Why a goal was not accepted. Closed set.
  *
  * - `unpathable`: the goal lies on seen ground and no seen vertex near it is traversable and
- *   reachable from the stop.
+ *   reachable from the stop, unseen ground counting as passable.
  * - `outside`: the goal lies beyond the survey of the stop it is planned from.
  * - `near-death-zone`: the snapped goal lies too close to a death.
  * - `too-short`, `too-long`: the planned drive time falls outside the mission's time band.

@@ -85,8 +85,6 @@ export function syntheticDisk(
       { grid, origin: { i: -HALF, j: -HALF } },
       { center: { x: 0, y: 0 }, radius },
     ),
-    reachableFrom: { i: HALF, j: HALF },
-    reachable: traversable.slice(),
     visible,
   }
 }

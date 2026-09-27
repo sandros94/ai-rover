@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
+import { believedReachable, computeStopDisk, defineWorld } from '#shared/utils/terrain'
 import { decodeDiskWire, encodeDiskWire } from '~~/modules/dev/runtime/shared/disk-wire'
 
 describe('disk wire format', () => {
@@ -8,18 +8,19 @@ describe('disk wire format', () => {
     radius: 90,
   })
   const wire = decodeDiskWire(encodeDiskWire(disk))
+  const belief = believedReachable(disk, disk.visible)
 
-  it('round-trips the grid, placement and reachability seed', () => {
+  it('round-trips the grid, placement and the believed reachability seed', () => {
     expect(wire.grid).toEqual(disk.grid)
     expect(wire.origin).toEqual(disk.origin)
     expect(wire.center).toEqual(disk.center)
-    expect(wire.reachableFrom).toEqual(disk.reachableFrom)
+    expect(wire.reachableFrom).toEqual(belief.from)
   })
 
   it('packs the three masks into one flag byte per vertex', () => {
     for (let k = 0; k < disk.traversable.length; k++) {
       expect(wire.traversable[k]).toBe(disk.traversable[k] ? 1 : 0)
-      expect(wire.reachable[k]).toBe(disk.reachable[k] ? 1 : 0)
+      expect(wire.reachable[k]).toBe(belief.reachable[k])
       expect(wire.visible[k]).toBe(disk.visible[k] ? 1 : 0)
     }
   })

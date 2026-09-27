@@ -24,6 +24,7 @@ export { viewshed } from './viewshed'
 export { CHUNK_FORMAT_VERSION, CHUNK_HEADER_BYTES, decodeChunk, encodeChunk } from './encode'
 export type { SnapRefusal, StopDisk } from './disk'
 export {
+  believedReachable,
   chunksByRow,
   chunksCoveringDisk,
   chunksNearestFirst,

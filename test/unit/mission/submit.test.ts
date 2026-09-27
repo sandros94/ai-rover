@@ -7,7 +7,14 @@ import { listRoundSubmissions, withdrawSubmission } from '#server/repositories/s
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
-import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
+import {
+  believedReachable,
+  computeStopDisk,
+  createRevealedMask,
+  defineWorld,
+  revealDisk,
+  revealedOverDisk,
+} from '#shared/utils/terrain'
 import {
   at,
   createTestDb,
@@ -102,28 +109,29 @@ describe('submitGoal', () => {
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
-      seed: 'mars',
+      seed: 'steep',
       at: { x: 0, y: 0 },
       world,
       rules: SMALL_RULES,
       now: T0,
     })
-    const disk = computeStopDisk(defineWorld({ seed: 'mars', ...world }), {
-      center: { x: 0, y: 0 },
-      radius: SMALL_RULES.stopRadiusM,
-    })
+    const steep = defineWorld({ seed: 'steep', ...world })
+    const disk = computeStopDisk(steep, { center: { x: 0, y: 0 }, radius: SMALL_RULES.stopRadiusM })
     const { width } = disk.grid
+    const revealed = revealedOverDisk(revealDisk(createRevealedMask(steep), disk), disk)
+    const { reachable } = believedReachable(disk, revealed)
     const pathable = (x: number, y: number) => {
       const k = (y - disk.origin.j) * width + (x - disk.origin.i)
-      return disk.traversable[k] === 1 && disk.reachable[k] === 1
+      return revealed[k] === 1 && disk.traversable[k] === 1 && reachable[k] === 1
     }
-    // A blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
+    // A seen blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
     let edge: { x: number; y: number } | undefined
     let island: { x: number; y: number } | undefined
-    for (let y = -55; y <= 55 && !(edge && island); y++) {
-      for (let x = -55; x <= 55 && !(edge && island); x++) {
+    for (let y = -45; y <= 45 && !(edge && island); y++) {
+      for (let x = -45; x <= 45 && !(edge && island); x++) {
         const distance = Math.hypot(x, y)
-        if (distance < 20 || distance > 55 || pathable(x, y)) continue
+        if (distance < 20 || distance > 45 || pathable(x, y)) continue
+        if (!revealed[(y - disk.origin.j) * width + (x - disk.origin.i)]) continue
         let near = false
         for (let dy = -5; dy <= 5; dy++) {
           for (let dx = -5; dx <= 5; dx++) {

@@ -42,8 +42,6 @@ export function syntheticDisk(options: {
     origin,
     traversable,
     inside: surveyMask({ grid, origin }, { center: { x: 0, y: 0 }, radius }),
-    reachableFrom: { i: half, j: half },
-    reachable: traversable.slice(),
     visible: new Uint8Array(size * size).fill(1),
   }
 }
