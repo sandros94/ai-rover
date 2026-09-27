@@ -54,7 +54,7 @@ const yesNo = (value: boolean) => (value ? 'yes' : 'no')
 const sections = computed(() => {
   const found = diagnosis.value
   if (!found) return []
-  const { database, blobs, runtime } = found
+  const { database, blobs, mission, runtime } = found
   const tables = Object.entries(database.tables)
   return [
     {
@@ -65,6 +65,20 @@ const sections = computed(() => {
         ...(database.error ? [`Error: ${database.error}`] : []),
         `Migrations: ${database.migrations.length ? database.migrations.join(', ') : 'none'}`,
         `Tables: ${tables.length ? tables.map(([name, n]) => `${name} ${n}`).join(', ') : 'none'}`,
+      ],
+    },
+    {
+      key: 'mission',
+      label: 'Mission read',
+      ok: mission.ok,
+      lines: [
+        `Active mission: ${yesNo(mission.active)}`,
+        ...(mission.error
+          ? [
+              `Error: ${mission.error.name}${mission.error.code ? ` (${mission.error.code})` : ''}: ${mission.error.message}`,
+              ...(mission.error.at ? [`At: ${mission.error.at}`] : []),
+            ]
+          : []),
       ],
     },
     {

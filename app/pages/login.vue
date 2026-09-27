@@ -19,7 +19,12 @@ const failure = computed(() => {
 
 if (loggedIn.value) await navigateTo(redirect.value)
 
+/*
+ * Which providers exist depends on the address the visitor uses, so the server-side fetch must
+ * carry the browser's own host headers rather than the function's internal address.
+ */
 const { data } = await useFetch('/api/auth/providers', {
+  $fetch: useRequestFetch(),
   default: () => ({ providers: [] as AuthProvider[] }),
 })
 const offers = (provider: AuthProvider) => data.value.providers.includes(provider)

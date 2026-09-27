@@ -87,6 +87,7 @@ describe('admin page', () => {
       json(200, {
         database: { ok: false, error: 'DatabaseError (28P01)', migrations: [], tables: {} },
         blobs: { ok: true, keys: 12 },
+        mission: { ok: true, active: false },
         runtime: {
           node: 'v24.0.0',
           region: 'eu-central-1',
