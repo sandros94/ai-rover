@@ -1,10 +1,10 @@
 {
-  "id": "9b3c6887-6961-4966-b586-73fc0bedc242",
+  "version": "8",
+  "dialect": "postgres",
+  "id": "649f0a1e-0566-471b-8bdd-2b6a5069167e",
   "prevIds": [
     "bf9589e4-681d-491b-8189-f5664bcb7a7d"
   ],
-  "version": "8",
-  "dialect": "postgres",
   "ddl": [
     {
       "isRlsEnabled": false,
@@ -939,6 +939,32 @@
       "generated": null,
       "identity": null,
       "name": "summary",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "double precision",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "exploration",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "submission"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "exploration_parts",
       "entityType": "columns",
       "schema": "public",
       "table": "submission"

@@ -6,6 +6,7 @@ export {
   checkPathClearOfDeaths,
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
+  distanceToPolyline,
   formatDriveTime,
   MissionRulesSchema,
   parseMissionRules,
@@ -23,3 +24,5 @@ export {
   stallEnding,
   truncateRecord,
 } from './not-moving'
+export type { ExplorationParts, ExplorationWeights, MissionHistory } from './exploration'
+export { drivenPath, explorationParts, explorationValue, POCKET_PATH_RADIUS_M } from './exploration'

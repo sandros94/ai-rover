@@ -7,6 +7,7 @@ import { listRoundSubmissions, withdrawSubmission } from '#server/repositories/s
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
+import { DEFAULT_MISSION_RULES, explorationValue } from '#shared/utils/mission'
 import {
   believedReachable,
   computeStopDisk,
@@ -194,6 +195,18 @@ describe('submitGoal', () => {
     expect(submission!.metrics).toMatchObject({ reached: true, goalInFog: true })
     expect(submission!.metrics.unrevealedFraction).toBeGreaterThan(0)
     expect(jev.summaries).toHaveLength(1)
+    // The code's parts from the plan and the landing stop's mask; nothing driven yet.
+    const parts = submission!.explorationParts
+    expect(parts).toEqual({
+      pathInFog: submission!.metrics.unrevealedFraction,
+      goalInFog: 1,
+      pocket: parts.pocket,
+    })
+    expect(jev.summaries[0]!.exploration).toMatchObject({ destination_unexplored: true })
+    expect(jev.summaries[0]!.recent_stops).toEqual([])
+    // The mean of the code's value and Jev's, which answers 0.5 here.
+    const code = explorationValue(parts, { weights: DEFAULT_MISSION_RULES.explorationWeights })
+    expect(submission!.exploration).toBeCloseTo((code + 0.5) / 2, 12)
   })
 
   it('stores a rejected verdict as a rejected submission and reports it', async () => {

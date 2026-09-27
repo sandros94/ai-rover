@@ -1,5 +1,6 @@
 import * as v from 'valibot'
 
+import type { ExplorationParts, MissionHistory } from '../mission/exploration'
 import type { StopDisk } from '../terrain/disk'
 import type { World } from '../terrain/world'
 import { NavError } from './errors'
@@ -12,6 +13,7 @@ export const DETOUR_LABELS = ['nearly straight', 'moderate detour', 'long detour
 export const SLOPE_LABELS = ['gentle', 'moderate', 'near the limit'] as const
 export const UNSEEN_LABELS = ['mostly seen', 'partly unseen', 'mostly unseen'] as const
 export const LOOSE_GROUND_LABELS = ['firm', 'some loose ground', 'mostly loose'] as const
+export const POCKET_LABELS = ['no pocket', 'near the driven path', 'a leftover pocket'] as const
 export const COMPASS_POINTS = [
   'north',
   'north-east',
@@ -41,6 +43,11 @@ const FAILURE_REASONS: Record<RouteFailureReason, string> = {
 }
 
 const wholeMetres = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+/** A share rounded to hundredths. */
+const share = v.pipe(v.number(), v.minValue(0), v.maxValue(1))
+
+/** How many of the latest stops Jev is shown. */
+export const RECENT_STOPS = 5
 
 const ReachedRouteSchema = v.strictObject({
   reached: v.literal(true),
@@ -77,6 +84,18 @@ export const SubmissionSummarySchema = v.pipe(
       v.strictObject({ reached: v.literal(false) }),
     ]),
     failure_reason: v.optional(v.pipe(v.string(), v.minLength(1))),
+    /** The code's exploration parts, from public data only. */
+    exploration: v.strictObject({
+      path_in_fog: share,
+      destination_unexplored: v.boolean(),
+      pocket: share,
+      pocket_label: v.picklist(POCKET_LABELS),
+    }),
+    /** The latest stops other than the start, most recent first, as seen from the start. */
+    recent_stops: v.pipe(
+      v.array(v.strictObject({ distance_m: wholeMetres, bearing: v.picklist(COMPASS_POINTS) })),
+      v.maxLength(RECENT_STOPS),
+    ),
   }),
   v.check(
     (summary) => summary.route.reached === (summary.failure_reason === undefined),
@@ -114,6 +133,11 @@ export function looseGroundLabel(looseness: number): (typeof LOOSE_GROUND_LABELS
   return looseness < 0.3 ? 'firm' : looseness < 0.6 ? 'some loose ground' : 'mostly loose'
 }
 
+/** How much the goal closes a leftover pocket, the `pocket` exploration part. */
+export function pocketLabel(pocket: number): (typeof POCKET_LABELS)[number] {
+  return pocket >= 1 ? 'a leftover pocket' : pocket >= 0.5 ? 'near the driven path' : 'no pocket'
+}
+
 /** Eight-point compass direction from `from` to `to`, x east and y north. */
 export function compassPoint(
   from: { x: number; y: number },
@@ -138,9 +162,12 @@ export function summarizeSubmission(
     revealed: Uint8Array
     start: { x: number; y: number }
     goal: { x: number; y: number }
+    /** The plan's exploration parts, as `explorationParts` gives them. */
+    exploration: ExplorationParts
+    history: Pick<MissionHistory, 'recentStops'>
   },
 ): SubmissionSummary {
-  const { world, disk, revealed, start, goal } = options
+  const { world, disk, revealed, start, goal, exploration, history } = options
   const { width, height } = disk.grid
   if (revealed.length !== width * height) {
     throw new NavError(
@@ -154,7 +181,26 @@ export function summarizeSubmission(
     straight_line_label: straightLineLabel(metrics.straightLineM),
     bearing: compassPoint(start, goal),
   }
-  const common = { rover: { ...ROVER }, mission_rules: MISSION_RULES, destination }
+  const hundredths = (value: number) => Math.round(value * 100) / 100
+  const common = {
+    rover: { ...ROVER },
+    mission_rules: MISSION_RULES,
+    destination,
+    exploration: {
+      path_in_fog: hundredths(exploration.pathInFog),
+      destination_unexplored: exploration.goalInFog === 1,
+      pocket: hundredths(exploration.pocket),
+      pocket_label: pocketLabel(exploration.pocket),
+    },
+    // A stop within a metre of the start is where the rover stands, with no bearing to give.
+    recent_stops: history.recentStops
+      .filter((stop) => Math.hypot(stop.x - start.x, stop.y - start.y) >= 1)
+      .slice(0, RECENT_STOPS)
+      .map((stop) => ({
+        distance_m: Math.round(Math.hypot(stop.x - start.x, stop.y - start.y)),
+        bearing: compassPoint(start, stop),
+      })),
+  }
   if (!metrics.reached) {
     return {
       ...common,

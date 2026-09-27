@@ -28,6 +28,12 @@ const emit = defineEmits<{ like: [liked: boolean]; highlight: [] }>()
 /** Distance and bearing, clockwise from north (world +y), of the goal from the anchor. */
 const goal = computed(() => goalBearing(props.anchor, props.submission.goal))
 
+/** The code's parts of the exploration value, in words, for the hover. */
+const explorationParts = computed(() => {
+  const p = props.submission.explorationParts
+  return `Path in fog ${p.pathInFog.toFixed(2)} · goal in fog ${p.goalInFog.toFixed(2)} · pocket ${p.pocket.toFixed(2)}; averaged with Jev's own score`
+})
+
 const route = computed(() => {
   const r = props.submission.summary.route
   return r.reached ? `${r.path_length_m} m path · ${r.estimated_drive_minutes} min` : null
@@ -98,6 +104,16 @@ const route = computed(() => {
       </span>
       <span v-if="route" class="tabular-nums">{{ route }}</span>
       <span v-if="submission.goalInFog" data-test="goal-in-fog">destination unexplored</span>
+      <UTooltip :text="explorationParts">
+        <span
+          data-test="exploration"
+          class="tabular-nums underline decoration-dotted underline-offset-2"
+          tabindex="0"
+          :aria-label="`Exploration ${submission.exploration.toFixed(2)}: ${explorationParts}`"
+        >
+          Exploration {{ submission.exploration.toFixed(2) }}
+        </span>
+      </UTooltip>
     </p>
     <JudgmentCard :judgment="submission.judgment" />
   </div>

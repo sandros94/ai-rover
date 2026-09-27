@@ -1,6 +1,7 @@
 import * as v from 'valibot'
 import { DEFAULT_STOP_RADIUS } from '../terrain/disk'
 import { MissionError } from './errors'
+import type { ExplorationWeights } from './exploration'
 
 /**
  * Tunable rules of a mission, stored with it. Every "within" radius is inclusive: a distance
@@ -37,6 +38,8 @@ export interface MissionRules {
    * Closed set.
    */
   tieBreak: 'risk' | 'confidence'
+  /** The weight of each part of a goal's exploration value (see `explorationValue`). */
+  explorationWeights: ExplorationWeights
   /**
    * When a playing drive is failed as not moving. Flags of distinct users within `windowMs` reach
    * the quorum, `min(quorumMax, max(quorumMin, ceil(active / 2)))` over the users active in the
@@ -64,6 +67,7 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   graceWindowMs: 5 * 60_000,
   maxJudgedPerRound: 5,
   tieBreak: 'risk',
+  explorationWeights: Object.freeze({ pathInFog: 0.4, goalInFog: 0.3, pocket: 0.3 }),
   notMoving: Object.freeze({
     quorumMax: 5,
     quorumMin: 2,
@@ -77,6 +81,7 @@ const seconds = v.pipe(v.number(), v.finite(), v.minValue(0))
 const metres = v.pipe(v.number(), v.finite(), v.minValue(0))
 const milliseconds = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
 const count = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+const weight = v.pipe(v.number(), v.finite(), v.minValue(0))
 
 /** Mission rules as stored with a mission; nothing else is accepted, extra fields included. */
 export const MissionRulesSchema = v.strictObject({
@@ -94,6 +99,13 @@ export const MissionRulesSchema = v.strictObject({
   graceWindowMs: milliseconds,
   maxJudgedPerRound: count,
   tieBreak: v.picklist(['risk', 'confidence']),
+  explorationWeights: v.pipe(
+    v.strictObject({ pathInFog: weight, goalInFog: weight, pocket: weight }),
+    v.check(
+      (w) => w.pathInFog + w.goalInFog + w.pocket > 0,
+      'explorationWeights must give at least one part a positive weight',
+    ),
+  ),
   notMoving: v.strictObject({
     quorumMax: count,
     quorumMin: count,
@@ -198,14 +210,24 @@ export function checkPathClearOfDeaths(
   }
   let nearestM = Infinity
   for (const death of options.deaths) {
-    if (polyline.length === 1) {
-      nearestM = Math.min(nearestM, Math.hypot(death.x - polyline[0]!.x, death.y - polyline[0]!.y))
-    }
-    for (let k = 1; k < polyline.length; k++) {
-      nearestM = Math.min(nearestM, distanceToSegment(death, polyline[k - 1]!, polyline[k]!))
-    }
+    nearestM = Math.min(nearestM, distanceToPolyline(death, polyline))
   }
   return { ok: nearestM > options.rules.failureZone.pathRadiusM, nearestM }
+}
+
+/**
+ * The smallest distance from `point` to any segment of a non-empty polyline, a single point
+ * counting as a zero-length segment.
+ */
+export function distanceToPolyline(point: MapPoint, polyline: readonly MapPoint[]): number {
+  if (polyline.length === 1) {
+    return Math.hypot(point.x - polyline[0]!.x, point.y - polyline[0]!.y)
+  }
+  let nearest = Infinity
+  for (let k = 1; k < polyline.length; k++) {
+    nearest = Math.min(nearest, distanceToSegment(point, polyline[k - 1]!, polyline[k]!))
+  }
+  return nearest
 }
 
 function distanceToSegment(p: MapPoint, a: MapPoint, b: MapPoint): number {

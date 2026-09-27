@@ -172,6 +172,9 @@ export interface SettledSegment {
   reasons: string[]
   /** Where the rover was lost; null unless failed. */
   death: { x: number; y: number } | null
+  /** Where the drive ended, whatever its status. */
+  end: { x: number; y: number }
+  manifestKey: string
 }
 
 /** The mission's settled segments in start order; the one driving is left out. */
@@ -183,6 +186,7 @@ export async function listSettledSegments(db: DB, missionId: string): Promise<Se
       startedAt: segment.startedAt,
       endsAt: segment.endsAt,
       fromStopId: segment.fromStopId,
+      manifestKey: segment.manifestKey,
       outcome: segment.outcome,
       deathX: segment.deathX,
       deathY: segment.deathY,
@@ -201,6 +205,8 @@ export async function listSettledSegments(db: DB, missionId: string): Promise<Se
     reasons: [...row.outcome!.reasons],
     // The settled check constraint makes both coordinates non-null on a failed segment.
     death: row.status === 'failed' ? { x: row.deathX!, y: row.deathY! } : null,
+    end: { x: row.outcome!.endPose.x, y: row.outcome!.endPose.y },
+    manifestKey: row.manifestKey,
   }))
 }
 

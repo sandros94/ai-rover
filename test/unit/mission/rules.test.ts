@@ -24,6 +24,7 @@ describe('DEFAULT_MISSION_RULES', () => {
       graceWindowMs: 300_000,
       maxJudgedPerRound: 5,
       tieBreak: 'risk',
+      explorationWeights: { pathInFog: 0.4, goalInFog: 0.3, pocket: 0.3 },
       notMoving: {
         quorumMax: 5,
         quorumMin: 2,
@@ -35,6 +36,7 @@ describe('DEFAULT_MISSION_RULES', () => {
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
     expect(Object.isFrozen(rules.notMoving)).toBe(true)
+    expect(Object.isFrozen(rules.explorationWeights)).toBe(true)
   })
 })
 

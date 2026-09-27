@@ -9,7 +9,7 @@ import { getDrivingSegment, listSettledSegments } from '../../repositories/segme
 import { getStop, listStops } from '../../repositories/stops'
 import type { Verdict } from '../jev/client'
 import { DEFAULT_SLICE_SECONDS } from '#shared/utils/drive'
-import type { MissionRules } from '#shared/utils/mission'
+import type { ExplorationParts, MissionRules } from '#shared/utils/mission'
 import { shouldResetToPreviousStop } from '#shared/utils/mission'
 import type { SubmissionSummary } from '#shared/utils/nav'
 import { LifecycleError } from './errors'
@@ -29,6 +29,10 @@ export interface PublicSubmission {
   deferred: boolean
   /** The goal lies on ground the rover had not seen when it was planned. */
   goalInFog: boolean
+  /** How much new ground the goal opens, 0 to 1: the mean of the code's value and Jev's. */
+  exploration: number
+  /** The code's parts of that value. */
+  explorationParts: ExplorationParts
   judgment: {
     feasible: number
     verdict: Verdict
@@ -293,6 +297,8 @@ export async function publicMissionState(
         submitter: s.submitter,
         deferred: s.userId === drivingAuthorId,
         goalInFog: s.metrics.goalInFog,
+        exploration: s.exploration,
+        explorationParts: s.explorationParts,
         judgment: publicJudgment(s.judgment),
         summary: s.summary,
       })),

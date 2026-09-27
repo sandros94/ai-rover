@@ -41,6 +41,8 @@ const SUBMISSION: Submission = {
   submitter: ADA,
   deferred: false,
   goalInFog: false,
+  exploration: 0.42,
+  explorationParts: { pathInFog: 0.3, goalInFog: 0, pocket: 0 },
   judgment: {
     feasible: 0.72,
     verdict: 'review',
@@ -291,6 +293,23 @@ describe('VoteCard', () => {
       submission: { ...SUBMISSION, goalInFog: true },
     })
     expect(fogged.find('[data-test=goal-in-fog]').text()).toBe('destination unexplored')
+  })
+
+  it('shows the exploration value, its parts in words beside it, and keeps the risk', async () => {
+    const wrapper = await mount(VoteCard, {
+      ...props,
+      submission: {
+        ...SUBMISSION,
+        exploration: 0.625,
+        explorationParts: { pathInFog: 0.5, goalInFog: 1, pocket: 0.25 },
+      },
+    })
+    const value = wrapper.find('[data-test=exploration]')
+    expect(value.text()).toBe('Exploration 0.63')
+    expect(value.attributes('aria-label')).toBe(
+      "Exploration 0.63: Path in fog 0.50 · goal in fog 1.00 · pocket 0.25; averaged with Jev's own score",
+    )
+    expect(wrapper.findAll('[data-test=risk-level]')).toHaveLength(4)
   })
 
   it('falls back to the expected levels without probabilities', async () => {

@@ -24,13 +24,15 @@ export interface ScoreJudgment {
   probabilities: number[]
 }
 
-/** The four answers as returned by Jev; what the cache stores. */
+/** The five answers as returned by Jev; what the cache stores. */
 export interface JudgedAnswers {
   /** Probability that the rover completes the segment as planned. */
   feasible: number
   distanceConfidence: ScoreJudgment
   timeConfidence: ScoreJudgment
   risk: ScoreJudgment
+  /** How much new ground the segment opens, lowest level the least. */
+  explorationValue: ScoreJudgment
 }
 
 export type Verdict = 'reject' | 'review' | 'accept'
@@ -40,6 +42,8 @@ export interface SubmissionJudgment extends JudgedAnswers {
   distanceWeight: number
   /** `timeConfidence.score` over its top level, 0 to 1. */
   timeWeight: number
+  /** `explorationValue.score` over its top level, 0 to 1: Jev's half of the exploration value. */
+  explorationWeight: number
   verdict: Verdict
   /** True when answered from the cache without a request. */
   cached: boolean
@@ -178,6 +182,7 @@ export function createJevClient(options: JevClientOptions): JevClient {
       ...structuredClone(answers),
       distanceWeight: answers.distanceConfidence.score / top(answers.distanceConfidence),
       timeWeight: answers.timeConfidence.score / top(answers.timeConfidence),
+      explorationWeight: answers.explorationValue.score / top(answers.explorationValue),
       verdict,
       cached,
       ...(inputTokens !== undefined && { usage: { inputTokens } }),
@@ -213,6 +218,7 @@ export function createJevClient(options: JevClientOptions): JevClient {
         distanceConfidence: scoreJudgment(answers.distance_confidence),
         timeConfidence: scoreJudgment(answers.time_confidence),
         risk: scoreJudgment(answers.risk),
+        explorationValue: scoreJudgment(answers.exploration_value),
       }
       await cache.set(key, judged)
       return judgmentOf(judged, false, usage.input_tokens)
@@ -263,6 +269,7 @@ const ResultSchema = v.object({
     distance_confidence: scoreSchema(JUDGE_QUESTIONS.distance_confidence.criteria.length),
     time_confidence: scoreSchema(JUDGE_QUESTIONS.time_confidence.criteria.length),
     risk: scoreSchema(JUDGE_QUESTIONS.risk.criteria.length),
+    exploration_value: scoreSchema(JUDGE_QUESTIONS.exploration_value.criteria.length),
   }),
   usage: v.object({ input_tokens: v.number() }),
 })

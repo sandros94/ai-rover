@@ -13,13 +13,20 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import type { JourneyStore } from '../journey/store'
-import type { MapPoint, MissionRules, PlanRefusal, SubmissionRefusal } from '#shared/utils/mission'
-import { planGoal } from '#shared/utils/mission'
+import type {
+  MapPoint,
+  MissionHistory,
+  MissionRules,
+  PlanRefusal,
+  SubmissionRefusal,
+} from '#shared/utils/mission'
+import { explorationParts, explorationValue, planGoal } from '#shared/utils/mission'
 import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
 import { assertNotPaused } from './pause'
+import { missionHistory } from './history'
 import { recordNextDue } from './round'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
@@ -45,17 +52,24 @@ export interface PlanningGround {
 /**
  * A goal checked against the rules and the settled deaths from `ground.start`, planned over the
  * ground, then judged by Jev; a refusal by rule asks Jev nothing. The judgment may still be a
- * reject, which the caller stores as such.
+ * reject, which the caller stores as such. The exploration value is the mean of the code's value
+ * over its parts, weighted by `rules.explorationWeights`, and Jev's.
  */
 export async function assessGoal(
   ground: PlanningGround,
-  options: { goal: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules; jev: JevClient },
+  options: {
+    goal: MapPoint
+    deaths: readonly MapPoint[]
+    rules: MissionRules
+    history: MissionHistory
+    jev: JevClient
+  },
 ): Promise<
   | { ok: true; assessment: SubmissionAssessment }
   | { ok: false; reason: PlanRefusal; message?: string }
 > {
   const { world, disk, revealed, start } = ground
-  const { goal, deaths, rules, jev } = options
+  const { goal, deaths, rules, history, jev } = options
   const planned = planGoal(disk, {
     revealed,
     start,
@@ -66,9 +80,28 @@ export async function assessGoal(
   })
   if (!planned.ok) return planned
   const { plan } = planned
-  const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
+  const parts = explorationParts(plan, { disk, revealed, goal, history })
+  const summary = summarizeSubmission(plan, {
+    world,
+    disk,
+    revealed,
+    start,
+    goal,
+    exploration: parts,
+    history,
+  })
   const { cached: _cached, usage: _usage, ...judgment } = await jev.judgeSubmission(summary)
-  return { ok: true, assessment: { judgment, metrics: plan.metrics, summary } }
+  const code = explorationValue(parts, { weights: rules.explorationWeights })
+  return {
+    ok: true,
+    assessment: {
+      judgment,
+      metrics: plan.metrics,
+      summary,
+      exploration: (code + judgment.explorationWeight) / 2,
+      explorationParts: parts,
+    },
+  }
 }
 
 /**
@@ -133,6 +166,7 @@ export async function submitGoal(
     goal,
     deaths: await listDeaths(db, missionId),
     rules: mission.config.rules,
+    history: await missionHistory(db, { store, missionId, disk }),
     jev,
   })
   if (!assessed.ok) {

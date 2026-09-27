@@ -1,4 +1,5 @@
 import { and, asc, count, eq } from 'drizzle-orm'
+import type { ExplorationParts } from '#shared/utils/mission/exploration'
 import type { NavMetrics } from '#shared/utils/nav/plan'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
 import type { DB } from '../database/db'
@@ -16,6 +17,9 @@ export interface SubmissionAssessment {
   judgment: StoredJudgment
   metrics: NavMetrics
   summary: SubmissionSummary
+  /** 0 to 1: the mean of the code's exploration value and Jev's. */
+  exploration: number
+  explorationParts: ExplorationParts
 }
 
 export type NewSubmission = SubmissionAssessment & {
@@ -200,14 +204,22 @@ export async function rejectSubmission(
   )
 }
 
-/** Replaces an open submission's judgment, metrics and summary, as re-planned and re-judged. */
+/**
+ * Replaces an open submission's judgment, metrics, summary and exploration, as re-planned and
+ * re-judged.
+ */
 export async function reviseSubmission(
   db: DB,
   submissionId: string,
   assessment: SubmissionAssessment,
 ): Promise<Submission> {
-  const { judgment, metrics, summary } = assessment
-  return updateOpen(db, submissionId, { judgment, metrics, summary }, 'be revised')
+  const { judgment, metrics, summary, exploration, explorationParts } = assessment
+  return updateOpen(
+    db,
+    submissionId,
+    { judgment, metrics, summary, exploration, explorationParts },
+    'be revised',
+  )
 }
 
 async function updateOpen(

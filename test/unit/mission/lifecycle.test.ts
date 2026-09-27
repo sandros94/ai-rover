@@ -10,7 +10,9 @@ import { getSubmission, listRoundSubmissions } from '#server/repositories/submis
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
+import { missionHistory } from '#server/utils/mission/history'
 import { tickMission } from '#server/utils/mission/tick'
+import { DEFAULT_MISSION_RULES, drivenPath, explorationValue } from '#shared/utils/mission'
 import {
   DEFAULT_SLICE_SECONDS,
   parseStoredSegmentManifest,
@@ -245,6 +247,19 @@ describe('settlement', () => {
       arrived: 1,
       distanceM: driving.outcome!.distanceM,
     })
+    // The settled drive is history now: its path, to where it ended, and both stops.
+    const history = await missionHistory(db, {
+      store: m.store,
+      missionId: m.missionId,
+      disk: { center: stop1!, radius: SMALL_RULES.stopRadiusM },
+    })
+    const end = { x: driving.outcome!.endPose.x, y: driving.outcome!.endPose.y }
+    const plan = parseStoredSegmentManifest(await m.store.getJson(driving.manifestKey)).plan
+    expect(history.drivenPaths).toEqual([drivenPath(plan.polyline, end)])
+    expect(history.recentStops).toEqual([
+      { x: stop1!.x, y: stop1!.y },
+      { x: 0, y: 0 },
+    ])
   })
 
   it('closes the next round when the drive ends if a submission was waiting', async () => {
@@ -254,6 +269,8 @@ describe('settlement', () => {
     const driving = await getSegment(db, first.segmentId)
     const goal = { x: 20, y: 20 }
     const { submission } = await m.submit(m.bob.id, goal, at(T0, 10 * MINUTE))
+    // Planned from the anchor, the drive's goal: the landing stop lies behind it.
+    expect(m.jev.summaries.at(-1)!.recent_stops).toEqual([{ distance_m: 20, bearing: 'south' }])
 
     // It closes with the drive, whose end stays private while it plays.
     const state = await publicMissionState(db, { missionId: m.missionId, now: at(T0, 10 * MINUTE) })
@@ -312,6 +329,12 @@ describe('settlement', () => {
     expect(judged.metrics.straightLineM).toBeCloseTo(Math.hypot(20, 10), 9)
     expect(judged.summary).toEqual(m.jev.summaries.at(-1))
     expect(judged.summary).not.toEqual(valid.submission!.summary)
+    // From the stop reached, the landing stop lies 10 m south and the drive is history.
+    expect(judged.summary.recent_stops).toEqual([{ distance_m: 10, bearing: 'south' }])
+    const code = explorationValue(judged.explorationParts, {
+      weights: DEFAULT_MISSION_RULES.explorationWeights,
+    })
+    expect(judged.exploration).toBeCloseTo((code + 0.5) / 2, 12)
     expect(tick.closed).toEqual({ roundId: beside.id, winnerSubmissionId: judged.id })
     expect(judged.status).toBe('won')
     expect(await getSegment(db, tick.started!.segmentId)).toMatchObject({ fromStopId: stop1.id })
@@ -392,6 +415,9 @@ describe('the public state', () => {
         submitter: { id: m.ada.id, displayName: 'Ada', avatarUrl: null },
         deferred: false,
         goalInFog: false,
+        // A seen goal over seen ground: nothing from the code, Jev's 0.5 halved.
+        exploration: 0.25,
+        explorationParts: { pathInFog: 0, goalInFog: 0, pocket: 0 },
         judgment: {
           feasible: 0.9,
           verdict: 'accept',

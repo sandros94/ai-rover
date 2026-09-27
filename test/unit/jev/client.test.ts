@@ -29,6 +29,13 @@ const SUMMARY: SubmissionSummary = fixtures[0]?.request.state ?? {
   destination: { straight_line_m: 120, straight_line_label: 'medium', bearing: 'east' },
   route: { reached: false },
   failure_reason: 'blocked',
+  exploration: {
+    path_in_fog: 0,
+    destination_unexplored: false,
+    pocket: 0,
+    pocket_label: 'no pocket',
+  },
+  recent_stops: [],
 }
 
 async function judgeErrorOf(promise: Promise<unknown>): Promise<JudgeError | undefined> {
@@ -42,8 +49,9 @@ async function judgeErrorOf(promise: Promise<unknown>): Promise<JudgeError | und
 }
 
 describe('judgeSubmission over recorded fixtures', () => {
-  it('has the six recorded submissions', () => {
-    expect(fixtures.length).toBe(6)
+  it('has the recorded submissions, a fog goal and a blocked one', () => {
+    expect(fixtures.map((f) => f.name)).toEqual(['jezero-south-east-blocked', 'mars-east-fog-goal'])
+    expect(fixtures.some((f) => f.request.state.exploration.destination_unexplored)).toBe(true)
     expect(fixtures.some((f) => !f.request.state.route.reached)).toBe(true)
   })
 
@@ -58,6 +66,7 @@ describe('judgeSubmission over recorded fixtures', () => {
       const distance = answers.distance_confidence!
       const time = answers.time_confidence!
       const risk = answers.risk!
+      const exploration = answers.exploration_value!
       expect(judgment.feasible).toBe(noul)
       expect(judgment.distanceConfidence.score).toBe(distance.score)
       expect(judgment.distanceConfidence.confidence).toBe(distance.confidence)
@@ -70,20 +79,23 @@ describe('judgeSubmission over recorded fixtures', () => {
       expect(judgment.risk.probabilities).toHaveLength(4)
       expect(judgment.distanceWeight).toBe((distance.score as number) / 4)
       expect(judgment.timeWeight).toBe((time.score as number) / 4)
+      expect(judgment.explorationValue.score).toBe(exploration.score)
+      expect(judgment.explorationValue.probabilities).toHaveLength(5)
+      expect(judgment.explorationWeight).toBe((exploration.score as number) / 4)
       expect(judgment.verdict).toBe(noul < 0.2 ? 'reject' : noul > 0.8 ? 'accept' : 'review')
       expect(judgment.cached).toBe(false)
       expect(judgment.usage).toEqual({ inputTokens: usage.input_tokens })
     }
   })
 
-  it('pins the model and asks the four questions', () => {
+  it('pins the model and asks the five questions', () => {
     for (const fixture of fixtures) {
       expect(fixture.request.model).toBe(JEV_MODEL)
       expect(fixture.request.questions).toEqual(JSON.parse(JSON.stringify(JUDGE_QUESTIONS)))
     }
     expect(JEV_MODEL).toBe('jev-1.13.0')
     expect(Object.keys(JUDGE_QUESTIONS).sort()).toEqual(
-      ['distance_confidence', 'feasible', 'risk', 'time_confidence'].sort(),
+      ['distance_confidence', 'exploration_value', 'feasible', 'risk', 'time_confidence'].sort(),
     )
   })
 })
