@@ -8,7 +8,10 @@ definePageMeta({ middleware: 'authenticated' })
 
 const route = useRoute()
 const session = useUserSession()
-const { data: account, error } = await useFetch<AccountView>('/api/_auth/account')
+// During SSR the request fetch does not carry the visitor's cookies on its own.
+const { data: account, error } = await useFetch<AccountView>('/api/_auth/account', {
+  headers: useRequestHeaders(['cookie']),
+})
 const offered = await useAuthProviders()
 
 /** Set when a link flow came back with a failure code. */
