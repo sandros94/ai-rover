@@ -29,6 +29,19 @@ jobs:
       - name: Typecheck code
         run: pnpm typecheck
 
+      # The platform applies migrations in name order and refuses one that sorts before an applied
+      # one, so a branch's new migrations must sort after everything already on the base branch.
+      - name: Migrations sort after the base branch's
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          base=$(git ls-tree --name-only "origin/${{ github.base_ref }}" netlify/database/migrations/ | xargs -n1 basename | sort | tail -n1)
+          new=$(comm -13 <(git ls-tree --name-only "origin/${{ github.base_ref }}" netlify/database/migrations/ | xargs -n1 basename | sort) <(ls netlify/database/migrations | sort))
+          for m in $new; do
+            if [[ "$m" < "$base" ]]; then echo "::error::migration $m sorts before $base, which is already on ${{ github.base_ref }}"; exit 1; fi
+          done
+          echo "new migrations: ${new:-none}; latest on base: $base"
+
       # The platform bundles `netlify/functions` itself, outside Nitro; importing the zipped result
       # proves every import and alias of the background function resolved.
       - name: Build the Netlify functions and import the background one

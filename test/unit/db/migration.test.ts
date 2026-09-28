@@ -187,7 +187,12 @@ describe('the segment_time_band migration', () => {
         stopRadiusM: _radius,
         ...kept
       } = DEFAULT_MISSION_RULES
-      const older = { ...kept, segmentDistanceBand: { minM: 50, maxM: 250 } }
+      // The stop radius migration sorts before this one, so stored rules already carry it here.
+      const older = {
+        ...kept,
+        stopRadiusM: DEFAULT_MISSION_RULES.stopRadiusM,
+        segmentDistanceBand: { minM: 50, maxM: 250 },
+      }
       const tuned = {
         ...kept,
         stopRadiusM: DEFAULT_MISSION_RULES.stopRadiusM,
