@@ -95,7 +95,7 @@ describe('POST /api/admin/diagnose', () => {
     const answer = await diagnosis(appWith({ store: () => store }))
     const migrations = (await readdir(MIGRATIONS_DIR, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
+      .map((entry) => entry.name.slice(0, 14))
       .sort()
     expect(answer.database).toEqual({
       ok: true,
