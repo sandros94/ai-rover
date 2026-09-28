@@ -67,7 +67,7 @@ export const GITHUB: CodeFlowProvider<GitHubFlow> = {
     return {
       subject: String(user.id),
       profile: {
-        displayName: typeof user.name === 'string' && user.name.trim() ? user.name : user.login,
+        displayName: user.login,
         avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : undefined,
         handle: user.login,
       },

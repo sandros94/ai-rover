@@ -25,7 +25,7 @@ const lastOne = computed(() => props.account.identities.length <= 1)
 const primaryItems = computed(() =>
   props.account.identities.map((identity) => ({
     value: identity.provider,
-    label: `${PROVIDER_DISPLAY[identity.provider].label}: ${identity.displayName}`,
+    label: `${PROVIDER_DISPLAY[identity.provider].label}: ${identity.handle ?? identity.displayName}`,
   })),
 )
 
