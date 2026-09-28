@@ -29,7 +29,7 @@ AutoNav / ENav behaviour (from JPL paper on ENav [S9] and ACE paper [S10]):
 - Candidate paths: tree of constant-curvature arcs (rover cannot steer while driving): 14 turns-in-place x 11 arcs of 3 m x 11 arcs of 3 m = 1,694 paths, ~6 m lookahead [S9]. Ranked by cost (arc time + costmap samples + Dijkstra cost-to-go); then **ACE** (kinematic clearance/tilt/suspension-angle bounds, interval arithmetic over rocker-bogie kinematics) run every **25 cm** along the best path until one passes [S9], [S10]. Only the first 1 m of arc (or first 30 deg of turn) is executed, then replan [S9].
 - Planning cycle ~3-4 s on RAD750; evaluating all 1,694 paths with ACE would be >22k calls, >3 min [S9]. Perseverance "thinks while driving"; it stops "when it cannot quickly determine a safe path" (i.e. when all cheap candidates fail ACE) [S3], [S5]. Modes: AVOID_ALL (avoid hazards + keep-out zones), GUARDED (stop at obstacle), UNGUARDED (blind) [S8].
 
-Gravity: Mars equatorial surface accel 3.69 m/s^2 (NSSDC; 3.71 is the mean value commonly quoted), sol = 24.6597 h [S11]. Moon 1.62 m/s^2 [S12]. **Open question:** "moon-like terrain" + Perseverance reference = mismatched gravity (1.62 vs 3.71). Under 1.62 m/s^2, same mass -> 44% of normal load -> lower traction, longer stopping, more bounce. Decide: (A) Mars gravity + Mars rover, moon-ish _look_ only; (B) Moon gravity, keep rover, accept it is a fictional lunar Perseverance; (C) make gravity a world param. Kinematic model (Sec 2b) barely cares; rigid-body sim cares a lot.
+Gravity: Mars equatorial surface accel 3.69 m/s^2 (NSSDC; 3.71 is the mean value commonly quoted), sol = 24.6597 h [S11]. The mission is Mars throughout (rover, gravity, sol, terrain), so every Perseverance figure applies unchanged; the Moon's 1.62 m/s^2 [S12] is kept only as the reference for a possible later lunar mission, where the same mass would carry 44% of the normal load (lower traction, longer stopping, more bounce).
 
 ---
 
@@ -70,7 +70,7 @@ Netlify limits (for sizing): background functions 15 min, available on Free/Pers
 
 ---
 
-## 3. Terrain generation (moon-like, pathable, reproducible)
+## 3. Terrain generation (Mars-like, pathable, reproducible)
 
 **Base relief: fBm of simplex noise.** Sum octaves with frequency x2 and amplitude x0.5 (`[1, 1/2, 1/4, ...]`), normalise by amplitude sum; optional `pow(e, exponent)` redistribution for flat maria vs highlands; give each octave its own seed or offset so low-frequency octaves are not correlated near the origin [S25]. Red Blob recommends `simplex-noise` and FastNoiseLite for JS [S25].
 

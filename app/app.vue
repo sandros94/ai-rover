@@ -9,7 +9,7 @@ useHead({
 
 const title = 'AI Rover'
 const description =
-  'A community-steered autonomous rover on procedurally generated, moon-like terrain.'
+  'A community-steered autonomous rover on procedurally generated Martian terrain.'
 
 useSeoMeta({
   title,

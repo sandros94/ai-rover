@@ -26,7 +26,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Rocker-bogie kinematics (ACE equations, geometry from `research/rover-geometry-mars-terrain.md`): wheel contacts, suspension angles, body pose, belly clearance, limit checks.
 - Producer drives the true terrain motion by motion, replans on discovery, applies the slip model, stops at the last safe pose when the way is blocked, and records per-metre reveals.
 - Segment record: binary 2 Hz keyframes plus events and reveal deltas, stored as time-indexed slices with release times.
-- Kinematic terrain-following producer (Mars gravity, lunar look) → keyframes; failure detection (slope, obstacle, slip) → failed record with death pose.
+- Kinematic terrain-following producer (Mars gravity and terrain) → keyframes; failure detection (slope, obstacle, slip) → failed record with death pose.
 - Safe-stop detection → intermediate checkpoint record (progress kept) vs hazard → failed record.
 - Golden tests: fixed seed + fixed destination → byte-identical keyframes.
 
