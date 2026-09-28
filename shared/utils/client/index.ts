@@ -55,7 +55,10 @@ export {
 export { currentSight, EYE_SNAP_CELLS, maskChange } from './sight'
 export type { PreviewRefusal, PreviewResult } from './preview-plan'
 export { diskFromTerrain, previewPlan } from './preview-plan'
-export { serverClockOffset } from './server-clock'
+export type { ClockOffsetEstimate } from './server-clock'
+export { CLOCK_OFFSET_WINDOW, createClockOffsetEstimate, serverClockOffset } from './server-clock'
+export type { DisplayClock } from './display-clock'
+export { createDisplayClock, DISPLAY_SLEW_RATE } from './display-clock'
 export type {
   Compass,
   DeathObject,
