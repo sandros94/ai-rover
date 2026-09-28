@@ -78,7 +78,8 @@ const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
       />
     </div>
     <p class="text-3xl font-semibold">
-      {{ (speed * 100).toFixed(1) }} <span class="text-base font-normal text-muted">cm/s</span>
+      <span class="readout min-w-[4ch]" data-test="speed">{{ (speed * 100).toFixed(1) }}</span>
+      <span class="text-base font-normal text-muted">cm/s</span>
     </p>
     <div
       class="space-y-2"
@@ -104,11 +105,18 @@ const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
     <dl class="grid grid-cols-3 gap-2">
       <div data-test="odometer-segment">
         <dt class="text-xs text-muted">Segment</dt>
-        <dd class="font-semibold">{{ reading.actualM.toFixed(2) }} m</dd>
+        <dd class="font-semibold">
+          <span class="readout min-w-[6ch]">{{ reading.actualM.toFixed(2) }}</span> m
+        </dd>
       </div>
       <div data-test="odometer-mission">
         <dt class="text-xs text-muted">Mission</dt>
-        <dd class="font-semibold">{{ fmt.format(missionBeforeM + reading.actualM) }} m</dd>
+        <dd class="font-semibold">
+          <span class="readout min-w-[6ch]">{{
+            fmt.format(missionBeforeM + reading.actualM)
+          }}</span>
+          m
+        </dd>
       </div>
       <div data-test="efficiency">
         <UTooltip
@@ -119,7 +127,10 @@ const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 0 })
           </dt>
         </UTooltip>
         <dd class="font-semibold">
-          {{ efficiency === undefined ? '—' : `${Math.round(efficiency * 100)} %` }}
+          <span class="readout min-w-[3ch]">{{
+            efficiency === undefined ? '—' : Math.round(efficiency * 100)
+          }}</span>
+          <template v-if="efficiency !== undefined"> %</template>
         </dd>
       </div>
     </dl>
