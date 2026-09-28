@@ -54,15 +54,25 @@ export default defineNuxtModule({
       handler: `${routes}/providers.get`,
     })
     addServerHandler({
+      middleware: true,
+      handler: resolver.resolve('./runtime/server/middleware/providers'),
+    })
+    addServerHandler({
       route: '/api/auth/atproto/client-metadata.json',
       method: 'get',
       handler: `${routes}/client-metadata.get`,
     })
 
-    addImports({
-      name: 'useUserSession',
-      from: resolver.resolve('./runtime/app/composables/useUserSession'),
-    })
+    addImports([
+      {
+        name: 'useUserSession',
+        from: resolver.resolve('./runtime/app/composables/useUserSession'),
+      },
+      {
+        name: 'useAuthProviders',
+        from: resolver.resolve('./runtime/app/composables/useAuthProviders'),
+      },
+    ])
     addPlugin(resolver.resolve('./runtime/app/plugins/session.server'))
     addPlugin(resolver.resolve('./runtime/app/plugins/session.client'))
     addRouteMiddleware({

@@ -1,13 +1,14 @@
 import type { H3Event } from 'nitro/h3'
 import { defineHandler } from 'nitro/h3'
 import { useRuntimeConfig } from 'nitro/runtime-config'
-import type { SignedInSession, UserSession } from '../../types'
+import type { AuthProvider, SignedInSession, UserSession } from '../../types'
 import { createAtprotoHandler } from '../lib/atproto/handler'
 import type { AuthContext } from '../lib/context'
 import { createAuthContext } from '../lib/context'
 import type { GitHubConfig } from '../lib/github'
 import { createGitHubHandler } from '../lib/github'
 import type { OAuthHandlerOptions } from '../lib/oauth'
+import { providersFor } from '../lib/providers'
 
 let shared: AuthContext | undefined
 
@@ -25,6 +26,14 @@ export function useAuthContext(): AuthContext {
     })
   }
   return shared
+}
+
+/** The sign-in providers offered on the origin `event` was addressed to. */
+export function requestProviders(event: H3Event): AuthProvider[] {
+  return providersFor(new URL(event.req.url).origin, {
+    origins: useAuthContext().origins,
+    github: useRuntimeConfig().oauth.github,
+  })
 }
 
 export function getUserSession(event: H3Event): Promise<UserSession> {

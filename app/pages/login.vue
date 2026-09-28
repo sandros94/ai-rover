@@ -19,15 +19,8 @@ const failure = computed(() => {
 
 if (loggedIn.value) await navigateTo(redirect.value)
 
-/*
- * Which providers exist depends on the address the visitor uses, so the server-side fetch must
- * carry the browser's own host headers rather than the function's internal address.
- */
-const { data } = await useFetch('/api/auth/providers', {
-  $fetch: useRequestFetch(),
-  default: () => ({ providers: [] as AuthProvider[] }),
-})
-const offers = (provider: AuthProvider) => data.value.providers.includes(provider)
+const providers = await useAuthProviders()
+const offers = (provider: AuthProvider) => providers.value.includes(provider)
 
 const handle = ref('')
 
@@ -71,6 +64,7 @@ async function signInWithAtproto() {
 
         <form
           v-if="offers('atproto')"
+          data-test="atproto-sign-in"
           class="flex flex-col gap-2"
           @submit.prevent="signInWithAtproto"
         >
@@ -84,7 +78,7 @@ async function signInWithAtproto() {
           <UButton type="submit" :disabled="!handle.trim()" block> Continue with Bluesky </UButton>
         </form>
 
-        <p v-if="!data.providers.length" class="text-sm text-muted">
+        <p v-if="!providers.length" data-test="no-sign-in" class="text-sm text-muted">
           Sign-in is not available on this address.
         </p>
       </div>

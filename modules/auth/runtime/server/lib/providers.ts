@@ -1,0 +1,21 @@
+import type { AuthProvider } from '../../types'
+import type { OriginPolicy } from './origins'
+import { isLoopbackOrigin } from './origins'
+
+export interface ProvidersConfig {
+  origins: Pick<OriginPolicy, 'allows'>
+  github: { clientId: string; clientSecret: string }
+}
+
+/**
+ * The sign-in providers a visitor on `origin` is offered: none on an origin sign-in may not
+ * redirect to; GitHub once its app is configured; AT Protocol on HTTPS or loopback, the only
+ * origins its authorization servers accept for a public client.
+ */
+export function providersFor(origin: string, config: ProvidersConfig): AuthProvider[] {
+  if (!config.origins.allows(origin)) return []
+  const providers: AuthProvider[] = []
+  if (config.github.clientId && config.github.clientSecret) providers.push('github')
+  if (origin.startsWith('https://') || isLoopbackOrigin(origin)) providers.push('atproto')
+  return providers
+}
