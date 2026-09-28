@@ -8,6 +8,8 @@ minimumReleaseAgeExclude:
 # @nuxt/test-utils-nightly ships with an unreplaced `workspace:*` dep — pin the
 # published environment package until the nightly publish pipeline is fixed.
 overrides:
+  # The 2026-09-28 CLI nightly imports a dev-only module in the server runtime and answers 500 on every dev page.
+  '@nuxt/cli': 'npm:@nuxt/cli-nightly@4.0.0-20260926-151446-e125c98'
   'vitest-environment-nuxt': ^2.0.0
   # Netlify Database runs PostgreSQL 18; `@netlify/database-dev` pins an older PGlite major.
   '@electric-sql/pglite': '0.5.8'
