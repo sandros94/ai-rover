@@ -31,3 +31,23 @@ export class MemoryBlobs implements BlobStore {
     this.blobs.delete(key)
   }
 }
+
+/** {@link MemoryBlobs} whose writes take a few milliseconds, counting how many overlap at most. */
+export class CountingBlobs extends MemoryBlobs {
+  inFlight = 0
+  maxInFlight = 0
+
+  override async set(
+    key: string,
+    data: ArrayBuffer,
+    options: { metadata: Record<string, unknown> },
+  ) {
+    this.maxInFlight = Math.max(this.maxInFlight, ++this.inFlight)
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      await super.set(key, data, options)
+    } finally {
+      this.inFlight--
+    }
+  }
+}

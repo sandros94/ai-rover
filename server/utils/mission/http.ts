@@ -41,6 +41,13 @@ const STATUS: Record<string, Record<string, number>> = {
 /** Seconds a client is told to wait before retrying an answer of {@link DbError} `BUSY`. */
 const BUSY_RETRY_AFTER_S = 5
 
+/**
+ * Milliseconds from a request's start after which its background tick starts no second pass
+ * (see `tickMission`): the platform kills a function about 10 s in, and a tick stopped between
+ * its passes resumes on the next read, where one killed mid-pass loses that pass's apply.
+ */
+export const TICK_BUDGET_MS = 8000
+
 /** What a signed-in visitor whose account was deleted is told. */
 export const USER_GONE_MESSAGE = 'Your account no longer exists; sign in again.'
 
@@ -142,7 +149,9 @@ export function isMissionDue(mission: Pick<Mission, 'nextDueAt'>, now: Date): bo
  * mission lock, and answers what the tick did. A read answers null at once: when the mission is
  * due it starts a tick that does not wait for the lock, not awaited, which the platform keeps
  * alive until it settles; its failure is logged and a change it makes purges the cached state.
- * Concurrent reads so never stack on the lock: the first takes it, the others skip.
+ * Concurrent reads so never stack on the lock: the first takes it, the others skip. The read's
+ * tick stops {@link TICK_BUDGET_MS} after `began` (epoch milliseconds, the request's start; now
+ * when absent), leaving what it did not reach due.
  */
 export async function syncMission<A extends MissionAccess>(
   db: DB,
@@ -152,6 +161,7 @@ export async function syncMission<A extends MissionAccess>(
     store: JourneyStore
     jev: JevClient
     now: Date
+    began?: number
   },
 ): Promise<A extends 'write' ? TickResult : null>
 export async function syncMission(
@@ -162,15 +172,21 @@ export async function syncMission(
     store: JourneyStore
     jev: JevClient
     now: Date
+    began?: number
   },
 ): Promise<TickResult | null> {
-  const { mission, access, store, jev, now } = options
+  const { mission, access, store, jev, now, began = Date.now() } = options
   if (access === 'write') return tickMission(db, { missionId: mission.id, store, jev, now })
   if (!isMissionDue(mission, now)) return null
-  const ticking = tickMission(db, { missionId: mission.id, store, jev, now, lock: 'try' })
+  const ticking = tickMission(db, {
+    missionId: mission.id,
+    store,
+    jev,
+    now,
+    lock: 'try',
+    deadline: began + TICK_BUDGET_MS,
+  })
     .then(async (tick) => {
-      if (tick.skipped)
-        console.warn(`[mission] tick of mission ${mission.id} ${SKIPPED[tick.skipped]}`)
       if (changed(tick)) await purgeMissionCache(mission.id)
     })
     .catch((error: unknown) => {
@@ -178,11 +194,6 @@ export async function syncMission(
     })
   globalThis.Netlify?.context?.waitUntil(ticking)
   return null
-}
-
-const SKIPPED: Record<NonNullable<TickResult['skipped']>, string> = {
-  busy: 'skipped: another tick holds the mission lock',
-  changed: 'skipped: the mission moved while it was prepared; the next tick redoes it',
 }
 
 function changed(tick: TickResult): boolean {
@@ -254,6 +265,7 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
   handler: MissionRouteHandler<T, A, U>,
 ) {
   return defineHandler(async (event) => {
+    const began = Date.now()
     const noStore = missionCacheHeaders('', 'none')
     for (const [name, value] of Object.entries(noStore)) event.res.headers.set(name, value)
     let purge: string | undefined
@@ -272,6 +284,7 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
         store,
         jev: LAZY_JEV,
         now,
+        began,
       })
       if (options.access === 'write') purge = mission.id
       const result = await handler(event, {

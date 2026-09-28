@@ -666,3 +666,138 @@ describe('the mission lock', () => {
     expect(answer.headers?.get('retry-after')).toBe('5')
   })
 })
+
+describe('a tick cut short', () => {
+  /** Ada's goal due to close at 6 minutes, with no drive yet. */
+  async function closing() {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    return { ...m, now: at(T0, 6 * MINUTE) }
+  }
+
+  /** The step of each line the tick of `missionId` logged, in order. */
+  function steps(log: { mock: { calls: unknown[][] } }, missionId: string): string[] {
+    const prefix = `[mission] tick ${missionId} `
+    return log.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.startsWith(prefix))
+      .map((line) => line.slice(prefix.length).split(' ')[0]!)
+  }
+
+  it('logs each step it takes, in order, then that it is done', async () => {
+    const m = await stoppingShort()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await m.tick(m.driving.endsAt)
+      expect(steps(log, m.missionId)).toEqual([
+        'settle-prepare',
+        'settle-publish',
+        'settle-apply',
+        'close-plan',
+        'close-simulate',
+        'close-publish',
+        'close-apply',
+        'done',
+      ])
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('logs that it failed, after the last step it finished', async () => {
+    const m = await closing()
+    onPut = (key) => {
+      if (key.startsWith('segments/')) throw new Error('killed')
+    }
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const failed = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(m.tick(m.now)).rejects.toThrow('killed')
+      expect(steps(log, m.missionId)).toEqual(['close-plan', 'close-simulate'])
+      expect(steps(failed, m.missionId)).toEqual(['failed'])
+    } finally {
+      log.mockRestore()
+      failed.mockRestore()
+    }
+  })
+
+  it('resumes publishing a drive a run left half written, under the same segment id', async () => {
+    const m = await closing()
+    let slices = 0
+    onPut = (key) => {
+      if (key.includes('/slices/') && ++slices > 5) throw new Error('killed')
+    }
+    await expect(m.tick(m.now)).rejects.toThrow('killed')
+    // The writes already in flight when the run failed still land.
+    await vi.waitFor(async () => expect(await m.store.listKeys('segments/')).toHaveLength(5))
+    const left = await m.store.listKeys('segments/')
+    const ids = new Set(left.map((key) => key.split('/')[1]))
+    expect(ids.size).toBe(1)
+
+    const rewritten: string[] = []
+    onPut = (key) => void rewritten.push(key)
+    const tick = await m.tick(m.now)
+    expect(ids).toEqual(new Set([tick.started!.segmentId]))
+    expect(rewritten.filter((key) => left.includes(key))).toEqual([])
+    expect(rewritten.at(-1)).toBe(`segments/${tick.started!.segmentId}/manifest.json`)
+  })
+
+  it('publishes and applies a computed drive even once its deadline has passed', async () => {
+    const m = await closing()
+    let clock = 0
+    // Planning and simulating the winner take the whole budget.
+    forced.records.push((real) => ((clock += 8000), real))
+    const written: string[] = []
+    onPut = (key) => void written.push(key)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    let tick: Awaited<ReturnType<typeof tickMission>>
+    try {
+      tick = await tickMission(db, {
+        store: m.store,
+        jev: m.jev.client,
+        missionId: m.missionId,
+        now: m.now,
+        deadline: 8000,
+        clock: () => clock,
+      })
+      expect(steps(log, m.missionId)).toEqual([
+        'close-plan',
+        'close-simulate',
+        'close-publish',
+        'close-apply',
+        'done',
+      ])
+    } finally {
+      log.mockRestore()
+    }
+    expect(tick.skipped).toBeUndefined()
+    expect(tick.closed?.roundId).toBe(m.round.id)
+    expect(written.at(-1)).toBe(`segments/${tick.started!.segmentId}/manifest.json`)
+    expect(await getRound(db, m.round.id)).toMatchObject({ status: 'closed' })
+  })
+
+  it('commits a settlement and leaves the close it made due once its deadline has passed', async () => {
+    const m = await stoppingShort()
+    let clock = 0
+    onPut = () => void (clock = 8000)
+    const tick = await tickMission(db, {
+      store: m.store,
+      jev: m.jev.client,
+      missionId: m.missionId,
+      now: m.driving.endsAt,
+      deadline: 8000,
+      clock: () => clock,
+    })
+    expect(tick).toMatchObject({
+      settled: { segmentId: m.driving.id, status: 'stopped-short' },
+      closed: null,
+      started: null,
+      skipped: 'deferred',
+    })
+    expect(await getRound(db, m.beside.id)).toMatchObject({ status: 'open' })
+    expect((await getMission(db, m.missionId)).nextDueAt!.getTime()).toBeLessThanOrEqual(
+      m.driving.endsAt.getTime(),
+    )
+    expect((await m.tick(m.driving.endsAt)).closed?.roundId).toBe(m.beside.id)
+  })
+})

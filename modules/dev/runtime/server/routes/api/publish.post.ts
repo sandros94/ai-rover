@@ -8,7 +8,7 @@ import {
   revealDisk,
   TerrainError,
 } from '#shared/utils/terrain'
-import { publishSegment, publishStop } from '#server/utils/journey/publish'
+import { encodeSegment, publishSegment, publishStop } from '#server/utils/journey/publish'
 import type { PutResult } from '#server/utils/journey/store'
 import { createJourneyStore } from '#server/utils/journey/store'
 
@@ -58,12 +58,21 @@ export default defineHandler(async (event) => {
     const { record } = await time('driveMs', () =>
       driveSegment(world, { disk, revealed: mask, start, goal: body.goal }),
     )
+    // Publishing skips keys already stored, and every smoke reuses this stop and may reuse its
+    // segment id with other inputs: clear both first so they hold this run.
+    for (const prefix of [`missions/${SMOKE_MISSION_ID}/`, `segments/${body.segmentId}/`]) {
+      for (const key of await store.listKeys(prefix)) await store.delete(key)
+    }
     const stop = await time('publishStopMs', () =>
       publishStop(store, { world, disk, mask, missionId: SMOKE_MISSION_ID, stopIndex: 0 }),
     )
     const startedAt = Math.round(Date.now() + body.startedAtOffsetS * 1000)
     const segment = await time('publishSegmentMs', () =>
-      publishSegment(store, { record, segmentId: body.segmentId, startedAt }),
+      publishSegment(store, {
+        segment: encodeSegment(record),
+        segmentId: body.segmentId,
+        startedAt,
+      }),
     )
     const chunks = stop.written.filter((w) => w.key.includes('/chunks/'))
     const maskBlobs = stop.written.filter((w) => w.key.includes('/revealed/'))

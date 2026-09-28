@@ -1,4 +1,5 @@
-import type { SegmentRecord, StoredSegmentManifest } from '#shared/utils/drive'
+import { hash } from 'unsecure/hash'
+import type { SegmentManifest, SegmentRecord, StoredSegmentManifest } from '#shared/utils/drive'
 import {
   assertSegmentId,
   DriveError,
@@ -8,7 +9,7 @@ import {
   sliceRecord,
   sliceReleaseAt,
 } from '#shared/utils/drive'
-import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
+import type { Chunk, RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import {
   buildStopManifest,
   encodeChunk,
@@ -17,15 +18,18 @@ import {
   generateChunk,
   stopManifestKey,
 } from '#shared/utils/terrain'
-import type { JourneyStore, PutResult } from './store'
+import type { JourneyStore, PutEntry, PutResult } from './store'
+import { putAll } from './store'
 
-const BINARY = { contentType: 'application/octet-stream' }
+const BINARY = 'application/octet-stream'
 
 /**
- * Publishes a mission's stop: every chunk of its disk not yet stored (chunks are immutable per
- * world), the disk's chunks again as one pack, the revealed mask as of this stop, then the stop
- * manifest, so a reader that finds the manifest finds everything it names. The pack holds exactly
- * the chunks the manifest lists, all of them public once the stop is.
+ * Publishes a mission's stop: every chunk of its disk and the revealed mask as of this stop, then
+ * the disk's chunks again as one pack, then the stop manifest, so a reader that finds the pack
+ * finds every chunk it holds and one that finds the manifest finds everything it names. A blob
+ * already stored is skipped: chunks are immutable per world, and a stop index is taken by one
+ * drive of the mission only, so its pack and mask are too. The pack holds exactly the chunks the
+ * manifest lists, all of them public once the stop is.
  */
 export async function publishStop(
   store: JourneyStore,
@@ -39,34 +43,81 @@ export async function publishStop(
 ): Promise<{ manifestKey: string; written: PutResult[]; skipped: string[] }> {
   const { world, disk, mask, missionId, stopIndex } = options
   const manifest = buildStopManifest(world, disk, { missionId, stopIndex })
-  const written: PutResult[] = []
-  const skipped: string[] = []
-  const chunks = manifest.chunks.map(({ cx, cy }) => generateChunk(world, { cx, cy }))
-  for (const [n, { key }] of manifest.chunks.entries()) {
-    if (await store.has(key)) {
-      skipped.push(key)
-      continue
-    }
-    written.push(await store.putImmutable(key, encodeChunk(chunks[n]!), BINARY))
+  const generated = new Map<number, Chunk>()
+  const chunk = (n: number) => {
+    let found = generated.get(n)
+    if (!found) generated.set(n, (found = generateChunk(world, manifest.chunks[n]!)))
+    return found
   }
-  written.push(await store.putImmutable(manifest.packKey, encodeDiskPack(chunks), BINARY))
-  written.push(await store.putImmutable(manifest.revealedKey, encodeRevealedMask(mask), BINARY))
+  const named: PutEntry[] = manifest.chunks.map(({ key }, n) => ({
+    key,
+    bytes: () => encodeChunk(chunk(n)),
+    contentType: BINARY,
+  }))
+  named.push({
+    key: manifest.revealedKey,
+    bytes: () => encodeRevealedMask(mask),
+    contentType: BINARY,
+  })
+  const pack: PutEntry = {
+    key: manifest.packKey,
+    bytes: () => encodeDiskPack(manifest.chunks.map((_, n) => chunk(n))),
+    contentType: BINARY,
+  }
+  const first = await putAll(store, named)
+  const packed = await putAll(store, [pack])
   const manifestKey = stopManifestKey(missionId, stopIndex)
-  written.push(await store.putJson(manifestKey, manifest))
-  return { manifestKey, written, skipped }
+  const written = [...first.written, ...packed.written, await store.putJson(manifestKey, manifest)]
+  return { manifestKey, written, skipped: [...first.skipped, ...packed.skipped] }
+}
+
+/** A segment record cut into slices of the default length and encoded, ready to publish. */
+export interface EncodedSegment {
+  manifest: SegmentManifest
+  /** Slice `n`'s bytes at index `n`. */
+  slices: Uint8Array[]
+}
+
+export function encodeSegment(record: SegmentRecord): EncodedSegment {
+  const { manifest, slices } = sliceRecord(record)
+  return { manifest, slices: slices.map(encodeSlice) }
 }
 
 /**
- * Publishes a segment record as time-gated slices of the default length, each served once its
- * window has passed, then its manifest stamped with the segment id and wall-clock start (epoch
- * milliseconds). The manifest goes last, so a reader that finds it finds every slice. `endsAt` is
- * the release time of the last slice, epoch milliseconds: the drive's public end.
+ * A segment id naming `segment`'s content within `scope`: a UUID (version 8) from the SHA-256 of
+ * the scope, the manifest and every slice. The same content in the same scope always gets the
+ * same id, so its slices, keyed by that id, never change once stored.
+ */
+export async function contentSegmentId(segment: EncodedSegment, scope: string): Promise<string> {
+  const head = new TextEncoder().encode(JSON.stringify([scope, segment.manifest]))
+  const bytes = new Uint8Array(
+    segment.slices.reduce((sum, slice) => sum + slice.byteLength, head.byteLength),
+  )
+  bytes.set(head)
+  let offset = head.byteLength
+  for (const slice of segment.slices) {
+    bytes.set(slice, offset)
+    offset += slice.byteLength
+  }
+  const digest = await hash(bytes, { returnAs: 'bytes' })
+  digest[6] = (digest[6]! & 0x0f) | 0x80
+  digest[8] = (digest[8]! & 0x3f) | 0x80
+  const hex = Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/**
+ * Publishes an encoded segment as time-gated slices, each served once its window has passed,
+ * then its manifest stamped with the segment id and wall-clock start (epoch milliseconds). A
+ * slice already stored under the id is skipped; the manifest is always written, last, so a reader
+ * that finds it finds every slice. `endsAt` is the release time of the last slice, epoch
+ * milliseconds: the drive's public end.
  */
 export async function publishSegment(
   store: JourneyStore,
-  options: { record: SegmentRecord; segmentId: string; startedAt: number },
-): Promise<{ manifestKey: string; written: PutResult[]; endsAt: number }> {
-  const { record, segmentId, startedAt } = options
+  options: { segment: EncodedSegment; segmentId: string; startedAt: number },
+): Promise<{ manifestKey: string; written: PutResult[]; skipped: string[]; endsAt: number }> {
+  const { segment, segmentId, startedAt } = options
   assertSegmentId(segmentId)
   if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
     throw new DriveError(
@@ -74,16 +125,18 @@ export async function publishSegment(
       `publishSegment: startedAt is ${startedAt}; pass whole epoch milliseconds.`,
     )
   }
-  const { manifest, slices } = sliceRecord(record)
-  const written: PutResult[] = []
-  for (const slice of slices) {
-    written.push(
-      await store.putImmutable(segmentSliceKey(segmentId, slice.index), encodeSlice(slice), BINARY),
-    )
-  }
-  const stored: StoredSegmentManifest = { ...manifest, segmentId, startedAt }
+  const { written, skipped } = await putAll(
+    store,
+    segment.slices.map((bytes, index) => ({
+      key: segmentSliceKey(segmentId, index),
+      bytes: () => bytes,
+      contentType: BINARY,
+    })),
+  )
+  const stored: StoredSegmentManifest = { ...segment.manifest, segmentId, startedAt }
   const manifestKey = segmentManifestKey(segmentId)
   written.push(await store.putJson(manifestKey, stored))
-  const endsAt = sliceReleaseAt(startedAt, slices.length - 1, manifest.sliceSeconds)
-  return { manifestKey, written, endsAt }
+  const { sliceSeconds } = segment.manifest
+  const endsAt = sliceReleaseAt(startedAt, segment.slices.length - 1, sliceSeconds)
+  return { manifestKey, written, skipped, endsAt }
 }

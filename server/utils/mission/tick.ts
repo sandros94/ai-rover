@@ -1,5 +1,4 @@
 import { sql } from 'drizzle-orm'
-import { uuidv7 } from 'unsecure/uuid'
 import type { DB } from '../../database/db'
 import { DbError, postgresErrorOf } from '../../database/errors'
 import type { Mission, Round, Segment, SegmentStatus, Stop } from '../../database/schema'
@@ -29,7 +28,8 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import { primeStop } from '../journey/prime'
-import { publishSegment, publishStop } from '../journey/publish'
+import { contentSegmentId, encodeSegment, publishSegment, publishStop } from '../journey/publish'
+import type { EncodedSegment } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { SegmentRecord } from '#shared/utils/drive'
 import { DEFAULT_SLICE_SECONDS, driveSegment, DriveError } from '#shared/utils/drive'
@@ -72,9 +72,10 @@ export interface TickResult {
   /**
    * Why a step that was due was left to the next tick: `busy` when a tick that does not wait
    * found the mission lock held, `changed` when the mission moved between the preparation and
-   * the lock. The state served is the one committed so far.
+   * the lock, `deferred` when the tick's deadline passed before its second pass. The state
+   * served is the one committed so far.
    */
-  skipped?: 'busy' | 'changed'
+  skipped?: 'busy' | 'changed' | 'deferred'
 }
 
 /**
@@ -90,6 +91,70 @@ const LOCK_TIMEOUT = '8s'
 const STATEMENT_TIMEOUT = '15s'
 /** SQLSTATE `lock_not_available`: a lock wait passed `lock_timeout`. */
 const LOCK_NOT_AVAILABLE = '55P03'
+
+/** What a tick is given beyond the mission: its store, Jev, lock mode and deadline. */
+interface TickOptions {
+  store: JourneyStore
+  jev: JevClient
+  missionId: string
+  now: Date
+  lock?: MissionLock
+  /**
+   * Wall-clock instant, per `clock`, after which the tick starts no second pass. Unbounded when
+   * absent.
+   */
+  deadline?: number
+  /** Wall-clock milliseconds; `Date.now` unless a test passes its own. */
+  clock?: () => number
+}
+
+/** The step names a tick logs, in the order they can happen. */
+type TickStep =
+  | 'settle-prepare'
+  | 'settle-publish'
+  | 'settle-apply'
+  | 'close-plan'
+  | 'close-simulate'
+  | 'close-publish'
+  | 'close-apply'
+  | 'busy'
+  | 'changed'
+  | 'deferred'
+
+/**
+ * Logs a tick's progress, one line per step with the milliseconds since the previous line, so a
+ * run killed at the platform's execution limit shows the last step it finished.
+ */
+class TickRun {
+  private readonly began: number
+  private mark: number
+  constructor(
+    private readonly missionId: string,
+    private readonly clock: () => number,
+    private readonly deadline: number,
+  ) {
+    this.began = this.mark = clock()
+  }
+
+  step(name: TickStep): void {
+    const now = this.clock()
+    console.log(`[mission] tick ${this.missionId} ${name} ${Math.round(now - this.mark)}ms`)
+    this.mark = now
+  }
+
+  end(outcome: 'done' | 'failed'): void {
+    const line = `[mission] tick ${this.missionId} ${outcome} ${Math.round(this.clock() - this.began)}ms`
+    if (outcome === 'done') console.log(line)
+    else console.error(line)
+  }
+
+  /** Whether the deadline has passed; logs `deferred` when it has. */
+  overdue(): boolean {
+    if (this.clock() < this.deadline) return false
+    this.step('deferred')
+    return true
+  }
+}
 
 interface TickContext {
   store: JourneyStore
@@ -116,7 +181,8 @@ interface PreparedSettlement {
 /**
  * Everything closing a due round computes before it takes the lock: the round and the stop it
  * leaves from, the candidates whose drive cannot be computed from there (ranked ahead of the
- * winner), and the winner's drive, published under a fresh segment id; no winner when none drives.
+ * winner), and the winner's drive, published under the id its content names within the round;
+ * no winner when none drives.
  */
 interface PreparedClose {
   roundId: string
@@ -151,51 +217,51 @@ interface PublishedDrive {
  * first is safe: a row never names a blob that is not there, and a blob no row names is never
  * served. Under the lock the tick checks that the mission is still where the preparation found
  * it; otherwise it applies nothing (`skipped: 'changed'`) and the next tick prepares again.
+ *
+ * With a `deadline` passed once the first pass is applied, the tick starts no second pass and
+ * answers `skipped: 'deferred'`: what was committed stays, the rest is still due. A drive already
+ * computed is always published and applied: publishing resumes where a killed run stopped and
+ * the apply is one short transaction, while deferring would compute it again every time. Every step is logged with its duration (see {@link TickRun}).
  */
-export async function tickMission(
-  db: DB,
-  options: {
-    store: JourneyStore
-    jev: JevClient
-    missionId: string
-    now: Date
-    lock?: MissionLock
-  },
-): Promise<TickResult> {
+export async function tickMission(db: DB, options: TickOptions): Promise<TickResult> {
+  const { missionId, clock = Date.now, deadline = Number.POSITIVE_INFINITY } = options
+  const run = new TickRun(missionId, clock, deadline)
   const result: TickResult = { settled: null, closed: null, started: null, opened: null }
-  for (let pass = 0; pass < 2; pass++) {
-    const step = await tickPass(db, options)
-    result.settled ??= step.settled
-    result.closed ??= step.closed
-    result.started ??= step.started
-    result.opened = step.opened ?? result.opened
-    if (step.skipped) result.skipped = step.skipped
-    // Only a settlement can make a close due within the same tick.
-    if (!step.settled || step.skipped) break
+  try {
+    for (let pass = 0; pass < 2; pass++) {
+      // Each pass commits on its own, so stopping between them leaves the mission due.
+      if (pass > 0 && run.overdue()) {
+        result.skipped = 'deferred'
+        break
+      }
+      const step = await tickPass(db, options, run)
+      result.settled ??= step.settled
+      result.closed ??= step.closed
+      result.started ??= step.started
+      result.opened = step.opened ?? result.opened
+      if (step.skipped) result.skipped = step.skipped
+      // Only a settlement can make a close due within the same tick.
+      if (!step.settled || step.skipped) break
+    }
+  } catch (error) {
+    run.end('failed')
+    throw error
   }
+  run.end('done')
   return result
 }
 
 /** One preparation, then one transaction under the mission lock applying it. */
-async function tickPass(
-  db: DB,
-  options: {
-    store: JourneyStore
-    jev: JevClient
-    missionId: string
-    now: Date
-    lock?: MissionLock
-  },
-): Promise<TickResult> {
+async function tickPass(db: DB, options: TickOptions, run: TickRun): Promise<TickResult> {
   const { store, jev, missionId, now, lock = 'wait' } = options
   const idle: TickResult = { settled: null, closed: null, started: null, opened: null }
   const snapshot = await getMission(db, missionId)
   if (snapshot.status !== 'active') return idle
   const moving = await getDrivingSegment(db, missionId)
   const settlement = moving
-    ? await prepareSettlement(db, { store, jev, mission: snapshot, driving: moving, now })
+    ? await prepareSettlement(db, { store, jev, mission: snapshot, driving: moving, now, run })
     : null
-  const closing = moving ? null : await prepareClose(db, { store, mission: snapshot, now })
+  const closing = moving ? null : await prepareClose(db, { store, mission: snapshot, now, run })
 
   let published: number | undefined
   const ticked = await underMissionLock(db, { missionId, lock }, async (tx) => {
@@ -228,7 +294,12 @@ async function tickPass(
     published = context.published
     return result
   })
-  if (ticked === 'busy') return { ...idle, skipped: 'busy' }
+  if (ticked === 'busy') {
+    run.step('busy')
+    return { ...idle, skipped: 'busy' }
+  }
+  run.step(moving ? 'settle-apply' : 'close-apply')
+  if (ticked.skipped === 'changed') run.step('changed')
   if (published !== undefined) void primeStop(missionId, published)
   return ticked
 }
@@ -281,9 +352,16 @@ async function underMissionLock<T>(
  */
 async function prepareSettlement(
   db: DB,
-  options: { store: JourneyStore; jev: JevClient; mission: Mission; driving: Segment; now: Date },
+  options: {
+    store: JourneyStore
+    jev: JevClient
+    mission: Mission
+    driving: Segment
+    now: Date
+    run: TickRun
+  },
 ): Promise<PreparedSettlement | null> {
-  const { store, jev, mission, driving, now } = options
+  const { store, jev, mission, driving, now, run } = options
   const outcome = driving.outcome
   if (!outcome || driving.endsAt.getTime() > now.getTime()) return null
   if (outcome.kind === 'failed') return null
@@ -316,7 +394,9 @@ async function prepareSettlement(
     }
   }
   const stopIndex = await nextStopIndex(db, mission.id)
+  run.step('settle-prepare')
   await publishStop(store, { world, disk, mask, missionId: mission.id, stopIndex })
+  run.step('settle-publish')
   return { segmentId: driving.id, stopIndex, assessments }
 }
 
@@ -414,9 +494,9 @@ async function applyAssessments(
  */
 async function prepareClose(
   db: DB,
-  options: { store: JourneyStore; mission: Mission; now: Date },
+  options: { store: JourneyStore; mission: Mission; now: Date; run: TickRun },
 ): Promise<PreparedClose | null> {
-  const { store, mission, now } = options
+  const { store, mission, now, run } = options
   const { rules } = mission.config
   const open = await getOpenRound(db, mission.id)
   if (!open) return null
@@ -429,6 +509,7 @@ async function prepareClose(
   const disk = stopDisk(world, from)
   const revealed = await loadRevealedMask(store, from)
   const refused = new Set<string>()
+  run.step('close-plan')
   for (const candidate of rankSubmissions(submissions, { rules, drivingAuthorId })) {
     let record: SegmentRecord
     try {
@@ -443,14 +524,18 @@ async function prepareClose(
       refused.add(candidate.id)
       continue
     }
-    const drive = await publishDrive(store, { record, mission, now })
+    const drive = await prepareDrive(record, { mission, roundId: open.id })
+    run.step('close-simulate')
+    const published = await publishDrive(store, { drive, now })
+    run.step('close-publish')
     return {
       roundId: open.id,
       fromStopId: from.id,
       refused,
-      winner: { submissionId: candidate.id, drive },
+      winner: { submissionId: candidate.id, drive: published },
     }
   }
+  run.step('close-simulate')
   return { roundId: open.id, fromStopId: from.id, refused, winner: null }
 }
 
@@ -506,40 +591,60 @@ function isDriveRefusal(error: unknown): boolean {
   return error instanceof DriveError || error instanceof NavError || error instanceof TerrainError
 }
 
+/** A winner's drive encoded under the id its content names, not yet published. */
+interface PreparedDrive {
+  segmentId: string
+  segment: EncodedSegment
+  outcome: SegmentRecord['outcome']
+}
+
 /**
- * Publishes a winner's drive starting at `now` under a fresh segment id, cut where the record
- * shows no progress over the not-moving backstop.
+ * The winner's drive of round `roundId`, cut where the record shows no progress over the
+ * not-moving backstop, encoded and named by its content within the round.
  */
-async function publishDrive(
-  store: JourneyStore,
-  options: { record: SegmentRecord; mission: Mission; now: Date },
-): Promise<PublishedDrive> {
-  const { mission, now } = options
+async function prepareDrive(
+  driven: SegmentRecord,
+  options: { mission: Mission; roundId: string },
+): Promise<PreparedDrive> {
+  const { mission, roundId } = options
   // The backstop is a pure function of the record, so a drive that would stall is cut here, as
   // it would be failed at the release that shows no progress over the backstop.
-  const stall = backstopSlice(options.record, {
+  const stall = backstopSlice(driven, {
     sliceSeconds: DEFAULT_SLICE_SECONDS,
     rules: mission.config.rules,
   })
   const record =
     stall === null
-      ? options.record
-      : truncateRecord(options.record, {
+      ? driven
+      : truncateRecord(driven, {
           sliceIndex: stall,
           sliceSeconds: DEFAULT_SLICE_SECONDS,
           reason: 'no-progress',
         })
-  const segmentId = uuidv7()
+  const segment = encodeSegment(record)
+  // A drive is a seeded, pure function of the world, the stop and the goal, so a close prepared
+  // again after a run cut short encodes the same bytes under the same id, and publishing resumes
+  // where that run stopped instead of starting over.
+  const segmentId = await contentSegmentId(segment, roundId)
+  return { segmentId, segment, outcome: record.outcome }
+}
+
+/** Publishes a prepared drive starting at `now`. */
+async function publishDrive(
+  store: JourneyStore,
+  options: { drive: PreparedDrive; now: Date },
+): Promise<PublishedDrive> {
+  const { drive, now } = options
   const published = await publishSegment(store, {
-    record,
-    segmentId,
+    segment: drive.segment,
+    segmentId: drive.segmentId,
     startedAt: now.getTime(),
   })
   return {
-    segmentId,
+    segmentId: drive.segmentId,
     endsAt: new Date(published.endsAt),
     manifestKey: published.manifestKey,
-    outcome: record.outcome,
+    outcome: drive.outcome,
   }
 }
 

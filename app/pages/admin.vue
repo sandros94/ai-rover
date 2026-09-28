@@ -96,7 +96,9 @@ const sections = computed(() => {
           ? ['Tick skipped: another tick holds the mission lock']
           : mission.skipped === 'changed'
             ? ['Tick skipped: the mission moved while it was prepared']
-            : []),
+            : mission.skipped === 'deferred'
+              ? ['Tick deferred: its time budget ran out; the next read resumes it']
+              : []),
         ...(mission.error
           ? [
               `Error: ${mission.error.name}${mission.error.code ? ` (${mission.error.code})` : ''}: ${mission.error.message}`,

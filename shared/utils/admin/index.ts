@@ -70,9 +70,10 @@ export interface MissionDiagnosis {
   active: boolean
   /**
    * Why the read's tick left something due undone: `busy` while another tick held the mission
-   * lock, `changed` when the mission moved while the tick prepared.
+   * lock, `changed` when the mission moved while the tick prepared, `deferred` when the tick's
+   * time budget ran out before its second pass.
    */
-  skipped?: 'busy' | 'changed'
+  skipped?: 'busy' | 'changed' | 'deferred'
   /** Error class, Postgres code and message of the failing step, plus the first stack line. */
   error?: { name: string; code?: string; message: string; at?: string }
 }

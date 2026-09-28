@@ -53,6 +53,56 @@ export interface JourneyStore {
   delete(key: string): Promise<void>
 }
 
+/** One blob for {@link putAll}; `bytes` is called only when `key` is not stored yet. */
+export interface PutEntry {
+  key: string
+  bytes: () => Uint8Array
+  contentType: string
+}
+
+/** Blob requests {@link putAll} keeps in flight at most. */
+export const PUT_CONCURRENCY = 16
+
+/**
+ * Writes every entry whose key is not stored yet, with at most `concurrency` of them in flight,
+ * and resolves once all are written: `written` and `skipped` in entry order. Only for keys whose
+ * content never changes: a stored key is taken as written, so a run cut short and run again
+ * writes only what is missing. On the first failure no further entry starts, and it rejects.
+ */
+export async function putAll(
+  store: JourneyStore,
+  entries: readonly PutEntry[],
+  options: { concurrency?: number } = {},
+): Promise<{ written: PutResult[]; skipped: string[] }> {
+  const concurrency = options.concurrency ?? PUT_CONCURRENCY
+  const outcomes: (PutResult | string)[] = Array.from({ length: entries.length })
+  let next = 0
+  let failed = false
+  async function work(): Promise<void> {
+    while (!failed && next < entries.length) {
+      const n = next++
+      const { key, bytes, contentType } = entries[n]!
+      try {
+        outcomes[n] = (await store.has(key))
+          ? key
+          : await store.putImmutable(key, bytes(), { contentType })
+      } catch (error) {
+        failed = true
+        throw error
+      }
+    }
+  }
+  const workers = Math.min(concurrency, entries.length)
+  await Promise.all(Array.from({ length: workers }, work))
+  const written: PutResult[] = []
+  const skipped: string[] = []
+  for (const outcome of outcomes) {
+    if (typeof outcome === 'string') skipped.push(outcome)
+    else written.push(outcome!)
+  }
+  return { written, skipped }
+}
+
 /**
  * Journey blobs, written deflated and immutable. Defaults to the strongly consistent Netlify
  * Blobs store named {@link JOURNEY_STORE_NAME}, so a reader sees a blob as soon as it is written.

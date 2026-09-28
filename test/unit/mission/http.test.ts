@@ -10,6 +10,7 @@ import {
   missionCacheHeaders,
   purgeMissionCache,
   syncMission,
+  TICK_BUDGET_MS,
 } from '#server/utils/mission/http'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
@@ -137,6 +138,29 @@ describe('syncMission', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it(`gives a read's tick until ${TICK_BUDGET_MS} ms after the request started`, async () => {
+    const m = await landed()
+    vi.mocked(tickMission).mockResolvedValueOnce({
+      settled: null,
+      closed: null,
+      started: null,
+      opened: null,
+    })
+    const due = { id: m.mission.id, nextDueAt: at(T0, MINUTE) }
+    await syncMission(db, {
+      mission: due,
+      access: 'read',
+      store: m.store,
+      jev: m.jev.client,
+      now: at(T0, 2 * MINUTE),
+      began: 1_000,
+    })
+    expect(tickMission).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ lock: 'try', deadline: 1_000 + TICK_BUDGET_MS }),
+    )
   })
 
   it('always ticks a write', async () => {

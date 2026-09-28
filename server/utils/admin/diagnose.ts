@@ -15,7 +15,7 @@ import type {
 } from '#shared/utils/admin'
 import { getActiveMission } from '../../repositories/missions'
 import { useJevClient } from '../jev'
-import { isMissionDue } from '../mission/http'
+import { isMissionDue, TICK_BUDGET_MS } from '../mission/http'
 import { publicMissionState } from '../mission/state'
 import { tickMission } from '../mission/tick'
 import type { AdminContext, AdminSettings } from './access'
@@ -123,6 +123,7 @@ export async function diagnoseMission(
   connect: () => DB,
   open: () => JourneyStore,
 ): Promise<MissionDiagnosis> {
+  const began = Date.now()
   let active = false
   let skipped: MissionDiagnosis['skipped']
   const result = await run(async () => {
@@ -139,6 +140,7 @@ export async function diagnoseMission(
         jev: useJevClient(),
         now,
         lock: 'try',
+        deadline: began + TICK_BUDGET_MS,
       })
       skipped = tick.skipped
     }
