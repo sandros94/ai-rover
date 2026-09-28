@@ -63,6 +63,36 @@ export interface JevCache {
  */
 export const JEV_SERVER_LIMITS = { timeoutMs: 20_000, maxRetries: 1 } as const
 
+/**
+ * Where the judgments come from, in order of preference: the project's own TypeSafe key
+ * (`typesafeToken`, from `NUXT_TYPESAFE_TOKEN`) against the public API, else the hosting
+ * platform's AI gateway when it injects `TYPESAFE_API_KEY` and `TYPESAFE_BASE_URL` into the
+ * runtime (billed to the hosting account, no TypeSafe account needed), else nothing, which the
+ * client reports as `NOT_CONFIGURED`.
+ */
+export function jevCredentialsOf(typesafeToken: string | undefined): {
+  apiKey: string | undefined
+  baseURL: string
+} {
+  const own = typesafeToken?.trim()
+  if (own) return { apiKey: own, baseURL: TYPESAFE_API_URL }
+  const gatewayKey = process.env.TYPESAFE_API_KEY?.trim()
+  const gatewayURL = process.env.TYPESAFE_BASE_URL?.trim()
+  if (gatewayKey && gatewayURL) return { apiKey: gatewayKey, baseURL: gatewayURL }
+  return { apiKey: undefined, baseURL: TYPESAFE_API_URL }
+}
+
+/**
+ * A client created by `create` on its first judgment, so a caller works without a key until a
+ * judgment needs one; a failed creation is tried again on the next judgment.
+ */
+export function lazyJevClient(create: () => JevClient): JevClient {
+  let client: JevClient | undefined
+  return {
+    judgeSubmission: (summary, options) => (client ??= create()).judgeSubmission(summary, options),
+  }
+}
+
 export interface JevClientOptions {
   /** Where the API lives; the public endpoint unless a test points elsewhere. */
   baseURL?: string

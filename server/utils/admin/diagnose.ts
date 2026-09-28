@@ -15,7 +15,7 @@ import type {
 } from '#shared/utils/admin'
 import { getActiveMission } from '../../repositories/missions'
 import { useJevClient } from '../jev'
-import { isMissionDue, TICK_BUDGET_MS } from '../mission/http'
+import { isMissionDue } from '../mission/background'
 import { publicMissionState } from '../mission/state'
 import { tickMission } from '../mission/tick'
 import type { AdminContext, AdminSettings } from './access'
@@ -23,9 +23,11 @@ import { noStore, PLATFORM, readAdminBody } from './access'
 
 /**
  * Each probe gives up after this long, so a hung dependency still leaves an answer. The probes
- * run side by side, so the answer comes within it, under the function's own time limit.
+ * run side by side, so the answer comes within the longest, under the function's 60 s limit.
  */
-const PROBE_TIMEOUT_MS = 12_000
+const PROBE_TIMEOUT_MS = 20_000
+/** The mission probe runs a whole tick, which a public read leaves to the background function. */
+const MISSION_PROBE_TIMEOUT_MS = 50_000
 /** A transaction open longer than this while waiting, idle or holding an advisory lock is stuck. */
 const STUCK_AFTER_S = 5
 /** Blob prefixes the app writes under. */
@@ -43,6 +45,7 @@ class ProbeTimeout extends Error {
  */
 async function run(
   probe: () => Promise<void>,
+  timeoutMs = PROBE_TIMEOUT_MS,
 ): Promise<{ ok: boolean; ms: number; error?: string; detail?: MissionDiagnosis['error'] }> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const started = performance.now()
@@ -51,7 +54,7 @@ async function run(
     await Promise.race([
       probe(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new ProbeTimeout()), PROBE_TIMEOUT_MS)
+        timer = setTimeout(() => reject(new ProbeTimeout()), timeoutMs)
       }),
     ])
     return { ok: true, ms: ms() }
@@ -123,7 +126,6 @@ export async function diagnoseMission(
   connect: () => DB,
   open: () => JourneyStore,
 ): Promise<MissionDiagnosis> {
-  const began = Date.now()
   let active = false
   let skipped: MissionDiagnosis['skipped']
   const result = await run(async () => {
@@ -140,12 +142,11 @@ export async function diagnoseMission(
         jev: useJevClient(),
         now,
         lock: 'try',
-        deadline: began + TICK_BUDGET_MS,
       })
       skipped = tick.skipped
     }
     await publicMissionState(db, { missionId: mission.id, now })
-  })
+  }, MISSION_PROBE_TIMEOUT_MS)
   const { ok, ms } = result
   if (ok) return { ok, ms, active, ...(skipped && { skipped }) }
   return {

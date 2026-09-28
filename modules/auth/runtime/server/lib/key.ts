@@ -28,12 +28,25 @@ export function sessionKey(raw: string, dev: boolean): SessionKey {
     const jwk = parseKey(value)
     return () => Promise.resolve(jwk)
   }
+  return derivedKey(sessionSecret(value, dev))
+}
+
+/**
+ * `NUXT_SESSION_KEY` as the secret keys are derived from, validated as {@link sessionKey} does: a
+ * JWK's JSON is taken as text, and under `nuxt dev` an empty value is the public development seed.
+ */
+export function sessionSecret(raw: string, dev: boolean): string {
+  const value = raw.trim()
+  if (value.startsWith('{')) {
+    parseKey(value)
+    return value
+  }
   if (value === DEV_SEED) {
     throw new Error(
       'NUXT_SESSION_KEY is the public development seed; generate a secret of your own.',
     )
   }
-  if (value.length >= MIN_SECRET_LENGTH) return derivedKey(value)
+  if (value.length >= MIN_SECRET_LENGTH) return value
   if (value || !dev) {
     throw new Error(
       `NUXT_SESSION_KEY is ${value ? 'too short' : 'empty'}; it must be ${FORMS}. Generate a JWK with: node -e "import('unjwt/jwk').then(async ({ generateJWK }) => console.log(JSON.stringify(await generateJWK('A256GCM'))))"`,
@@ -45,16 +58,23 @@ export function sessionKey(raw: string, dev: boolean): SessionKey {
       '[auth] NUXT_SESSION_KEY is empty; using the public development key. Sessions signed with it are forgeable.',
     )
   }
-  return derivedKey(DEV_SEED)
+  return DEV_SEED
+}
+
+/** 256 bits derived from `secret` with HKDF under `info`, base64url: one per use of a secret. */
+export function deriveSecret(secret: string, info: string): Promise<string> {
+  return hkdf(secret, { length: 32, info, returnAs: 'base64url' })
 }
 
 /** The key derived from `secret`, computed on first call and kept. */
 function derivedKey(secret: string): SessionKey {
   let derived: Promise<JWK_oct<'A256GCM'>> | undefined
   return () =>
-    (derived ??= hkdf(secret, { length: 32, info: 'rover-session', returnAs: 'base64url' }).then(
-      (k): JWK_oct<'A256GCM'> => ({ kty: 'oct', k, alg: 'A256GCM' }),
-    ))
+    (derived ??= deriveSecret(secret, 'rover-session').then((k): JWK_oct<'A256GCM'> => ({
+      kty: 'oct',
+      k,
+      alg: 'A256GCM',
+    })))
 }
 
 function parseKey(raw: string): JWK_oct<'A256GCM'> {

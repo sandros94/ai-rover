@@ -1,6 +1,6 @@
-import { purgeCache } from '@netlify/functions'
 import type { H3Event } from 'nitro/h3'
 import { defineHandler, HTTPError } from 'nitro/h3'
+import { useRuntimeConfig } from 'nitro/runtime-config'
 import type { UserSessions } from '../../../modules/auth/runtime/server/lib/session'
 import { useAuthContext } from '../../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../../database/db'
@@ -11,12 +11,15 @@ import { findUser } from '../../repositories/users'
 import { useDB } from '../db'
 import { useJevClient } from '../jev'
 import type { JevClient } from '../jev/client'
+import { lazyJevClient } from '../jev/client'
 import { JudgeError } from '../jev/errors'
 import type { JourneyStore } from '../journey/store'
 import { createJourneyStore } from '../journey/store'
 import { MissionError } from '#shared/utils/mission'
 import { NavError } from '#shared/utils/nav'
 import { TerrainError } from '#shared/utils/terrain'
+import type { TickDispatcher } from './background'
+import { createTickDispatcher, isMissionDue, purgeMissionCache, tickToken } from './background'
 import { LifecycleError } from './errors'
 import type { TickResult } from './tick'
 import { tickMission } from './tick'
@@ -40,13 +43,6 @@ const STATUS: Record<string, Record<string, number>> = {
 
 /** Seconds a client is told to wait before retrying an answer of {@link DbError} `BUSY`. */
 const BUSY_RETRY_AFTER_S = 5
-
-/**
- * Milliseconds from a request's start after which its background tick starts no second pass
- * (see `tickMission`): the platform kills a function about 10 s in, and a tick stopped between
- * its passes resumes on the next read, where one killed mid-pass loses that pass's apply.
- */
-export const TICK_BUDGET_MS = 8000
 
 /** What a signed-in visitor whose account was deleted is told. */
 export const USER_GONE_MESSAGE = 'Your account no longer exists; sign in again.'
@@ -91,15 +87,13 @@ export function httpErrorOf(thrown: unknown): HTTPError {
  * The server's Jev client, created only when a tick has something to judge, so routes keep
  * working without a TypeSafe key until a settlement needs one.
  */
-const LAZY_JEV: JevClient = {
-  judgeSubmission: (summary, options) => useJevClient().judgeSubmission(summary, options),
-}
+const LAZY_JEV: JevClient = lazyJevClient(useJevClient)
 
 /**
  * What a mission route does to the mission. `read`: answers the state committed so far at once
- * and, only when something is due, brings the mission up to date in the background, so no read
- * waits for a tick. `write`: always brings it up to date first, waiting for the lock, and purges
- * the cached public state afterwards.
+ * and, only when something is due, has the background function bring the mission up to date, so
+ * no read waits for a tick. `write`: always brings it up to date first, waiting for the lock, and
+ * purges the cached public state afterwards.
  */
 export type MissionAccess = 'read' | 'write'
 
@@ -127,31 +121,10 @@ export function missionCacheHeaders(
 }
 
 /**
- * Drops the CDN's copies of the mission's public state. Only Netlify has that cache; a failed
- * purge is logged and leaves the copies to expire within their short lifetime.
- */
-export async function purgeMissionCache(missionId: string): Promise<void> {
-  if (!process.env.NETLIFY) return
-  try {
-    await purgeCache({ tags: [`mission-${missionId}`] })
-  } catch (error) {
-    console.error(`[mission] purging the cache of mission ${missionId} failed:`, error)
-  }
-}
-
-/** Whether a tick has something to do at `now`, from the recorded next due instant alone. */
-export function isMissionDue(mission: Pick<Mission, 'nextDueAt'>, now: Date): boolean {
-  return mission.nextDueAt !== null && mission.nextDueAt.getTime() <= now.getTime()
-}
-
-/**
  * Brings the mission up to `now` as a route of `access` needs. A write ticks, waiting for the
  * mission lock, and answers what the tick did. A read answers null at once: when the mission is
- * due it starts a tick that does not wait for the lock, not awaited, which the platform keeps
- * alive until it settles; its failure is logged and a change it makes purges the cached state.
- * Concurrent reads so never stack on the lock: the first takes it, the others skip. The read's
- * tick stops {@link TICK_BUDGET_MS} after `began` (epoch milliseconds, the request's start; now
- * when absent), leaving what it did not reach due.
+ * due it asks `dispatch` for a tick in the background function, never waiting for it; that tick
+ * does not wait for the lock, so concurrent ones never stack on it.
  */
 export async function syncMission<A extends MissionAccess>(
   db: DB,
@@ -161,7 +134,7 @@ export async function syncMission<A extends MissionAccess>(
     store: JourneyStore
     jev: JevClient
     now: Date
-    began?: number
+    dispatch: (missionId: string) => void
   },
 ): Promise<A extends 'write' ? TickResult : null>
 export async function syncMission(
@@ -172,33 +145,13 @@ export async function syncMission(
     store: JourneyStore
     jev: JevClient
     now: Date
-    began?: number
+    dispatch: (missionId: string) => void
   },
 ): Promise<TickResult | null> {
-  const { mission, access, store, jev, now, began = Date.now() } = options
+  const { mission, access, store, jev, now, dispatch } = options
   if (access === 'write') return tickMission(db, { missionId: mission.id, store, jev, now })
-  if (!isMissionDue(mission, now)) return null
-  const ticking = tickMission(db, {
-    missionId: mission.id,
-    store,
-    jev,
-    now,
-    lock: 'try',
-    deadline: began + TICK_BUDGET_MS,
-  })
-    .then(async (tick) => {
-      if (changed(tick)) await purgeMissionCache(mission.id)
-    })
-    .catch((error: unknown) => {
-      console.error(`[mission] background tick of mission ${mission.id} failed:`, error)
-    })
-  globalThis.Netlify?.context?.waitUntil(ticking)
+  if (isMissionDue(mission, now)) dispatch(mission.id)
   return null
-}
-
-function changed(tick: TickResult): boolean {
-  const { settled, closed, started, opened } = tick
-  return [settled, closed, started, opened].some((step) => step !== null)
 }
 
 /** What mission routes reach beyond the request; tests pass their own. */
@@ -206,12 +159,18 @@ export interface MissionRouteContext {
   db: () => DB
   sessions: () => Pick<UserSessions, 'require' | 'clear'>
   store: () => JourneyStore
+  dispatch: TickDispatcher
 }
+
+let token: Promise<string> | undefined
 
 const PLATFORM: MissionRouteContext = {
   db: useDB,
   sessions: () => useAuthContext().sessions,
   store: () => createJourneyStore(),
+  dispatch: createTickDispatcher({
+    token: () => (token ??= tickToken(useRuntimeConfig().sessionKey, Boolean(import.meta.dev))),
+  }),
 }
 
 /**
@@ -231,8 +190,8 @@ export async function requireSessionUser(
 
 /**
  * A mission route: errors mapped by {@link httpErrorOf}, and the mission brought up to date per
- * `access` (see {@link syncMission}): before a write's handler runs, in the background of a read,
- * which answers the state committed so far. A write purges the cached public state once done. Only a successful answer of a `public` route is cacheable. With `user`, the
+ * `access` (see {@link syncMission}): before a write's handler runs, in the background function
+ * for a read, which answers the state committed so far. A write purges the cached public state once done. Only a successful answer of a `public` route is cacheable. With `user`, the
  * signed-in account is resolved before anything else and handed over; an answer of `USER_GONE`,
  * from there or from a write, also clears the session so the browser signs in afresh.
  */
@@ -265,7 +224,6 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
   handler: MissionRouteHandler<T, A, U>,
 ) {
   return defineHandler(async (event) => {
-    const began = Date.now()
     const noStore = missionCacheHeaders('', 'none')
     for (const [name, value] of Object.entries(noStore)) event.res.headers.set(name, value)
     let purge: string | undefined
@@ -284,7 +242,8 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
         store,
         jev: LAZY_JEV,
         now,
-        began,
+        // The request's own origin, never the site's main address: a preview ticks its own data.
+        dispatch: (missionId) => platform.dispatch(missionId, event.url.origin),
       })
       if (options.access === 'write') purge = mission.id
       const result = await handler(event, {

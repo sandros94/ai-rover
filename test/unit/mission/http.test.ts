@@ -1,16 +1,17 @@
+import { H3 } from 'nitro/h3'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
-import { getMission } from '#server/repositories/missions'
-import { getOpenRound, getRound } from '#server/repositories/rounds'
+import { mission as missionTable } from '#server/database/schema'
+import { getActiveMission, getMission } from '#server/repositories/missions'
+import { getOpenRound } from '#server/repositories/rounds'
 import { JUDGE_UNAVAILABLE, JudgeError } from '#server/utils/jev/errors'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import {
+  defineMissionHandlerWith,
   httpErrorOf,
   missionCacheHeaders,
-  purgeMissionCache,
   syncMission,
-  TICK_BUDGET_MS,
 } from '#server/utils/mission/http'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
@@ -20,11 +21,6 @@ vi.mock('#server/utils/mission/tick', async (original) => {
   const actual = await original<typeof import('#server/utils/mission/tick')>()
   return { ...actual, tickMission: vi.fn<typeof actual.tickMission>(actual.tickMission) }
 })
-const purge = vi.hoisted(() =>
-  vi.fn<(options: { tags: string[] }) => Promise<void>>(async () => {}),
-)
-vi.mock('@netlify/functions', () => ({ purgeCache: purge }))
-
 vi.setConfig({ testTimeout: 60_000 })
 
 let db: DB
@@ -33,8 +29,6 @@ beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())
 afterEach(() => {
   vi.mocked(tickMission).mockClear()
-  purge.mockClear()
-  vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
 
@@ -47,6 +41,7 @@ async function landed() {
     now: T0,
   })
   const jev = fakeJev()
+  const dispatch = vi.fn<(missionId: string) => void>()
   const sync = async (access: 'read' | 'write', now: Date) =>
     syncMission(db, {
       mission: await getMission(db, created.mission.id),
@@ -54,8 +49,9 @@ async function landed() {
       store,
       jev: jev.client,
       now,
+      dispatch,
     })
-  return { ...created, store, jev, sync }
+  return { ...created, store, jev, dispatch, sync }
 }
 
 describe('syncMission', () => {
@@ -64,6 +60,7 @@ describe('syncMission', () => {
     expect((await getMission(db, m.mission.id)).nextDueAt).toBeNull()
     expect(await m.sync('read', at(T0, MINUTE))).toBeNull()
     expect(tickMission).not.toHaveBeenCalled()
+    expect(m.dispatch).not.toHaveBeenCalled()
 
     const [ada] = await users(db, 'Ada')
     await submitGoal(db, {
@@ -77,9 +74,10 @@ describe('syncMission', () => {
     // Due five minutes after the first submission; a read just before still does not tick.
     expect(await m.sync('read', at(T0, 6 * MINUTE - 1))).toBeNull()
     expect(tickMission).not.toHaveBeenCalled()
+    expect(m.dispatch).not.toHaveBeenCalled()
   })
 
-  it('answers a due read at once and ticks it in the background, without waiting for the lock', async () => {
+  it('answers a due read at once and dispatches its tick to the background function', async () => {
     const m = await landed()
     const [ada] = await users(db, 'Ada')
     await submitGoal(db, {
@@ -90,84 +88,44 @@ describe('syncMission', () => {
       goal: { x: 0, y: 80 },
       now: at(T0, MINUTE),
     })
-    const { tickMission: actual } = await vi.importActual<
-      typeof import('#server/utils/mission/tick')
-    >('#server/utils/mission/tick')
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => (release = resolve))
-    vi.mocked(tickMission).mockImplementationOnce(async (...args) => {
-      await gate
-      return actual(...args)
-    })
-    const kept: Promise<unknown>[] = []
-    vi.stubGlobal('Netlify', { context: { waitUntil: (p: Promise<unknown>) => kept.push(p) } })
-    vi.stubEnv('NETLIFY', 'true')
-    try {
-      // The tick cannot finish until released, yet the read has answered.
-      expect(await m.sync('read', at(T0, 6 * MINUTE))).toBeNull()
-      expect(tickMission).toHaveBeenCalledWith(db, expect.objectContaining({ lock: 'try' }))
-      expect(kept).toHaveLength(1)
-      expect(await getOpenRound(db, m.mission.id)).toMatchObject({ id: m.round.id })
-      release()
-      await kept[0]
-      expect((await getRound(db, m.round.id)).status).toBe('closed')
-      expect(purge).toHaveBeenCalledWith({ tags: [`mission-${m.mission.id}`] })
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    expect(await m.sync('read', at(T0, 6 * MINUTE))).toBeNull()
+    expect(m.dispatch).toHaveBeenCalledExactlyOnceWith(m.mission.id)
+    expect(tickMission).not.toHaveBeenCalled()
+    expect(await getOpenRound(db, m.mission.id)).toMatchObject({ id: m.round.id })
   })
 
-  it('logs a background tick that fails, and the read still answers', async () => {
-    const m = await landed()
-    vi.mocked(tickMission).mockRejectedValueOnce(new Error('the tick broke'))
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const kept: Promise<unknown>[] = []
-    vi.stubGlobal('Netlify', { context: { waitUntil: (p: Promise<unknown>) => kept.push(p) } })
-    try {
-      const due = { id: m.mission.id, nextDueAt: at(T0, MINUTE) }
-      const read = await syncMission(db, {
-        mission: due,
-        access: 'read',
-        store: m.store,
-        jev: m.jev.client,
-        now: at(T0, 2 * MINUTE),
-      })
-      expect(read).toBeNull()
-      await kept[0]
-      expect(logged).toHaveBeenCalledWith(expect.stringContaining(m.mission.id), expect.any(Error))
-    } finally {
-      vi.unstubAllGlobals()
-    }
-  })
-
-  it(`gives a read's tick until ${TICK_BUDGET_MS} ms after the request started`, async () => {
-    const m = await landed()
-    vi.mocked(tickMission).mockResolvedValueOnce({
-      settled: null,
-      closed: null,
-      started: null,
-      opened: null,
-    })
-    const due = { id: m.mission.id, nextDueAt: at(T0, MINUTE) }
-    await syncMission(db, {
-      mission: due,
-      access: 'read',
-      store: m.store,
-      jev: m.jev.client,
-      now: at(T0, 2 * MINUTE),
-      began: 1_000,
-    })
-    expect(tickMission).toHaveBeenCalledWith(
-      db,
-      expect.objectContaining({ lock: 'try', deadline: 1_000 + TICK_BUDGET_MS }),
-    )
-  })
-
-  it('always ticks a write', async () => {
+  it('always ticks a write, and never dispatches', async () => {
     const m = await landed()
     const tick = await m.sync('write', at(T0, MINUTE))
     expect(tickMission).toHaveBeenCalledTimes(1)
     expect(tick).toEqual({ settled: null, closed: null, started: null, opened: null })
+    expect(m.dispatch).not.toHaveBeenCalled()
+  })
+
+  it("dispatches a due read's tick to the request's own origin", async () => {
+    const m = await landed()
+    // The route acts at the wall clock, so the mission is made due long before it.
+    await db.update(missionTable).set({ nextDueAt: new Date(0) })
+    const active = await getActiveMission(db)
+    const dispatch = vi.fn<(missionId: string, origin: string) => void>()
+    const platform = {
+      db: () => db,
+      sessions: () => {
+        throw new Error('A route without `user` reads no session.')
+      },
+      store: () => m.store,
+      dispatch,
+    }
+    const app = new H3().get(
+      '/api/read',
+      defineMissionHandlerWith(platform, { access: 'read', cache: 'public' }, async () => 'ok'),
+    )
+    const answer = await app.request('https://deploy-preview-7--rover.netlify.app/api/read')
+    expect(answer.status).toBe(200)
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith(
+      active!.id,
+      'https://deploy-preview-7--rover.netlify.app',
+    )
   })
 })
 
@@ -193,28 +151,6 @@ describe('missionCacheHeaders', () => {
       'cache-control': 'no-store',
       'netlify-cdn-cache-control': 'no-store',
     })
-  })
-})
-
-describe('purgeMissionCache', () => {
-  it('purges the mission tag on Netlify', async () => {
-    vi.stubEnv('NETLIFY', 'true')
-    await purgeMissionCache('m1')
-    expect(purge).toHaveBeenCalledWith({ tags: ['mission-m1'] })
-  })
-
-  it('does nothing off Netlify', async () => {
-    vi.stubEnv('NETLIFY', '')
-    await purgeMissionCache('m1')
-    expect(purge).not.toHaveBeenCalled()
-  })
-
-  it('logs a failed purge instead of failing the request', async () => {
-    vi.stubEnv('NETLIFY', 'true')
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    purge.mockRejectedValueOnce(new Error('no purge token'))
-    await expect(purgeMissionCache('m1')).resolves.toBeUndefined()
-    expect(logged).toHaveBeenCalled()
   })
 })
 

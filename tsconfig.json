@@ -5,5 +5,11 @@
     { "path": "./.nuxt/tsconfig.shared.json" },
     { "path": "./.nuxt/tsconfig.node.json" }
   ],
+  "compilerOptions": {
+    "paths": {
+      "#shared": ["./shared"],
+      "#shared/*": ["./shared/*"]
+    }
+  },
   "files": []
 }

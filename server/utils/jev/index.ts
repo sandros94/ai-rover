@@ -2,26 +2,15 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { jevCacheOver } from '../../repositories/judgments'
 import { useDB } from '../db'
 import type { JevClient } from './client'
-import { createJevClient, JEV_SERVER_LIMITS, TYPESAFE_API_URL } from './client'
+import { createJevClient, JEV_SERVER_LIMITS, jevCredentialsOf } from './client'
 
 // Nitro auto-imports every file under `server/utils`, so this folder has no barrel re-exports.
 
 let shared: JevClient | undefined
 
-/**
- * Where the judgments come from, in order of preference: the project's own TypeSafe key
- * (`NUXT_TYPESAFE_TOKEN`) against the public API, else the hosting platform's AI gateway when it
- * injects `TYPESAFE_API_KEY` and `TYPESAFE_BASE_URL` into the runtime (billed to the hosting
- * account, no TypeSafe account needed), else nothing, which the client reports as
- * `NOT_CONFIGURED`.
- */
+/** {@link jevCredentialsOf} with the project's key from the runtime config. */
 export function jevCredentials(): { apiKey: string | undefined; baseURL: string } {
-  const own = useRuntimeConfig().typesafeToken?.trim()
-  if (own) return { apiKey: own, baseURL: TYPESAFE_API_URL }
-  const gatewayKey = process.env.TYPESAFE_API_KEY?.trim()
-  const gatewayURL = process.env.TYPESAFE_BASE_URL?.trim()
-  if (gatewayKey && gatewayURL) return { apiKey: gatewayKey, baseURL: gatewayURL }
-  return { apiKey: undefined, baseURL: TYPESAFE_API_URL }
+  return jevCredentialsOf(useRuntimeConfig().typesafeToken)
 }
 
 /**

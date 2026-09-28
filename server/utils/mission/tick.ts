@@ -72,10 +72,9 @@ export interface TickResult {
   /**
    * Why a step that was due was left to the next tick: `busy` when a tick that does not wait
    * found the mission lock held, `changed` when the mission moved between the preparation and
-   * the lock, `deferred` when the tick's deadline passed before its second pass. The state
-   * served is the one committed so far.
+   * the lock. The state served is the one committed so far.
    */
-  skipped?: 'busy' | 'changed' | 'deferred'
+  skipped?: 'busy' | 'changed'
 }
 
 /**
@@ -92,20 +91,13 @@ const STATEMENT_TIMEOUT = '15s'
 /** SQLSTATE `lock_not_available`: a lock wait passed `lock_timeout`. */
 const LOCK_NOT_AVAILABLE = '55P03'
 
-/** What a tick is given beyond the mission: its store, Jev, lock mode and deadline. */
+/** What a tick is given beyond the mission: its store, Jev and lock mode. */
 interface TickOptions {
   store: JourneyStore
   jev: JevClient
   missionId: string
   now: Date
   lock?: MissionLock
-  /**
-   * Wall-clock instant, per `clock`, after which the tick starts no second pass. Unbounded when
-   * absent.
-   */
-  deadline?: number
-  /** Wall-clock milliseconds; `Date.now` unless a test passes its own. */
-  clock?: () => number
 }
 
 /** The step names a tick logs, in the order they can happen. */
@@ -119,7 +111,6 @@ type TickStep =
   | 'close-apply'
   | 'busy'
   | 'changed'
-  | 'deferred'
 
 /**
  * Logs a tick's progress, one line per step with the milliseconds since the previous line, so a
@@ -128,31 +119,20 @@ type TickStep =
 class TickRun {
   private readonly began: number
   private mark: number
-  constructor(
-    private readonly missionId: string,
-    private readonly clock: () => number,
-    private readonly deadline: number,
-  ) {
-    this.began = this.mark = clock()
+  constructor(private readonly missionId: string) {
+    this.began = this.mark = Date.now()
   }
 
   step(name: TickStep): void {
-    const now = this.clock()
+    const now = Date.now()
     console.log(`[mission] tick ${this.missionId} ${name} ${Math.round(now - this.mark)}ms`)
     this.mark = now
   }
 
   end(outcome: 'done' | 'failed'): void {
-    const line = `[mission] tick ${this.missionId} ${outcome} ${Math.round(this.clock() - this.began)}ms`
+    const line = `[mission] tick ${this.missionId} ${outcome} ${Math.round(Date.now() - this.began)}ms`
     if (outcome === 'done') console.log(line)
     else console.error(line)
-  }
-
-  /** Whether the deadline has passed; logs `deferred` when it has. */
-  overdue(): boolean {
-    if (this.clock() < this.deadline) return false
-    this.step('deferred')
-    return true
   }
 }
 
@@ -217,23 +197,13 @@ interface PublishedDrive {
  * first is safe: a row never names a blob that is not there, and a blob no row names is never
  * served. Under the lock the tick checks that the mission is still where the preparation found
  * it; otherwise it applies nothing (`skipped: 'changed'`) and the next tick prepares again.
- *
- * With a `deadline` passed once the first pass is applied, the tick starts no second pass and
- * answers `skipped: 'deferred'`: what was committed stays, the rest is still due. A drive already
- * computed is always published and applied: publishing resumes where a killed run stopped and
- * the apply is one short transaction, while deferring would compute it again every time. Every step is logged with its duration (see {@link TickRun}).
+ * Every step is logged with its duration (see {@link TickRun}).
  */
 export async function tickMission(db: DB, options: TickOptions): Promise<TickResult> {
-  const { missionId, clock = Date.now, deadline = Number.POSITIVE_INFINITY } = options
-  const run = new TickRun(missionId, clock, deadline)
+  const run = new TickRun(options.missionId)
   const result: TickResult = { settled: null, closed: null, started: null, opened: null }
   try {
     for (let pass = 0; pass < 2; pass++) {
-      // Each pass commits on its own, so stopping between them leaves the mission due.
-      if (pass > 0 && run.overdue()) {
-        result.skipped = 'deferred'
-        break
-      }
       const step = await tickPass(db, options, run)
       result.settled ??= step.settled
       result.closed ??= step.closed

@@ -29,6 +29,25 @@ jobs:
       - name: Typecheck code
         run: pnpm typecheck
 
+      # The platform bundles `netlify/functions` itself, outside Nitro; importing the zipped result
+      # proves every import and alias of the background function resolved.
+      - name: Build the Netlify functions and import the background one
+        run: |
+          pnpm --package=netlify-cli@27 dlx netlify build --offline
+          node --input-type=module -e "
+          import { execFileSync } from 'node:child_process'
+          import { mkdtempSync } from 'node:fs'
+          import { tmpdir } from 'node:os'
+          import { join } from 'node:path'
+          import { pathToFileURL } from 'node:url'
+          const dir = mkdtempSync(join(tmpdir(), 'mission-tick-'))
+          execFileSync('unzip', ['-q', '.netlify/functions/mission-tick-background.zip', '-d', dir])
+          const entry = join(dir, 'netlify/functions/mission-tick-background.mjs')
+          const fn = await import(pathToFileURL(entry).href)
+          if (typeof fn.default !== 'function') throw new Error('mission-tick-background exports no handler')
+          console.log('mission-tick-background imports from its zip')
+          "
+
   test:
     needs: check
     runs-on: ubuntu-latest

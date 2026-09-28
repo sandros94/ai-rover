@@ -17,7 +17,12 @@ let db: DB
 let close: () => Promise<void>
 const { store } = memoryStore()
 const sessions = createUserSessions({ key: KEY, dev: false })
-const platform: MissionRouteContext = { db: () => db, sessions: () => sessions, store: () => store }
+const platform: MissionRouteContext = {
+  db: () => db,
+  sessions: () => sessions,
+  store: () => store,
+  dispatch: () => {},
+}
 
 beforeAll(async () => {
   ;({ db, close } = await createTestDb())
