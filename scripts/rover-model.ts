@@ -42,6 +42,8 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { prune } from '@gltf-transform/functions'
 import draco3d from 'draco3dgltf'
 import { MeshoptSimplifier } from 'meshoptimizer'
+import type { Surface } from './rover-model/atlas'
+import { bakeAtlases } from './rover-model/atlas'
 import { fitRigid } from './rover-model/fit'
 import {
   assignPieces,
@@ -81,10 +83,11 @@ const OUT_DIR = fileURLToPath(new URL('../public/models/rover/', import.meta.url
 
 /**
  * Meshopt quantization bits. Positions are quantized over each mesh's bounds: 14 bits over the
- * 3.0 m chassis is a 0.18 mm step, 0.09 mm error at most. Texture coordinates get 12 bits: the
- * largest texture is 1024 px, so a step is a quarter texel.
+ * 3.0 m chassis is a 0.18 mm step, 0.09 mm error at most. Texture coordinates get 14 bits: an
+ * atlas page is at most 2048 texels, so a step is an eighth of a texel and an island's texels
+ * stay where its UVs were moved to.
  */
-const QUANTIZE = { position: 14, texcoord: 12 }
+const QUANTIZE = { position: 14, texcoord: 14 }
 /** Opacity of NASA's transmissive glass (the camera lenses, the name plate's cover). */
 const GLASS_OPACITY = 0.3
 
@@ -125,6 +128,26 @@ const KEPT: KeptLink[] = [
   { link: 'Body_WheelLeftRear', node: 'wheel_lr' },
   { link: 'Body_WheelRightRear', node: 'wheel_rr' },
 ]
+/**
+ * The nodes whose materials bake into shared atlas pages: parts cut from the same NASA meshes use
+ * the same textures, so sharing pages keeps each texel once in memory. Draw calls stay per node.
+ */
+function atlasGroup(node: string): string {
+  if (node === 'chassis') return 'chassis'
+  if (node.startsWith('mast_')) return 'mast'
+  if (node.startsWith('wheel_')) return 'wheels'
+  return 'suspension'
+}
+
+function atlasGroups(surfaces: Surface[]): Map<string, Surface[]> {
+  const groups = new Map<string, Surface[]>()
+  for (const surface of surfaces) {
+    const group = atlasGroup(surface.node)
+    groups.set(group, [...(groups.get(group) ?? []), surface])
+  }
+  return groups
+}
+
 const WHEELS = KEPT.filter((k) => k.node.startsWith('wheel_'))
 /** The suspension links NASA's `suspension` mesh is cut into, by the URDF mesh each piece lies on. */
 const SUSPENSION = KEPT.filter((k) =>
@@ -596,14 +619,20 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     )
   }
 
+  if (variant.kind === 'full') {
+    for (const material of root.listMaterials()) glassAsBlend(material, GLASS_OPACITY)
+  }
+  /** The full model's triangles, one surface per material per node, before baking. */
+  const surfaces: Surface[] = []
+  const meshes = new Map<string, ReturnType<Document['createMesh']>>()
   for (const [name, placed] of nodePose) {
     const inNode = invert(placed)
     const mesh = doc.createMesh(name)
+    meshes.set(name, mesh)
     const list = bakedPrimitives.flatMap((b) =>
       b.part.flatMap((part, t) => (part === name ? [{ b, t }] : [])),
     )
     if (variant.kind === 'full') {
-      // One primitive per material: the export's parts sharing a material draw as one.
       const byMaterial = new Map<Material, { b: Baked; t: number }[]>()
       for (const entry of list) {
         let group = byMaterial.get(entry.b.material)
@@ -616,17 +645,7 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
           inNode,
           group.every(({ b }) => b.uvs),
         )
-        triangles += merged.indices.length / 3
-        const primitive = doc
-          .createPrimitive()
-          .setMaterial(material)
-          .setAttribute('POSITION', accessor(doc, buffer, 'VEC3', merged.positions))
-          .setAttribute('NORMAL', accessor(doc, buffer, 'VEC3', merged.normals))
-          .setIndices(accessor(doc, buffer, 'SCALAR', merged.indices))
-        if (merged.uvs) {
-          primitive.setAttribute('TEXCOORD_0', accessor(doc, buffer, 'VEC2', merged.uvs))
-        }
-        mesh.addPrimitive(primitive)
+        surfaces.push({ node: name, material, ...merged })
       }
     } else if (list.length) {
       const merged = gather(list, inNode, false)
@@ -634,7 +653,6 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
         target: variant.triangles[name] ?? 100,
         error: variant.error,
       })
-      triangles += shape.indices.length / 3
       mesh.addPrimitive(
         doc
           .createPrimitive()
@@ -643,14 +661,53 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
           .setIndices(accessor(doc, buffer, 'SCALAR', shape.indices)),
       )
     }
+  }
+  const calls = new Map<string, { before: number; after: number }>()
+  if (variant.kind === 'full') {
+    // Each atlas group's materials baked into its pages and its glass: a node then draws one
+    // primitive per page it uses, and one for its glass.
+    for (const [group, members] of atlasGroups(surfaces)) {
+      const { baked, report } = await bakeAtlases(doc, group, members)
+      const pages = report.pages.map((p) => `${p.width}×${p.height} (${p.islands} islands)`)
+      console.log(
+        `  atlas ${group}: ${pages.join(', ')}` +
+          (report.dropped.length ? `; dropped ${report.dropped.join(', ')}` : ''),
+      )
+      for (const surface of baked) {
+        meshes.get(surface.node)!.addPrimitive(
+          doc
+            .createPrimitive()
+            .setMaterial(surface.material)
+            .setAttribute('POSITION', accessor(doc, buffer, 'VEC3', surface.positions))
+            .setAttribute('NORMAL', accessor(doc, buffer, 'VEC3', surface.normals))
+            .setAttribute('TEXCOORD_0', accessor(doc, buffer, 'VEC2', surface.uvs))
+            .setIndices(accessor(doc, buffer, 'SCALAR', surface.indices)),
+        )
+      }
+      for (const name of new Set(members.map((s) => s.node))) {
+        calls.set(name, {
+          before: members.filter((s) => s.node === name).length,
+          after: baked.filter((s) => s.node === name).length,
+        })
+      }
+    }
+  }
+  for (const [name, mesh] of meshes) {
     if (!mesh.listPrimitives().length) {
       mesh.dispose()
       continue
     }
-    primitives += mesh.listPrimitives().length
+    const count = mesh.listPrimitives().length
+    const meshTriangles = mesh
+      .listPrimitives()
+      .reduce((s, p) => s + p.getIndices()!.getCount() / 3, 0)
+    triangles += meshTriangles
+    primitives += count
+    const call = calls.get(name)
     console.log(
-      `  ${variant.file} ${name}: ${mesh.listPrimitives().length} primitives, ` +
-        `${mesh.listPrimitives().reduce((s, p) => s + p.getIndices()!.getCount() / 3, 0)} triangles`,
+      `  ${variant.file} ${name}: ${count} primitives` +
+        (call ? ` (${call.before} materials before baking)` : '') +
+        `, ${meshTriangles} triangles`,
     )
     // Mesh on a child node: quantization rescales mesh nodes, the joint node stays exact.
     nodes.get(name)!.addChild(doc.createNode(`${name}:mesh`).setMesh(mesh))
@@ -673,9 +730,6 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
   root.setDefaultScene(scene)
   for (const extension of root.listExtensionsUsed()) {
     if (extension.extensionName === 'KHR_draco_mesh_compression') extension.dispose()
-  }
-  if (variant.kind === 'full') {
-    for (const material of root.listMaterials()) glassAsBlend(material, GLASS_OPACITY)
   }
   await doc.transform(prune({ keepExtras: true, keepLeaves: true }))
   root.getAsset().extras = {

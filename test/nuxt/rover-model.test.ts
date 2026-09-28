@@ -59,20 +59,31 @@ describe('the rover model', () => {
     expect(scene.getObjectByName('turret')?.parent?.name).toBe('chassis')
   })
 
-  it('draws with its own materials: metals, and the camera glass blended', async () => {
+  it('draws each part in one baked material and its glass in another, 35 draw calls at most', async () => {
     serveModel()
     const { scene } = await loadRoverModel('/')
-    const materials = new Set<MeshStandardMaterial>()
+    const meshes: Mesh[] = []
     scene.traverse((node) => {
-      if ((node as Mesh).isMesh) materials.add((node as Mesh).material as MeshStandardMaterial)
+      if ((node as Mesh).isMesh) meshes.push(node as Mesh)
     })
-    const all = [...materials]
-    expect(all.every((m) => m.isMeshStandardMaterial)).toBe(true)
-    expect(all.some((m) => m.metalness === 1 && m.roughness < 0.5)).toBe(true)
-    const glass = all.filter((m) => m.name === 'glass lens')
-    expect(glass).toHaveLength(1)
-    expect(glass[0]!.transparent).toBe(true)
-    expect(glass[0]!.opacity).toBeCloseTo(0.3, 3)
+    expect(meshes.length).toBeLessThanOrEqual(35)
+    const materials = [...new Set(meshes.map((m) => m.material as MeshStandardMaterial))]
+    expect(materials.every((m) => m.isMeshStandardMaterial)).toBe(true)
+    // Colour, roughness and metalness come from the atlas pages, the factors stay at one.
+    const opaque = materials.filter((m) => !m.transparent)
+    expect(opaque.map((m) => m.name).sort()).toEqual([
+      'chassis 1',
+      'chassis 2',
+      'chassis 3',
+      'mast',
+      'suspension',
+      'wheels',
+    ])
+    for (const m of opaque) expect([m.metalness, m.roughness]).toEqual([1, 1])
+    // The glass's opacity per pane is its texture's alpha.
+    const glass = materials.filter((m) => m.transparent)
+    expect(glass.map((m) => m.name).sort()).toEqual(['chassis glass', 'mast glass'])
+    for (const m of glass) expect(m.opacity).toBe(1)
   })
 })
 
