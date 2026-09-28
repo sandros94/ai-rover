@@ -24,4 +24,5 @@ allowBuilds:
 
 patchedDependencies:
   '@netlify/database-dev': .patches/@netlify__database-dev.patch
+  '@nuxt/fonts': .patches/@nuxt__fonts.patch
   '@nuxt/test-utils-nightly': .patches/@nuxt__test-utils-nightly.patch

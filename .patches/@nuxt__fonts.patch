@@ -1,0 +1,50 @@
+diff --git a/dist/module.mjs b/dist/module.mjs
+index c6401a76a217cf024201ff040558c2c4803adb1a..363a43e11bb652d03a1c858cc70656417d8c80ae 100644
+--- a/dist/module.mjs
++++ b/dist/module.mjs
+@@ -173,12 +173,30 @@ async function setupPublicAssetStrategy(options = {}) {
+     nuxt.hook("webpack:compiled", () => {
+       built = true;
+     });
++    /*
++     * When the app is bundled inside Nitro's own Vite environments, the compiled hook that marks
++     * the app as built never fires and the font URLs are only known once Nitro has compiled, so
++     * the fonts are downloaded straight into the output's public directory at that point.
++     */
++    let downloaded = false;
++    nitro.hooks.hook("compiled", async () => {
++      if (downloaded) {
++        return;
++      }
++      const dir = join(nitro.options.output.publicDir, context.assetsBaseURL);
++      await fsp.mkdir(dir, { recursive: true });
++      await downloadFonts(dir);
++    });
+     nitro.hooks.hook("rollup:before", async () => {
+       if (!built) {
+         return;
+       }
+       await fsp.rm(cacheDir, { recursive: true, force: true });
+       await fsp.mkdir(cacheDir, { recursive: true });
++      await downloadFonts(cacheDir);
++    });
++    async function downloadFonts(dir) {
++      downloaded = true;
+       let banner = false;
+       for (const [filename, url] of context.renderedFontURLs) {
+         const key = "data:fonts:" + filename;
+@@ -193,12 +211,12 @@ async function setupPublicAssetStrategy(options = {}) {
+           res = Buffer.from(r);
+           await storage.setItemRaw(key, res);
+         }
+-        await fsp.writeFile(join(cacheDir, filename), res);
++        await fsp.writeFile(join(dir, filename), res);
+       }
+       if (banner) {
+         logger.success("Fonts downloaded and cached.");
+       }
+-    });
++    }
+   });
+   return {
+     normalizeFontData: normalizeFontData.bind(null, context)

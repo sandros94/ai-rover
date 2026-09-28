@@ -10,6 +10,7 @@ overrides:
 
 patchedDependencies:
   '@netlify/database-dev': 9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27
+  '@nuxt/fonts': c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f
   '@nuxt/test-utils-nightly': 092d4f2275d450055011b7bf9c322768a93927717427179974924c29c8ed0484
 
 importers:
@@ -8483,7 +8484,7 @@ snapshots:
       - uploadthing
       - vue
 
-  '@nuxt/fonts@0.14.0(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(esbuild@0.28.1)(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(vite@8.3.0)':
+  '@nuxt/fonts@0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(esbuild@0.28.1)(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(vite@8.3.0)':
     dependencies:
       '@nuxt/devtools-kit': 3.4.2(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))(vite@8.3.0)
       '@nuxt/kit': 4.5.2(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))
@@ -8895,7 +8896,7 @@ snapshots:
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@iconify/vue': 5.0.3(vue@3.5.43(typescript@7.0.2))
-      '@nuxt/fonts': 0.14.0(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(esbuild@0.28.1)(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(vite@8.3.0)
+      '@nuxt/fonts': 0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(esbuild@0.28.1)(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(vite@8.3.0)
       '@nuxt/icon': 2.5.1(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))(vite@8.3.0)(vue@3.5.43(typescript@7.0.2))
       '@nuxt/kit': 4.5.2(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))
       '@nuxt/schema': 4.5.2
