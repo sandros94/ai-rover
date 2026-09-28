@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import type { MapObject, RoverObject } from '#shared/utils/client'
-import { mapObjects } from '#shared/utils/client'
+import { destinationObject, mapObjects } from '#shared/utils/client'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopStage from '~/components/map/StopStage.vue'
 
@@ -245,5 +245,93 @@ describe('focusing from the 2D map', () => {
     await flushPromises()
     // No longer followed: the rover moves 10 m east on screen, 32 px.
     expect(roverAt(wrapper)).toEqual({ x: 272, y: 200 })
+  })
+})
+
+describe("the drive's destination on the 2D map", () => {
+  const STARTED = '2026-09-26T09:00:00.000Z'
+  /** From stop 1 at (-20, -10) m to (30, -30) m: drawn at (296, 296) px. */
+  const PLAN = [
+    { x: -20, y: -10 },
+    { x: 0, y: -25 },
+    { x: 30, y: -30 },
+  ]
+  const DESTINATION = destinationObject(
+    {
+      currentStop: { index: 1, x: -20, y: -10 },
+      trail: [
+        { x: 0, y: 0 },
+        { x: -20, y: -10 },
+      ],
+      segment: {
+        id: 'seg-3',
+        startedAt: STARTED,
+        submitter: { displayName: 'Grace', avatarUrl: null },
+        plan: { pathLengthM: 57, estimatedMinutes: 38 },
+      },
+    },
+    PLAN,
+  )!
+  const ARRIVAL = new Date(Date.parse(STARTED) + 38 * 60_000).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  async function mountDrive() {
+    const wrapper = await mountSuspended(StopStage, {
+      props: {
+        view: '2d',
+        heightAt: () => 0,
+        loading: { loaded: 0, total: 0, error: null },
+        center: { x: 0, y: 0 },
+        radius: 60,
+        rover: REST,
+        trail: [
+          { x: 0, y: 0 },
+          { x: -20, y: -10, current: true },
+        ],
+        plan: PLAN,
+        objects: [...OBJECTS, DESTINATION],
+        roverObject: rover(REST),
+      },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  it("flags the route's end", async () => {
+    const wrapper = await mountDrive()
+    expect(wrapper.find('[data-test=destination-marker]').attributes('transform')).toBe(
+      'translate(296 296)',
+    )
+  })
+
+  it('shows its card on hover: the author, where it lies, the route and the planned arrival', async () => {
+    const wrapper = await mountDrive()
+    wrapper.find('[data-test=map]').element.dispatchEvent(pointer('pointermove', 299, 292))
+    await flushPromises()
+    expect(card()?.dataset.kind).toBe('destination')
+    const text = card()?.textContent ?? ''
+    expect(text).toContain('Destination')
+    expect(card()?.querySelector('[data-test=object-card-author]')?.textContent).toContain('Grace')
+    // 53.9 m at 111.8° from stop 1.
+    expect(text).toContain('54 m · 112° E from stop 1')
+    expect(text).toContain('57 m path · 38 min')
+    expect(text).toContain(`Arrival ${ARRIVAL}, planned`)
+  })
+
+  it('focuses it on a click, the view easing onto it', async () => {
+    const wrapper = await mountDrive()
+    const map = wrapper.find('[data-test=map]').element
+    map.dispatchEvent(pointer('pointerdown', 296, 294))
+    map.dispatchEvent(pointer('pointerup', 296, 294))
+    await flushPromises()
+    expect(useMapFocus().focused.value).toBe('destination:seg-3')
+    expect(wrapper.emitted('pick')).toBeUndefined()
+    await vi.waitFor(() =>
+      expect(wrapper.find('[data-test=destination-marker]').attributes('transform')).toBe(
+        'translate(200 200)',
+      ),
+    )
   })
 })

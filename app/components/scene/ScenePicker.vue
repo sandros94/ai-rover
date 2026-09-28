@@ -23,10 +23,12 @@ import {
   Raycaster,
   Vector2,
 } from 'three'
+import { FLAG_MARKERS } from '#shared/utils/client/scene'
 
 /**
  * Finds what the pointer is over in the scene: invisible pick volumes the size of each marker
- * (a stop's post, a ghost, a goal's flag, the rover), raycast from the camera. A mouse moving
+ * (a stop's post, a ghost, a goal's flag, the destination's flag, the rover), raycast from the
+ * camera. A mouse moving
  * without a button reports `hover`; a press released where it started (within a few pixels, so
  * orbiting is not a tap) reports `tap`. The rover's volume follows `rover`.
  */
@@ -44,15 +46,25 @@ const emit = defineEmits<{
 /** Finger or mouse travel, pixels, beyond which a press is an orbit and not a tap. */
 const TAP_SLOP_PX = 6
 
+/** The destination flag's reach from its pole: its cloth turns with the view, so any side. */
+const FLAG = FLAG_MARKERS.destination
+const FLAG_REACH_M = FLAG_MARKERS.poleRadiusM + FLAG.clothWidthM
+
 /** Pick volumes, metres: generous enough to hit at a distance, no larger than the marker's reach. */
 const VOLUMES: Record<MapObjectKind, { geometry: BoxGeometry | CylinderGeometry; lift: number }> = {
   stop: { geometry: new CylinderGeometry(0.7, 0.7, 3.4, 8), lift: 1.7 },
   death: { geometry: new BoxGeometry(3.4, 3.2, 2.6), lift: 1.2 },
   submission: { geometry: new CylinderGeometry(0.9, 0.9, 2.8, 8), lift: 1.4 },
+  destination: {
+    geometry: new CylinderGeometry(FLAG_REACH_M, FLAG_REACH_M, FLAG.poleHeightM, 8),
+    lift: FLAG.poleHeightM / 2,
+  },
   rover: { geometry: new BoxGeometry(3.4, 3, 2.6), lift: 1.2 },
 }
 // Cylinders stand along their local y; the scene is z-up.
-for (const kind of ['stop', 'submission'] as const) VOLUMES[kind].geometry.rotateX(Math.PI / 2)
+for (const kind of ['stop', 'submission', 'destination'] as const) {
+  VOLUMES[kind].geometry.rotateX(Math.PI / 2)
+}
 
 const invisible = new MeshBasicMaterial({ visible: false })
 const root = new Group()

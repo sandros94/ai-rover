@@ -52,7 +52,10 @@ const props = withDefaults(
     /** A submission whose route to show, in place of hover previews. */
     highlight?: { id: string; goal: MapPoint } | null
     track: MapTrack
-    /** The state's stops, deaths and submissions, to draw and inspect; the rover is added here. */
+    /**
+     * The state's stops, deaths, submissions and the drive's destination, to draw and inspect;
+     * the rover is added here.
+     */
     objects: readonly MapObject[]
   }>(),
   { signedIn: false, highlight: null },

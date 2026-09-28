@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
-import { mapObjects, ROVER_ID } from '#shared/utils/client'
+import { destinationObject, mapObjects, ROVER_ID } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
@@ -205,7 +205,13 @@ const highlight = computed<{ id: string; goal: MapPoint } | null>(() => {
 
 const mapFocus = useMapFocus()
 onBeforeUnmount(mapFocus.clear)
-const objects = computed(() => (props.state ? mapObjects(props.state) : []))
+/** The state's objects, and the destination where the route the drive follows now ends. */
+const objects = computed(() => {
+  const state = props.state
+  if (!state) return []
+  const destination = destinationObject(state, plan.value)
+  return destination ? [...mapObjects(state), destination] : mapObjects(state)
+})
 const focused = computed(() => {
   const id = mapFocus.focused.value
   const object = id && id !== ROVER_ID ? objects.value.find((o) => o.id === id) : undefined

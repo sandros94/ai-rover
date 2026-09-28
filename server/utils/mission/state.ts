@@ -3,6 +3,7 @@ import type { Mission, SegmentStatus, Stop, StoredJudgment } from '../../databas
 import { getMission } from '../../repositories/missions'
 import { getActivePause } from '../../repositories/pauses'
 import { getOpenRound } from '../../repositories/rounds'
+import { getAuthoredSubmission } from '../../repositories/submissions'
 import type { SettledSegment } from '../../repositories/segments'
 import { getDrivingSegment, listSettledSegments } from '../../repositories/segments'
 import { getStop, listStops } from '../../repositories/stops'
@@ -218,6 +219,13 @@ export interface PublicMissionState {
     submissionId: string
     fromStopId: string
     manifestKey: string
+    /** The winning submission's author, as its round listed it. */
+    submitter: { displayName: string; avatarUrl: string | null }
+    /**
+     * The winning submission's route as its round showed it: path length and estimated drive
+     * time. Null when its summary holds no route.
+     */
+    plan: { pathLengthM: number; estimatedMinutes: number } | null
   } | null
   /** How the driving segment's slices are released; null while none drives. */
   release: { startedAt: Date; sliceSeconds: number } | null
@@ -300,6 +308,8 @@ export async function publicMissionState(
       })
     : null
   const pause = await getActivePause(db, missionId)
+  const winner = driving ? await getAuthoredSubmission(db, driving.submissionId) : undefined
+  const route = winner?.summary.route
 
   return {
     now,
@@ -321,17 +331,28 @@ export async function publicMissionState(
       revealedKey: stop.revealedKey,
     },
     round,
-    segment: !driving
-      ? null
-      : {
-          id: driving.id,
-          status: driving.status,
-          attempt: driving.attempt,
-          startedAt: driving.startedAt,
-          submissionId: driving.submissionId,
-          fromStopId: driving.fromStopId,
-          manifestKey: driving.manifestKey,
-        },
+    segment:
+      driving && winner
+        ? {
+            id: driving.id,
+            status: driving.status,
+            attempt: driving.attempt,
+            startedAt: driving.startedAt,
+            submissionId: driving.submissionId,
+            fromStopId: driving.fromStopId,
+            manifestKey: driving.manifestKey,
+            submitter: {
+              displayName: winner.submitter.displayName,
+              avatarUrl: winner.submitter.avatarUrl,
+            },
+            plan: route?.reached
+              ? {
+                  pathLengthM: route.path_length_m,
+                  estimatedMinutes: route.estimated_drive_minutes,
+                }
+              : null,
+          }
+        : null,
     release: driving ? { startedAt: driving.startedAt, sliceSeconds } : null,
     flags,
     pause: pause

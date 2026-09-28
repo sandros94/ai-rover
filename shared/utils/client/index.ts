@@ -59,6 +59,8 @@ export { serverClockOffset } from './server-clock'
 export type {
   Compass,
   DeathObject,
+  DestinationObject,
+  DestinationSource,
   MapObject,
   MapObjectKind,
   MapObjectsSource,
@@ -71,6 +73,8 @@ export type {
   SubmissionObject,
 } from './map-objects'
 export {
+  destinationLines,
+  destinationObject,
   easeFocus,
   FOCUS_EASE_MS,
   goalBearing,

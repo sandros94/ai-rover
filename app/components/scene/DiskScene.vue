@@ -12,11 +12,12 @@ import StopScene from './StopScene.vue'
 
 /**
  * A stop disk in 3D with what the 2D map draws over it: the rover at the playback frame (or at
- * rest), the route, the path driven, past stops, deaths, the open round's goals, and the fog
- * over what neither the stop nor the drive so far has seen. Objects are inspected as on the 2D
- * map: a card on hover (or a first tap), focus on a click (or a second tap), the camera easing
- * to the focused object; the recentre control returns it to the rover. Ground still arriving is
- * drawn chunk by chunk, each chunk's mesh made once. Load it lazily: it brings three.js.
+ * rest), the route and its destination, the path driven, past stops, deaths, the open round's
+ * goals, and the fog over what neither the stop nor the drive so far has seen. Objects are
+ * inspected as on the 2D map: a card on hover (or a first tap), focus on a click (or a second
+ * tap), the camera easing to the focused object; the recentre control returns it to the rover.
+ * Ground still arriving is drawn chunk by chunk, each chunk's mesh made once. Load it lazily: it
+ * brings three.js.
  */
 const props = withDefaults(
   defineProps<{
@@ -49,7 +50,10 @@ const props = withDefaults(
     deathRadiusM?: number
     /** What the playing drive has seen so far, as disk-grid vertex indices. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
-    /** Stops, deaths and submissions to inspect; submissions are drawn as flagged goals. */
+    /**
+     * Stops, deaths, submissions and the destination to inspect; submissions are drawn as
+     * flagged goals, the destination's flag stands at the route's end.
+     */
     objects?: readonly MapObject[]
     /** The rover, inspectable. */
     roverObject?: RoverObject
@@ -222,10 +226,13 @@ const goals = computed(() =>
     .filter((o) => o.kind === 'submission')
     .map((o) => ({ id: o.id, x: o.x, y: o.y, z: groundAt(o) })),
 )
+/** Where an object stands: the destination's flag on the ground as drawn, like the route. */
+const standAt = (o: MapObject) =>
+  o.kind === 'destination' ? (drawnHeightAt.value(o.x, o.y) ?? 0) : groundAt(o)
 /** Changes only when the rover becomes inspectable or stops being: not with every frame. */
 const roverInspectable = computed(() => props.roverObject !== undefined)
 const pickables = computed((): Pickable[] => [
-  ...props.objects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, z: groundAt(o) })),
+  ...props.objects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, z: standAt(o) })),
   // The picker moves the rover's volume with the rover.
   ...(roverInspectable.value ? [{ id: ROVER_ID, kind: 'rover' as const, x: 0, y: 0, z: 0 }] : []),
 ])
@@ -237,7 +244,7 @@ const mapFocus = useMapFocus()
 const focusTarget = computed(() => {
   const id = mapFocus.focused.value
   const object = id && id !== ROVER_ID ? find(id) : undefined
-  return object && { x: object.x, y: object.y, z: groundAt(object) + 1 }
+  return object && { x: object.x, y: object.y, z: standAt(object) + 1 }
 })
 
 const hovered = shallowRef<{ id: string; client: { x: number; y: number } } | null>(null)

@@ -33,7 +33,7 @@ import {
   worldToScreen,
   zoomAbout,
 } from '#shared/utils/client'
-import { RELIEF_STOPS, rgbHex, SEEN_STOPS } from '#shared/utils/client/scene'
+import { RELIEF_STOPS, rgbHex, routeDestination, SEEN_STOPS } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
@@ -499,6 +499,12 @@ const previewGoal = computed(() =>
   view.value && props.preview?.goal ? toScreen(props.preview.goal) : undefined,
 )
 
+/** The route's destination, flagged until a stop stands there, as the 3D scene flags it. */
+const destinationMarker = computed(() => {
+  const end = view.value && routeDestination(props.plan, props.trail)
+  return end ? toScreen(end) : undefined
+})
+
 const roverMarker = computed(() => {
   if (!view.value || !props.rover) return undefined
   const { x, y } = toScreen(props.rover)
@@ -785,6 +791,18 @@ const focusRing = computed(() => {
         stroke-width="2.5"
         stroke-linejoin="round"
       />
+      <g
+        v-if="destinationMarker"
+        data-test="destination-marker"
+        :transform="`translate(${destinationMarker.x} ${destinationMarker.y})`"
+      >
+        <path d="M 0 0 V -12" class="stroke-(--ui-text-highlighted)" stroke-width="1.5" />
+        <path
+          d="M 0.75 -12 h 9 v 6 h -9 Z"
+          class="fill-(--ui-primary) stroke-(--ui-bg)"
+          stroke-width="1"
+        />
+      </g>
       <g
         v-for="(death, k) in deaths"
         :key="`death-${k}`"

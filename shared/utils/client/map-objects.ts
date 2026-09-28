@@ -1,11 +1,18 @@
 import { formatLmst, solTime } from './instruments/sol-clock'
+import { routeDestination } from './scene/markers'
 
 /**
  * Everything on the map a visitor can inspect: past stops, deaths, the open round's submissions
- * at their goals, and the rover. Each has an `id` unique across kinds (`stop:3`, `death:<segment>`,
- * `submission:<submission>`, `rover`), which is what focus holds.
+ * at their goals, the drive's destination and the rover. Each has an `id` unique across kinds
+ * (`stop:3`, `death:<segment>`, `submission:<submission>`, `destination:<segment>`, `rover`),
+ * which is what focus holds.
  */
-export type MapObject = StopObject | DeathObject | SubmissionObject | RoverObject
+export type MapObject =
+  | StopObject
+  | DeathObject
+  | SubmissionObject
+  | DestinationObject
+  | RoverObject
 
 export type MapObjectKind = MapObject['kind']
 
@@ -65,6 +72,30 @@ export interface SubmissionObject {
   verdict: string
   risk: number
   likes: number
+}
+
+/**
+ * Where the drive in progress is headed, as it was planned: its flag at the route's end. Nothing
+ * of how the drive goes: the arrival is the plan's, and the drive may stop short or fail.
+ */
+export interface DestinationObject {
+  kind: 'destination'
+  id: `destination:${string}`
+  segmentId: string
+  x: number
+  y: number
+  /** Index of the stop the drive left. */
+  fromIndex: number
+  /** The winning submission's author. */
+  author: { displayName: string; avatarUrl: string | null }
+  /** From the stop the drive left, straight. */
+  distanceM: number
+  bearing: { degrees: number; compass: Compass }
+  /** The winning submission's route; null when it has none. */
+  plan: { pathLengthM: number; estimatedMinutes: number } | null
+  startedAt: string
+  /** The start plus the estimated drive time; null without a plan. */
+  plannedArrival: string | null
 }
 
 /** What the rover is doing, as its card says it. */
@@ -254,6 +285,74 @@ export function roverObject(
   return { kind: 'rover', id: ROVER_ID, ...pose, ...info }
 }
 
+/** What the destination is built from: the public mission state, with dates as strings or not. */
+export interface DestinationSource {
+  /** The stop the drive left: the rover's current stop until the drive settles. */
+  currentStop: { index: number; x: number; y: number }
+  trail: readonly { x: number; y: number }[]
+  segment: {
+    id: string
+    startedAt: Instant
+    submitter: { displayName: string; avatarUrl: string | null }
+    plan: { pathLengthM: number; estimatedMinutes: number } | null
+  } | null
+}
+
+/**
+ * The destination of `source`'s drive, standing where its flag does: at the end of `route`, the
+ * route the drive follows now. None without a drive or a route, or once a stop stands there.
+ */
+export function destinationObject(
+  source: DestinationSource,
+  route: readonly { x: number; y: number }[],
+): DestinationObject | null {
+  const segment = source.segment
+  const end = segment && routeDestination(route, source.trail)
+  if (!segment || !end) return null
+  const from = source.currentStop
+  const { distanceM, degrees, compass } = goalBearing(from, end)
+  const startedAt = iso(segment.startedAt)
+  const plan = segment.plan && { ...segment.plan }
+  return {
+    kind: 'destination',
+    id: `destination:${segment.id}`,
+    segmentId: segment.id,
+    x: end.x,
+    y: end.y,
+    fromIndex: from.index,
+    author: { ...segment.submitter },
+    distanceM,
+    bearing: { degrees, compass },
+    plan,
+    startedAt,
+    plannedArrival: plan
+      ? new Date(Date.parse(startedAt) + plan.estimatedMinutes * 60_000).toISOString()
+      : null,
+  }
+}
+
+/**
+ * The destination's card lines: where it lies from the stop the drive left, the planned route,
+ * and the planned arrival as a local time (in `options.timeZone`, by default the browser's).
+ */
+export function destinationLines(
+  destination: DestinationObject,
+  options: { locale?: string; timeZone?: string } = {},
+): { heading: string; route: string | null; arrival: string | null } {
+  const { distanceM, bearing, fromIndex, plan, plannedArrival } = destination
+  const time = (at: string) =>
+    new Date(at).toLocaleTimeString(options.locale, {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: options.timeZone,
+    })
+  return {
+    heading: `${Math.round(distanceM)} m · ${bearing.degrees}° ${bearing.compass} from stop ${fromIndex}`,
+    route: plan ? `${plan.pathLengthM} m path · ${plan.estimatedMinutes} min` : null,
+    arrival: plannedArrival ? `Arrival ${time(plannedArrival)}, planned` : null,
+  }
+}
+
 /**
  * What the rover is doing by the public state: driving while a segment plays, in the planning
  * phase once the round has a closing time (the first pick is in), else waiting for one.
@@ -288,11 +387,11 @@ export function goalBearing(
 export const HIT_TOLERANCE_PX = 12
 
 /** Which object wins where several are within reach, first first. */
-const PRIORITY: readonly MapObjectKind[] = ['rover', 'submission', 'death', 'stop']
+const PRIORITY: readonly MapObjectKind[] = ['rover', 'destination', 'submission', 'death', 'stop']
 
 /**
  * The object at world point `at` within `toleranceM`: of those in reach, the first kind in
- * rover, submission, death, stop order, then the nearest.
+ * rover, destination, submission, death, stop order, then the nearest.
  */
 export function hitMapObject<T extends { kind: MapObjectKind; x: number; y: number }>(
   objects: readonly T[],

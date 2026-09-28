@@ -124,17 +124,22 @@ describe('an idle rover and the grace window', () => {
 
   it('shows the drive and the anchor, without the outcome or the end, until it is released', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const winner = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
     const now = at(T0, 10 * MINUTE)
     const tick = await m.tick(now)
     const state = await publicMissionState(db, { missionId: m.missionId, now })
     expect(state.now).toEqual(now)
     expect(state.currentStop.id).toBe(m.stop.id)
+    const route = winner.submission!.summary.route
+    if (!route.reached) throw new Error('The fixture goal is reachable.')
     expect(state.segment).toMatchObject({
       id: tick.started!.segmentId,
       status: 'driving',
       startedAt: now,
       attempt: 1,
+      // The winner as its round showed it: author, path length and estimated drive time.
+      submitter: { displayName: 'Ada', avatarUrl: null },
+      plan: { pathLengthM: route.path_length_m, estimatedMinutes: route.estimated_drive_minutes },
     })
     expect(state.release).toEqual({ startedAt: now, sliceSeconds: DEFAULT_SLICE_SECONDS })
     // Unsettled, the drive counts nowhere yet: neither as the last segment nor in the tally.

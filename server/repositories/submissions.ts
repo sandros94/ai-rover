@@ -103,6 +103,27 @@ export async function getSubmission(db: DB, submissionId: string): Promise<Submi
   return row
 }
 
+/** The submission with its author, as a round lists it. */
+export async function getAuthoredSubmission(
+  db: DB,
+  submissionId: string,
+): Promise<Submission & Pick<ListedSubmission, 'submitter'>> {
+  const [row] = await db
+    .select({
+      submission,
+      submitter: {
+        id: userAccount.id,
+        displayName: userAccount.displayName,
+        avatarUrl: userAccount.avatarUrl,
+      },
+    })
+    .from(submission)
+    .innerJoin(userAccount, eq(userAccount.id, submission.userId))
+    .where(eq(submission.id, submissionId))
+  if (!row) throw new DbError('NOT_FOUND', `Submission ${submissionId} does not exist.`)
+  return { ...row.submission, submitter: row.submitter }
+}
+
 /** Submissions `userId` made in the round, whatever their status. */
 export async function countUserRoundSubmissions(
   db: DB,

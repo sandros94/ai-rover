@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useCurrentSight, usePlanPreview } from '#imports'
-import { liftSeen } from '#shared/utils/client'
+import { destinationObject, liftSeen } from '#shared/utils/client'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
@@ -9,6 +9,7 @@ import { DEFAULT_MAST_HEIGHT, DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
 import PickPreview from '~/components/map/PickPreview.vue'
 import StopMap from '~/components/map/StopMap.vue'
 import type { PlanGround } from '~/workers/plan-protocol'
+import { fixtureSegment } from '../../playground/fixtures'
 import { PLAYGROUND_PROPS, useRevealsUntil } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
@@ -44,6 +45,19 @@ const sight = useCurrentSight(
 )
 
 const anchor = computed(() => ({ x: props.record.start.x, y: props.record.start.y }))
+
+/** The flag at the route's end, inspectable as the live map's: hover for its card, click to focus. */
+const objects = computed(() => {
+  const destination = destinationObject(
+    {
+      currentStop: { index: 0, ...anchor.value },
+      trail: [],
+      segment: fixtureSegment(props.record),
+    },
+    props.record.plan.polyline,
+  )
+  return destination ? [destination] : []
+})
 
 /* The dev disk route serves the world's default slope limit and mast height. */
 const ground = computed<PlanGround | undefined>(() => {
@@ -89,6 +103,7 @@ function onHover(point: MapPoint | null): void {
       :plan="record.plan.polyline"
       :preview="preview.result.value"
       :picked="picked"
+      :objects="objects"
       @pick="onPick"
       @hover="onHover"
     />

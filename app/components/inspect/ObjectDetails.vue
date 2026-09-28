@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { DeathObject, StopObject, SubmissionObject } from '#shared/utils/client'
+import type {
+  DeathObject,
+  DestinationObject,
+  StopObject,
+  SubmissionObject,
+} from '#shared/utils/client'
+import { destinationLines } from '#shared/utils/client'
 import type { MissionRules } from '#shared/utils/mission'
 import type { StopManifest } from '#shared/utils/terrain'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
@@ -12,10 +18,11 @@ type Submission = NonNullable<MissionStateJson['round']>['submissions'][number]
  * Everything known about a focused object. A stop: when and by which segment it was reached,
  * its disk as its manifest describes it (fetched when shown), and the segments that left it. A
  * death: its segment, why and when it ended, how far it drove, the zone goals and routes keep
- * clear of, and its replay. A submission: its author, goal, route and Jev's judgment.
+ * clear of, and its replay. A submission: its author, goal, route and Jev's judgment. The
+ * destination: the winning author, where it lies, the planned route and arrival.
  */
 const props = defineProps<{
-  object: StopObject | DeathObject | SubmissionObject
+  object: StopObject | DeathObject | SubmissionObject | DestinationObject
   missionId: string
   rules: MissionRules
   /** The focused submission as the round lists it. */
@@ -39,6 +46,10 @@ watch(
     }
   },
   { immediate: true },
+)
+
+const destination = computed(() =>
+  props.object.kind === 'destination' ? destinationLines(props.object) : null,
 )
 
 const route = computed(() => {
@@ -128,6 +139,23 @@ const route = computed(() => {
       >
         Replay segment {{ object.number }}
       </UButton>
+    </template>
+
+    <template v-else-if="object.kind === 'destination'">
+      <div class="flex items-center gap-2">
+        <UAvatar
+          :src="object.author.avatarUrl ?? undefined"
+          :alt="object.author.displayName"
+          size="xs"
+        />
+        <span class="font-medium">{{ object.author.displayName }}</span>
+      </div>
+      <p v-if="destination" class="flex flex-col text-xs text-muted tabular-nums">
+        <span>{{ destination.heading }}</span>
+        <span v-if="destination.route">{{ destination.route }}</span>
+        <span v-if="destination.arrival">{{ destination.arrival }}</span>
+      </p>
+      <p class="text-xs text-muted">The drive may stop short of it or fail on the way.</p>
     </template>
 
     <template v-else>

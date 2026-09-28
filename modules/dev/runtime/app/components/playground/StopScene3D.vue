@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import { useCurrentSight } from '#imports'
-import { createTerrainSampler, liftSeen } from '#shared/utils/client'
+import { createTerrainSampler, destinationObject, liftSeen } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
 import { DEFAULT_MAST_HEIGHT, DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
+import { fixtureSegment } from '../../playground/fixtures'
 import { PLAYGROUND_PROPS, useRevealsUntil } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
@@ -66,6 +67,19 @@ const stops = computed(() => {
   return [...earlier, { x: start.x, y: start.y, current: true }]
 })
 const rest = computed(() => ({ ...props.record.start }))
+/** The flag at the route's end, inspectable as the live map's: hover for its card, click to focus. */
+const objects = computed(() => {
+  const { start } = props.record
+  const destination = destinationObject(
+    {
+      currentStop: { index: DEMO_STOPS.length, x: start.x, y: start.y },
+      trail: stops.value,
+      segment: fixtureSegment(props.record),
+    },
+    props.record.plan.polyline,
+  )
+  return destination ? [destination] : []
+})
 /** What the drive has revealed by the scrub time, lifting the fog as it goes. */
 const reveals = useRevealsUntil(
   () => props.record,
@@ -111,13 +125,15 @@ const deaths = computed(() => {
           :stops="stops"
           :deaths="deaths"
           :reveals="reveals"
+          :objects="objects"
         />
       </ClientOnly>
     </div>
     <p class="text-xs text-muted">
       {{ cut.length }} chunks · {{ reveals.length }} / {{ record.reveals.length }} reveals · drag to
       orbit, wheel or pinch to zoom · the red ghost {{ DEMO_DEATH_M }} m behind the start is a demo
-      death and the two grey-headed posts are demo earlier stops, none from the record.
+      death and the two grey-headed posts are demo earlier stops, none from the record; the
+      destination's author is made up.
     </p>
   </div>
   <p v-else class="text-muted">This scene needs the stop disk.</p>

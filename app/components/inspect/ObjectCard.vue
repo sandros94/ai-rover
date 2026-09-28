@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { MapObject, MarsMoment, RoverStatus } from '#shared/utils/client'
+import { destinationLines } from '#shared/utils/client'
 import { RISK, VERDICT } from '~/components/instruments/JudgmentCard.vue'
 
 /** Jev's expected risk level as its word. */
@@ -32,6 +33,8 @@ export function objectTitle(object: MapObject): string {
       return `Segment ${object.number}: rover lost`
     case 'submission':
       return `${object.author.displayName}'s destination`
+    case 'destination':
+      return 'Destination'
     case 'rover':
       return 'The rover'
   }
@@ -68,6 +71,10 @@ const lines = computed((): string[] => {
         `${verdictWord(o.verdict)} · ${riskWord(o.risk)} risk`,
         `${o.likes} LGTM`,
       ]
+    case 'destination': {
+      const { heading, route, arrival } = destinationLines(o)
+      return [heading, ...(route ? [route] : []), ...(arrival ? [arrival] : [])]
+    }
     case 'rover':
       return [
         ROVER_STATUS[o.status],
@@ -93,6 +100,18 @@ const lines = computed((): string[] => {
         size="3xs"
       />
       {{ objectTitle(object) }}
+    </p>
+    <p
+      v-if="object.kind === 'destination'"
+      data-test="object-card-author"
+      class="flex items-center gap-1.5"
+    >
+      <UAvatar
+        :src="object.author.avatarUrl ?? undefined"
+        :alt="object.author.displayName"
+        size="3xs"
+      />
+      {{ object.author.displayName }}
     </p>
     <p v-for="line in lines" :key="line" class="text-muted tabular-nums">{{ line }}</p>
   </div>

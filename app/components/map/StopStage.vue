@@ -59,8 +59,8 @@ const props = withDefaults(
     preview?: PreviewResult
     picked?: MapPoint | null
     /**
-     * What can be inspected on both views: stops, deaths and submissions, a list that changes
-     * with the mission state; and the rover, which moves every frame.
+     * What can be inspected on both views: stops, deaths, submissions and the destination, a
+     * list that changes with the mission state; and the rover, which moves every frame.
      */
     objects?: readonly MapObject[]
     roverObject?: RoverObject

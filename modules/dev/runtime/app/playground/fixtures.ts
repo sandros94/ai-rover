@@ -1,8 +1,9 @@
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { MARS_SOL_SECONDS, slopeProfile } from '#shared/utils/client/instruments'
+import type { DestinationSource } from '#shared/utils/client'
 import { DEFAULT_LIVE_MARGIN_SECONDS } from '#shared/utils/client'
 import type { DriveEvent, SegmentRecord } from '#shared/utils/drive'
-import { DEFAULT_SLICE_SECONDS } from '#shared/utils/drive'
+import { DEFAULT_SLICE_SECONDS, estimatedDriveMinutes } from '#shared/utils/drive'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { NavMetrics } from '#shared/utils/nav'
 import type { DiskWire } from '../../shared/disk-wire'
@@ -138,4 +139,23 @@ export function scrubContext(
   const nowMs =
     FIXTURE_STARTED_AT + (t + DEFAULT_SLICE_SECONDS + DEFAULT_LIVE_MARGIN_SECONDS) * 1000
   return { nowMs, round: roundAt(t, record.outcome.durationS, nowMs) }
+}
+
+/**
+ * The fixture drive as the public state names it while it plays: a made-up author, and the
+ * record's opening plan with its estimated drive time.
+ */
+export function fixtureSegment(record: SegmentRecord): NonNullable<DestinationSource['segment']> {
+  const { metrics } = record.plan
+  return {
+    id: 'fixture',
+    startedAt: new Date(FIXTURE_STARTED_AT).toISOString(),
+    submitter: { displayName: 'Ada', avatarUrl: null },
+    plan: metrics.reached
+      ? {
+          pathLengthM: Math.round(metrics.pathLengthM),
+          estimatedMinutes: estimatedDriveMinutes(record.plan),
+        }
+      : null,
+  }
 }
