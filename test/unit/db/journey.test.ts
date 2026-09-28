@@ -5,16 +5,19 @@ import { createTestDb, dbErrorOf, JOURNEY_T0, JUDGMENT, seedJourney } from './he
 
 let db: DB
 let close: () => Promise<void>
-beforeAll(async () => ({ db, close } = await createTestDb()))
+/** The journey every test reads. */
+let j: Awaited<ReturnType<typeof seedJourney>>
+beforeAll(async () => {
+  ;({ db, close } = await createTestDb())
+  j = await seedJourney(db)
+})
 afterAll(() => close())
 
 const HOUR = 3_600_000
 const plus = (ms: number) => new Date(JOURNEY_T0.getTime() + ms)
-const journey = () => seedJourney(db)
 
 describe('listJourneySegments', () => {
   it('lists settled drives newest first with stops, submitter and running distance', async () => {
-    const j = await journey()
     const { segments, total } = await listJourneySegments(db, j.mission.id, {
       limit: 50,
       offset: 0,
@@ -50,7 +53,6 @@ describe('listJourneySegments', () => {
   })
 
   it('pages by offset, keeping numbers and running distance of the whole journey', async () => {
-    const j = await journey()
     const page = await listJourneySegments(db, j.mission.id, { limit: 1, offset: 1 })
     expect(page.total).toBe(2)
     expect(page.segments.map((s) => [s.id, s.number])).toEqual([[j.arrival.id, 1]])
@@ -62,15 +64,13 @@ describe('listJourneySegments', () => {
 
 describe('getJourneySegment', () => {
   it('reads one settled drive of the mission as the list shows it', async () => {
-    const j = await journey()
     const one = await getJourneySegment(db, j.failure.id, { missionId: j.mission.id })
     const [listed] = (await listJourneySegments(db, j.mission.id, { limit: 1, offset: 0 })).segments
     expect(one).toEqual(listed)
   })
 
   it('does not find the drive still playing, nor one of another mission', async () => {
-    const j = await journey()
-    const other = await journey()
+    const other = await seedJourney(db)
     const playing = await dbErrorOf(
       getJourneySegment(db, j.driving.id, { missionId: j.mission.id }),
     )

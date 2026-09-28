@@ -9,7 +9,7 @@ import type { MissionRouteContext } from '#server/utils/mission/http'
 import { defineMissionHandlerWith, USER_GONE_MESSAGE } from '#server/utils/mission/http'
 import { createUserSessions } from '~~/modules/auth/runtime/server/lib/session'
 import { cookieHeader, KEY, ORIGIN, setCookies } from '../auth/helpers'
-import { createTestDb, memoryStore, T0 } from './helpers'
+import { createTestDb, memoryStore, SMALL_RULES, T0 } from './helpers'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -26,7 +26,13 @@ const platform: MissionRouteContext = {
 
 beforeAll(async () => {
   ;({ db, close } = await createTestDb())
-  await createMissionAtStop(db, { store, seed: 'mars', at: { x: 0, y: 0 }, now: T0 })
+  await createMissionAtStop(db, {
+    store,
+    seed: 'mars',
+    at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
+    now: T0,
+  })
 })
 afterAll(() => close())
 
