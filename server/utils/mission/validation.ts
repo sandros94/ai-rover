@@ -2,6 +2,7 @@ import * as v from 'valibot'
 
 export const SubmissionParams = v.object({ id: v.pipe(v.string(), v.uuid()) })
 export const SegmentParams = SubmissionParams
+export const UserParams = SubmissionParams
 
 /** Validation failures as a 400 naming each offending field. */
 export const BAD_INPUT = {

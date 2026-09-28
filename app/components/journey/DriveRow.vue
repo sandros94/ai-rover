@@ -6,13 +6,7 @@ import { driveRoute } from '~/composables/useJourney'
 /** One settled drive, a segment of the mission, in a line: where from and to, how it ended, how far and long, and whose. */
 const props = defineProps<{ drive: DriveJson }>()
 
-const STATUS = {
-  'arrived': { color: 'success', label: 'Arrived' },
-  'stopped-short': { color: 'warning', label: 'Stopped short' },
-  'failed': { color: 'error', label: 'Failed' },
-} as const
-
-const status = computed(() => STATUS[props.drive.status])
+const status = computed(() => DRIVE_STATUS[props.drive.status])
 const route = computed(() => driveRoute(props.drive))
 const started = computed(() =>
   new Date(props.drive.startedAt).toLocaleString(undefined, {
