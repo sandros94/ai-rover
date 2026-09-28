@@ -1,7 +1,12 @@
 import { slopeAt } from '../terrain/analysis'
 import type { StopDisk } from '../terrain/disk'
 import type { GridCell } from '../terrain/grid'
-import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from '../drive/models'
+import {
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  groundSpeedMps,
+  imagingStopCount,
+} from '../drive/models'
 import type { CostMapOptions } from './costmap'
 import { buildCostMap, DEFAULT_COST_MAP } from './costmap'
 import { NavError } from './errors'
@@ -39,7 +44,7 @@ export interface NavMetrics {
   /**
    * Planned drive time, seconds, under the default speed and stop models: each cell of the path
    * at the speed its seen slope allows, unseen cells at the speed of ground that costs the
-   * unrevealed penalty, an imaging stop every `imagingEveryM` short of the goal, and the turns in
+   * unrevealed penalty, an imaging stop every `imagingEveryM` away from either end, and the turns in
    * place. Assessments are left out, as they wait on ground the drive finds blocked; so are slip
    * and a turn to face the route from the rover's heading.
    */
@@ -192,11 +197,11 @@ function alongPath(
 
 /**
  * Standstill a drive of `lengthM` along `motions` spends under the default models: an imaging
- * stop at every `imagingEveryM` short of the goal, and the turns in place.
+ * stop at every `imagingEveryM` away from either end, and the turns in place.
  */
 function stopsAlong(lengthM: number, motions: readonly Motion[]): number {
   const { imagingEveryM, imagingStopS } = DEFAULT_STOP_MODEL
-  const imaging = lengthM > 0 ? Math.ceil(lengthM / imagingEveryM) - 1 : 0
+  const imaging = imagingStopCount(lengthM, imagingEveryM)
   let turnedRad = 0
   for (const motion of motions) if (motion.type === 'turn') turnedRad += Math.abs(motion.angleRad)
   return imaging * imagingStopS + turnedRad / DEFAULT_SPEED_MODEL.turnRateRadPerS

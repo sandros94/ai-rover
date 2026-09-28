@@ -224,6 +224,44 @@ describe('driveSegment with a turn in place', () => {
   })
 })
 
+describe('imaging stops near either end of the path', () => {
+  const world = syntheticWorld({})
+  const disk = syntheticDisk(world)
+  const revealed = revealedAfterStop(world, disk)
+  const start = { x: -50, y: 0, headingRad: 0 }
+  const imagedAt = (record: ReturnType<typeof driveSegment>['record']) =>
+    record.events.filter((event) => event.type === 'imaging').map((event) => event.x - start.x)
+
+  it('are skipped in the first and last 5 % of the path', () => {
+    const { record } = driveSegment(world, {
+      disk,
+      revealed,
+      start,
+      goal: { x: 50, y: 0 },
+      stops: { imagingEveryM: 2 },
+    })
+    const path = record.plan.metrics.pathLengthM
+    expect(path).toBeCloseTo(100, 6)
+    const at = imagedAt(record)
+    for (const driven of at) {
+      expect(driven).toBeGreaterThanOrEqual(0.05 * path - 0.1)
+      expect(driven).toBeLessThanOrEqual(0.95 * path + 0.1)
+    }
+    // Every 2 m from 6 m to 94 m: 2 and 4 m are in the first 5 m, 96 and 98 m in the last.
+    expect(at).toHaveLength(45)
+    expect(at[0]).toBeCloseTo(6, 1)
+    expect(at.at(-1)).toBeCloseTo(94, 1)
+  })
+
+  it('leaves none on a 26 m drive, where the stop at 25 m falls in the last 5 %', () => {
+    const { record } = driveSegment(world, { disk, revealed, start, goal: { x: -24, y: 0 } })
+    expect(imagedAt(record)).toEqual([])
+    // The plan's estimate applies the same rule.
+    expect(record.plan.metrics.estimatedDriveS).toBeCloseTo(record.outcome.durationS, -1)
+    expect(record.outcome.durationS).toBeCloseTo(26 / 0.033, -1)
+  })
+})
+
 describe('driveSegment input checks', () => {
   const world = syntheticWorld({})
   const disk = syntheticDisk(world)

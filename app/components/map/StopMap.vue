@@ -943,6 +943,7 @@ const focusRing = computed(() => {
     <div
       v-if="legend && terrain"
       data-test="relief-legend"
+      data-scene-widget
       class="pointer-events-none absolute bottom-2 left-2 rounded bg-(--ui-bg)/75 px-1.5 py-1 text-[10px] leading-tight text-muted tabular-nums"
     >
       <div class="flex items-end gap-2">

@@ -7,7 +7,13 @@ import type {
   StoredSegmentManifest,
 } from '#shared/utils/drive'
 import { KEYFRAME_STRIDE } from '#shared/utils/drive'
-import type { PlaybackClock, PlaybackMode, PlaybackRate, SegmentStream } from '#shared/utils/client'
+import type {
+  DisplayClock,
+  PlaybackClock,
+  PlaybackMode,
+  PlaybackRate,
+  SegmentStream,
+} from '#shared/utils/client'
 import { createPlaybackClock, createSegmentStream } from '#shared/utils/client'
 import { useJourneyClient } from './useJourneyClient'
 
@@ -16,16 +22,18 @@ import { useJourneyClient } from './useJourneyClient'
  * released slices and exposes the interpolated keyframe with the keyframes, events and reveals
  * so far, and the outcome only once playback reaches it. A new `segmentId` starts over; none
  * stops playback and clears everything.
- * `serverOffsetMs` (server minus browser clock, see `useMissionState`) keeps release times on
- * the server's clock. `endsAt`, the end of a drive already settled when it is started, keeps the
- * slice requests from going past its last slice.
+ * Playback runs on `display` (see `useDisplayClock`), stepped only by a seek or a new segment;
+ * slice requests run on the browser's clock plus `serverOffsetMs` (server minus browser clock, see
+ * `useMissionState`), the server's release times. `endsAt`, the end of a drive already settled
+ * when it is started, keeps the slice requests from going past its last slice.
  */
 export function useSegmentPlayback(
   segmentId: MaybeRefOrGetter<string | null | undefined>,
   options: {
-    serverOffsetMs?: MaybeRefOrGetter<number>
+    display: DisplayClock
+    serverOffsetMs?: MaybeRefOrGetter<number | null>
     endsAt?: MaybeRefOrGetter<string | Date | null | undefined>
-  } = {},
+  },
 ) {
   const client = useJourneyClient()
   const manifest = shallowRef<StoredSegmentManifest>()
@@ -46,7 +54,8 @@ export function useSegmentPlayback(
   const paused = ref(false)
   const error = shallowRef<unknown>(null)
 
-  const now = () => Date.now() + toValue(options.serverOffsetMs ?? 0)
+  const { display } = options
+  const serverNow = () => Date.now() + (toValue(options.serverOffsetMs) ?? 0)
   let clock: PlaybackClock | undefined
   let stream: SegmentStream | undefined
   let handle: number | undefined
@@ -56,9 +65,9 @@ export function useSegmentPlayback(
   function frameLoop(): void {
     handle = requestAnimationFrame(frameLoop)
     if (!clock || !stream) return
-    const wall = now()
+    const wall = display.now()
     const sim = clock.tick(wall)
-    stream.poll(wall).catch((caught: unknown) => {
+    stream.poll(serverNow()).catch((caught: unknown) => {
       error.value = caught
     })
     frame.value = stream.frameAt(sim)
@@ -104,8 +113,9 @@ export function useSegmentPlayback(
       const loaded = await client.getSegmentManifest(id)
       if (current !== generation) return
       manifest.value = loaded
+      display.snap()
       clock = createPlaybackClock({
-        now,
+        now: () => display.now(),
         startedAt: loaded.startedAt,
         sliceSeconds: loaded.sliceSeconds,
       })
@@ -154,6 +164,7 @@ export function useSegmentPlayback(
     paused,
     error,
     seek(simSeconds: number): void {
+      display.snap()
       clock?.seek(simSeconds)
       mode.value = clock?.mode ?? mode.value
     },

@@ -258,21 +258,33 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
       for (const [name, value] of Object.entries(headers)) event.res.headers.set(name, value)
       return result
     } catch (error) {
-      const answer = httpErrorOf(error)
-      if ((answer.body as { code?: unknown } | undefined)?.code !== 'USER_GONE') throw answer
-      await platform.sessions().clear(event)
-      // An error answer carries its own headers, not the event's: the cleared cookie rides on it.
-      const cleared = event.res.headers.getSetCookie().map((cookie) => ['set-cookie', cookie])
-      throw new HTTPError({
-        status: answer.status,
-        message: answer.message,
-        body: answer.body,
-        headers: cleared as [string, string][],
-        cause: answer.cause,
-      })
+      throw await answerRouteError(event, error, platform.sessions())
     } finally {
       if (purge) await purgeMissionCache(purge)
     }
+  })
+}
+
+/**
+ * The answer for anything a route throws, as {@link httpErrorOf} maps it; a `USER_GONE` answer
+ * also clears the session so the browser signs in afresh.
+ */
+export async function answerRouteError(
+  event: H3Event,
+  error: unknown,
+  sessions: Pick<UserSessions, 'clear'>,
+): Promise<HTTPError> {
+  const answer = httpErrorOf(error)
+  if ((answer.body as { code?: unknown } | undefined)?.code !== 'USER_GONE') return answer
+  await sessions.clear(event)
+  // An error answer carries its own headers, not the event's: the cleared cookie rides on it.
+  const cleared = event.res.headers.getSetCookie().map((cookie) => ['set-cookie', cookie])
+  return new HTTPError({
+    status: answer.status,
+    message: answer.message,
+    body: answer.body,
+    headers: cleared as [string, string][],
+    cause: answer.cause,
   })
 }
 

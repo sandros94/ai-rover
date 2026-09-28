@@ -19,25 +19,18 @@ const failure = computed(() => {
 
 if (loggedIn.value) await navigateTo(redirect.value)
 
-/*
- * Which providers exist depends on the address the visitor uses, so the server-side fetch must
- * carry the browser's own host headers rather than the function's internal address.
- */
-const { data } = await useFetch('/api/auth/providers', {
-  $fetch: useRequestFetch(),
-  default: () => ({ providers: [] as AuthProvider[] }),
-})
-const offers = (provider: AuthProvider) => data.value.providers.includes(provider)
+const providers = await useAuthProviders()
+const offers = (provider: AuthProvider) => providers.value.includes(provider)
 
 const handle = ref('')
 
-function signInUrl(provider: AuthProvider, extra: Record<string, string> = {}) {
-  return `/api/auth/${provider}?${new URLSearchParams({ redirect: redirect.value, ...extra })}`
-}
-
 async function signInWithAtproto() {
   const value = handle.value.trim()
-  if (value) await navigateTo(signInUrl('atproto', { handle: value }), { external: true })
+  if (value) {
+    await navigateTo(signInUrl('atproto', { redirect: redirect.value, handle: value }), {
+      external: true,
+    })
+  }
 }
 </script>
 
@@ -58,19 +51,23 @@ async function signInWithAtproto() {
           :description="failure"
         />
 
-        <UButton
-          v-if="offers('github')"
-          :to="signInUrl('github')"
-          external
-          icon="i-lucide-github"
-          color="neutral"
-          block
-        >
-          Continue with GitHub
-        </UButton>
+        <template v-for="provider in REDIRECT_PROVIDERS" :key="provider">
+          <UButton
+            v-if="offers(provider)"
+            :data-test="`sign-in-${provider}`"
+            :to="signInUrl(provider, { redirect })"
+            external
+            :icon="PROVIDER_DISPLAY[provider].icon"
+            color="neutral"
+            block
+          >
+            Continue with {{ PROVIDER_DISPLAY[provider].label }}
+          </UButton>
+        </template>
 
         <form
           v-if="offers('atproto')"
+          data-test="atproto-sign-in"
           class="flex flex-col gap-2"
           @submit.prevent="signInWithAtproto"
         >
@@ -78,13 +75,15 @@ async function signInWithAtproto() {
             v-model="handle"
             placeholder="alice.bsky.social"
             autocomplete="username"
-            aria-label="Bluesky or AT Protocol handle"
+            aria-label="AT Protocol handle or DID"
             icon="i-lucide-at-sign"
           />
-          <UButton type="submit" :disabled="!handle.trim()" block> Continue with Bluesky </UButton>
+          <UButton type="submit" :disabled="!handle.trim()" block>
+            Continue with AT Protocol
+          </UButton>
         </form>
 
-        <p v-if="!data.providers.length" class="text-sm text-muted">
+        <p v-if="!providers.length" data-test="no-sign-in" class="text-sm text-muted">
           Sign-in is not available on this address.
         </p>
       </div>

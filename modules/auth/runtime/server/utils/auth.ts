@@ -1,13 +1,16 @@
 import type { H3Event } from 'nitro/h3'
 import { defineHandler } from 'nitro/h3'
 import { useRuntimeConfig } from 'nitro/runtime-config'
-import type { SignedInSession, UserSession } from '../../types'
+import type { AuthProvider, SignedInSession, UserSession } from '../../types'
 import { createAtprotoHandler } from '../lib/atproto/handler'
 import type { AuthContext } from '../lib/context'
 import { createAuthContext } from '../lib/context'
+import type { DiscordConfig } from '../lib/discord'
+import { createDiscordHandler } from '../lib/discord'
 import type { GitHubConfig } from '../lib/github'
 import { createGitHubHandler } from '../lib/github'
 import type { OAuthHandlerOptions } from '../lib/oauth'
+import { providersFor } from '../lib/providers'
 
 let shared: AuthContext | undefined
 
@@ -25,6 +28,15 @@ export function useAuthContext(): AuthContext {
     })
   }
   return shared
+}
+
+/** The sign-in providers offered on the origin `event` was addressed to. */
+export function requestProviders(event: H3Event): AuthProvider[] {
+  return providersFor(new URL(event.req.url).origin, {
+    origins: useAuthContext().origins,
+    github: useRuntimeConfig().oauth.github,
+    discord: useRuntimeConfig().oauth.discord,
+  })
 }
 
 export function getUserSession(event: H3Event): Promise<UserSession> {
@@ -60,6 +72,19 @@ export function defineOAuthGitHubEventHandler(options: OAuthEventHandlerOptions<
     handler ??= createGitHubHandler(
       contextFor(options.config?.fetch),
       () => ({ ...useRuntimeConfig().oauth.github, ...options.config }),
+      options,
+    )
+    return handler(event)
+  })
+}
+
+/** Discord sign-in at the route it is mounted on; answers 404 until the client id and secret are set. */
+export function defineOAuthDiscordEventHandler(options: OAuthEventHandlerOptions<DiscordConfig>) {
+  let handler: ReturnType<typeof createDiscordHandler> | undefined
+  return defineHandler((event) => {
+    handler ??= createDiscordHandler(
+      contextFor(options.config?.fetch),
+      () => ({ ...useRuntimeConfig().oauth.discord, ...options.config }),
       options,
     )
     return handler(event)

@@ -65,19 +65,24 @@ const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
         <div data-test="reveal-drive">
           <dt class="text-xs text-muted">This drive</dt>
           <dd class="text-xl font-semibold">
-            {{ fmt.format(drive) }} <span class="text-xs font-normal text-muted">m²</span>
+            <span class="readout min-w-[8ch]">{{ fmt.format(drive) }}</span>
+            <span class="text-xs font-normal text-muted">m²</span>
           </dd>
         </div>
         <div data-test="reveal-journey">
           <dt class="text-xs text-muted">Journey</dt>
           <dd class="text-xl font-semibold">
-            {{ fmt.format(journey) }} <span class="text-xs font-normal text-muted">m²</span>
+            <span class="readout min-w-[8ch]">{{ fmt.format(journey) }}</span>
+            <span class="text-xs font-normal text-muted">m²</span>
           </dd>
         </div>
       </dl>
     </div>
     <div class="mt-3">
-      <p class="text-xs text-muted">Per minute · now {{ compact.format(rate.at(-1) ?? 0) }} m²</p>
+      <p class="text-xs text-muted">
+        Per minute · now
+        <span class="readout min-w-[4ch]">{{ compact.format(rate.at(-1) ?? 0) }}</span> m²
+      </p>
       <div class="relative h-10">
         <svg
           data-test="sparkline"

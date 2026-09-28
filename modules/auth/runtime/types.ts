@@ -1,5 +1,11 @@
 /** The identity providers a user can sign in with. */
-export type AuthProvider = 'github' | 'atproto'
+export const AUTH_PROVIDERS = ['github', 'discord', 'atproto'] as const
+
+export type AuthProvider = (typeof AUTH_PROVIDERS)[number]
+
+export function isAuthProvider(value: unknown): value is AuthProvider {
+  return AUTH_PROVIDERS.includes(value as AuthProvider)
+}
 
 /**
  * The signed-in user as the session carries it. Extend it by declaration merging on `#auth`;

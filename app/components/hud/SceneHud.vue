@@ -106,6 +106,8 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => observer?.disconnect())
+const sceneLayer = useTemplateRef<HTMLElement>('sceneLayer')
+useCreditsLift(sceneLayer, area)
 
 function toggleInstruments(): void {
   if (wide.value) hud.value.visible = !hud.value.visible
@@ -124,9 +126,14 @@ function togglePanel(id: PanelId): void {
 const status = computed(() => {
   const p = props.playback
   if (!p) return null
-  if (p.paused) return { label: `Paused ${formatDuration(p.t)}`, color: 'neutral' as const }
+  if (p.paused) return { label: 'Paused', time: formatDuration(p.t), color: 'neutral' as const }
   if (p.mode === 'live') return { label: 'Live', color: 'error' as const }
-  return { label: `Replay ${formatDuration(p.t)} · ${p.rate}×`, color: 'info' as const }
+  return {
+    label: 'Replay',
+    time: formatDuration(p.t),
+    rate: `${p.rate}×`,
+    color: 'info' as const,
+  }
 })
 
 const SHORTCUTS = computed(() => [
@@ -166,8 +173,11 @@ defineShortcuts(
         :color="status.color"
         variant="subtle"
         :icon="playback?.mode === 'live' && !playback.paused ? 'i-lucide-radio' : undefined"
-        :label="status.label"
-      />
+      >
+        {{ status.label }}
+        <span v-if="status.time" class="readout min-w-[8ch]">{{ status.time }}</span>
+        <template v-if="status.rate"> · {{ status.rate }}</template>
+      </UBadge>
       <div class="ml-auto flex items-center gap-0.5">
         <UButton
           data-test="hud-toggle"
@@ -261,7 +271,7 @@ defineShortcuts(
       </div>
     </SiteHeader>
     <main ref="area" class="relative min-h-0 flex-1">
-      <div data-test="scene-layer" class="absolute inset-0">
+      <div ref="sceneLayer" data-test="scene-layer" class="absolute inset-0">
         <slot name="scene" />
       </div>
       <HudLayer>

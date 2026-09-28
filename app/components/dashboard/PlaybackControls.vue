@@ -57,7 +57,10 @@ function onScrub(value: number | undefined): void {
       variant="ghost"
       @click="emit('toggle')"
     />
-    <span class="font-mono tabular-nums" data-test="sim-time">{{ formatDuration(position) }}</span>
+    <!-- h:mm:ss: a replayed journey skips the idle time between drives, so it stays under 100 h. -->
+    <span class="readout min-w-[8ch] font-mono" data-test="sim-time">{{
+      formatDuration(position)
+    }}</span>
     <USlider
       class="min-w-16 flex-1"
       :model-value="position"
@@ -68,9 +71,11 @@ function onScrub(value: number | undefined): void {
       aria-label="Playback position"
       @update:model-value="onScrub"
     />
-    <span class="hidden text-muted sm:inline">{{ formatDuration(max) }}</span>
+    <span class="readout hidden min-w-[8ch] font-mono text-muted sm:inline" data-test="duration">{{
+      formatDuration(max)
+    }}</span>
     <span v-if="lagS !== null" class="hidden text-muted md:inline" data-test="lag">
-      {{ Math.max(0, Math.round(lagS)) }} s behind
+      <span class="readout min-w-[3ch]">{{ Math.max(0, Math.round(lagS)) }}</span> s behind
     </span>
     <div class="hidden items-center gap-0.5 sm:flex">
       <UButton

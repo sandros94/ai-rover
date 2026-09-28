@@ -151,8 +151,10 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
         :disabled="!record"
         class="min-w-48 flex-1"
       />
-      <span class="font-mono text-sm tabular-nums">
-        {{ t.toFixed(1) }} / {{ duration.toFixed(1) }} s · {{ events.length }} events
+      <span class="font-mono text-sm">
+        <span class="readout min-w-[6ch]">{{ t.toFixed(1) }}</span> /
+        <span class="readout min-w-[6ch]">{{ duration.toFixed(1) }}</span> s ·
+        <span class="readout min-w-[4ch]">{{ events.length }}</span> events
       </span>
     </header>
     <main class="flex-1 p-6">

@@ -283,7 +283,8 @@ const TREADS = [0, 60, 120, 180, 240, 300]
           <span class="sr-only">{{ STATUS[r.level].label }}</span>
         </dt>
         <dd class="font-semibold tabular-nums">
-          {{ r.value }} <span class="text-xs font-normal text-dimmed">/ {{ r.limit }}</span>
+          <span class="readout min-w-[6ch]">{{ r.value }}</span>
+          <span class="text-xs font-normal text-dimmed">/ {{ r.limit }}</span>
         </dd>
       </div>
     </dl>

@@ -35,7 +35,7 @@ function oneOf(values: readonly string[]) {
   return sql.raw(values.map((value) => `'${value}'`).join(', '))
 }
 
-export const IDENTITY_PROVIDERS = ['github', 'atproto'] as const
+export const IDENTITY_PROVIDERS = ['github', 'discord', 'atproto'] as const
 export const MISSION_STATUSES = ['active', 'ended'] as const
 /** `void`: the drive beside the round failed, so nothing won it and it never starts a segment. */
 export const ROUND_STATUSES = ['open', 'closed', 'void'] as const
@@ -65,28 +65,48 @@ export type StoredJudgment = Omit<
 > &
   Partial<Pick<SubmissionJudgment, 'explorationValue' | 'explorationWeight'>>
 
-export const userAccount = snakeCase.table('user_account', {
-  id: id(),
-  createdAt: createdAt(),
-  displayName: text().notNull(),
-  avatarUrl: text(),
-  handle: text(),
-})
+/**
+ * The name, avatar and handle are those of the identity `primary_provider` names, copied from it
+ * whenever it changes; an account without identities (a development login) keeps its own.
+ */
+export const userAccount = snakeCase.table(
+  'user_account',
+  {
+    id: id(),
+    createdAt: createdAt(),
+    displayName: text().notNull(),
+    avatarUrl: text(),
+    handle: text(),
+    /** One of the account's own identities; the repository keeps it so. */
+    primaryProvider: text({ enum: IDENTITY_PROVIDERS }),
+  },
+  (t) => [
+    check(
+      'user_account_primary_provider_check',
+      sql`${t.primaryProvider} is null or ${t.primaryProvider} in (${oneOf(IDENTITY_PROVIDERS)})`,
+    ),
+  ],
+)
 
 export const userIdentity = snakeCase.table(
   'user_identity',
   {
     provider: text({ enum: IDENTITY_PROVIDERS }).notNull(),
-    /** The provider's stable account id (a DID for AT Protocol, the numeric id for GitHub). */
+    /** The provider's stable account id (a DID for AT Protocol, the numeric id for GitHub and Discord). */
     subject: text().notNull(),
     userId: uuid()
       .notNull()
       .references(() => userAccount.id),
+    /** The provider's profile as of the last sign-in with this identity. */
+    displayName: text().notNull(),
+    avatarUrl: text(),
+    handle: text(),
     createdAt: createdAt(),
   },
   (t) => [
     primaryKey({ columns: [t.provider, t.subject] }),
-    index('user_identity_user_idx').on(t.userId),
+    // One identity per provider and user, so a provider names the identity within an account.
+    unique('user_identity_user_provider_unique').on(t.userId, t.provider),
     check('user_identity_provider_check', sql`${t.provider} in (${oneOf(IDENTITY_PROVIDERS)})`),
   ],
 )

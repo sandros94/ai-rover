@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { serverClockOffset } from '#shared/utils/client'
+import {
+  CLOCK_OFFSET_WINDOW,
+  ClientError,
+  createClockOffsetEstimate,
+  serverClockOffset,
+} from '#shared/utils/client'
 
 describe('serverClockOffset', () => {
   it('is server minus browser clock at the middle of the round trip', () => {
@@ -30,5 +35,37 @@ describe('serverClockOffset', () => {
     expect(serverClockOffset({ ...base, age: '0' })).toBe(0)
     // Anything but a non-negative integer of seconds is ignored.
     for (const age of ['', '-3', '1.5', 'soon']) expect(serverClockOffset({ ...base, age })).toBe(0)
+  })
+})
+
+describe('createClockOffsetEstimate', () => {
+  it('has no estimate before the first sample, then takes it', () => {
+    const estimate = createClockOffsetEstimate()
+    expect(estimate.offsetMs).toBeNull()
+    expect(estimate.add(420)).toBe(420)
+    expect(estimate.offsetMs).toBe(420)
+  })
+
+  it('ignores a single outlier among the samples it keeps', () => {
+    const estimate = createClockOffsetEstimate()
+    for (const sample of [1000, 1040, 980, 1020]) estimate.add(sample)
+    const before = estimate.add(1010)
+    expect(before).toBe(1010)
+    // A stale CDN copy, a second off, barely moves it.
+    expect(estimate.add(2000)).toBe(1015)
+    expect(estimate.add(-500)).toBe(1010)
+  })
+
+  it('forgets samples older than the window', () => {
+    const estimate = createClockOffsetEstimate()
+    for (let i = 0; i < CLOCK_OFFSET_WINDOW; i++) estimate.add(0)
+    for (let i = 0; i < CLOCK_OFFSET_WINDOW / 2; i++) estimate.add(3000)
+    expect(estimate.offsetMs).toBe(1500)
+    estimate.add(3000)
+    expect(estimate.offsetMs).toBe(3000)
+  })
+
+  it('refuses a sample that is not finite', () => {
+    expect(() => createClockOffsetEstimate().add(Number.NaN)).toThrow(ClientError)
   })
 })

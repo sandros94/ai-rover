@@ -16,11 +16,12 @@ const SERVER_UTILS = [
   'clearUserSession',
   'requireUserSession',
   'defineOAuthGitHubEventHandler',
+  'defineOAuthDiscordEventHandler',
   'defineOAuthAtprotoEventHandler',
 ]
 
 /**
- * Sessions and sign-in: a JWE cookie session, GitHub OAuth and AT Protocol OAuth (public client),
+ * Sessions and sign-in: a JWE cookie session, GitHub and Discord OAuth and AT Protocol OAuth (public client),
  * with server utils, the `useUserSession()` composable, an `authenticated` route middleware and
  * the types at `#auth`. The sign-in routes themselves are the app's: it mounts the
  * `defineOAuth…EventHandler`s and decides in `onSuccess` which user an identity belongs to.
@@ -54,15 +55,25 @@ export default defineNuxtModule({
       handler: `${routes}/providers.get`,
     })
     addServerHandler({
+      middleware: true,
+      handler: resolver.resolve('./runtime/server/middleware/providers'),
+    })
+    addServerHandler({
       route: '/api/auth/atproto/client-metadata.json',
       method: 'get',
       handler: `${routes}/client-metadata.get`,
     })
 
-    addImports({
-      name: 'useUserSession',
-      from: resolver.resolve('./runtime/app/composables/useUserSession'),
-    })
+    addImports([
+      {
+        name: 'useUserSession',
+        from: resolver.resolve('./runtime/app/composables/useUserSession'),
+      },
+      {
+        name: 'useAuthProviders',
+        from: resolver.resolve('./runtime/app/composables/useAuthProviders'),
+      },
+    ])
     addPlugin(resolver.resolve('./runtime/app/plugins/session.server'))
     addPlugin(resolver.resolve('./runtime/app/plugins/session.client'))
     addRouteMiddleware({

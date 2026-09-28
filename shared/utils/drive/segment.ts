@@ -23,7 +23,7 @@ import { DriveError } from './errors'
 import type { KeyframeBlock } from './keyframes'
 import { KEYFRAME_STRIDE } from './keyframes'
 import type { SpeedModel, StopModel } from './models'
-import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from './models'
+import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps, imagingAllowed } from './models'
 
 /**
  * Wheel slip `s = min(max, loose · gain · (tan slope / tan slopeLimit)²)`: commanded travel
@@ -252,6 +252,8 @@ class Drive {
   private route = new Map<number, number>()
   /** Odometer reading when the current route was taken. */
   private routeFrom = 0
+  /** Odometer reading at which the current route ends: the path as planned now, in full. */
+  private plannedM = 0
   private cursor: Cursor
   private pose: RoverPose | undefined
   private posed: { x: number; y: number; heading: number } | undefined
@@ -369,7 +371,7 @@ class Drive {
     if (this.odometer >= this.nextImaging) {
       this.nextImaging =
         (Math.floor(this.odometer / this.o.imagingEveryM) + 1) * this.o.imagingEveryM
-      this.hold('imaging', this.o.imagingSteps)
+      if (imagingAllowed(this.odometer, this.plannedM)) this.hold('imaging', this.o.imagingSteps)
     }
     const travelled = this.odometer - this.routeFrom
     for (const [k, at] of this.route) {
@@ -460,6 +462,7 @@ class Drive {
     const { waypoints } = plan.route
     this.route = new Map()
     this.routeFrom = this.odometer
+    this.plannedM = this.odometer + plan.metrics.pathLengthM
     let legStart = 0
     for (let k = 1; k < waypoints.length; k++) {
       const a = waypoints[k - 1]!

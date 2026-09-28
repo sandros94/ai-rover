@@ -26,10 +26,10 @@ const props = withDefaults(
     state: MissionStateJson | null
     /** Why the state did not load; a 404 means no mission has landed. */
     error?: unknown
-    /** Server minus browser clock, milliseconds. */
-    serverOffsetMs?: number
+    /** Server minus browser clock, milliseconds; null before the first estimate. */
+    serverOffsetMs?: number | null
   }>(),
-  { serverOffsetMs: 0 },
+  { serverOffsetMs: null },
 )
 
 /** Something the visitor did changed the mission state: an LGTM, a submission, a flag. */
@@ -64,7 +64,9 @@ const playing = computed(() => {
   return null
 })
 
+const display = useDisplayClock(() => props.serverOffsetMs)
 const playback = useSegmentPlayback(() => playing.value?.id, {
+  display,
   serverOffsetMs: () => props.serverOffsetMs,
   endsAt: () => playing.value?.endsAt,
 })
@@ -96,13 +98,13 @@ const profile = computed<SlopeProfile | undefined>(() => {
   return polyline && g && polyline.length > 1 ? slopeProfile(polyline, g) : undefined
 })
 
-const now = ref(Date.now())
+/** The display clock, read once a second for the countdowns. */
+const nowMs = ref(display.now())
 let ticker: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
-  ticker = setInterval(() => (now.value = Date.now()), 1000)
+  ticker = setInterval(() => (nowMs.value = display.now()), 1000)
 })
 onBeforeUnmount(() => clearInterval(ticker))
-const nowMs = computed(() => now.value + props.serverOffsetMs)
 
 const drive = computed(() => {
   const p = playing.value

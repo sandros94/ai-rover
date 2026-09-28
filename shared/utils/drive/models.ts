@@ -18,7 +18,10 @@ export interface SpeedModel {
  * speed model's turn rate), an assessment before every replan, and periodic imaging.
  */
 export interface StopModel {
-  /** Ground distance between imaging stops, metres; none at the goal. Default 25. */
+  /**
+   * Ground distance between imaging stops, metres; none within {@link IMAGING_END_MARGIN} of
+   * either end. Default 25.
+   */
   imagingEveryM?: number
   /** Length of an imaging stop, seconds. Default 30. */
   imagingStopS?: number
@@ -48,6 +51,25 @@ export const DEFAULT_STOP_MODEL: Readonly<Required<StopModel>> = Object.freeze({
   imagingStopS: 30,
   assessStopS: 20,
 })
+
+/**
+ * Share of the planned path at each end where a due imaging stop is skipped: the ground around
+ * the stop left and the stop reached is imaged there, so a stop this close adds little.
+ */
+export const IMAGING_END_MARGIN = 0.05
+
+/** Whether a due imaging stop is made `drivenM` along a path planned `plannedM` long. */
+export function imagingAllowed(drivenM: number, plannedM: number): boolean {
+  const margin = IMAGING_END_MARGIN * plannedM
+  return drivenM >= margin && plannedM - drivenM >= margin
+}
+
+/** Imaging stops along a path of `lengthM`, one every `everyM` where {@link imagingAllowed}. */
+export function imagingStopCount(lengthM: number, everyM: number): number {
+  let count = 0
+  for (let at = everyM; at < lengthM; at += everyM) if (imagingAllowed(at, lengthM)) count++
+  return count
+}
 
 /**
  * Speed over ground at a slope `ratio` (tan slope over tan of the slope limit), m/s: the cruise

@@ -46,10 +46,14 @@ const covered = computed(() => (1 - last.value.slip) * 100)
       />
     </div>
     <p class="text-3xl font-semibold">
-      <span data-test="slip-value">{{ Math.round(last.slip * 100) }}</span>
+      <span data-test="slip-value" class="readout min-w-[3ch]">{{
+        Math.round(last.slip * 100)
+      }}</span>
       <span class="text-base font-normal text-muted">%</span>
     </p>
-    <p class="text-xs text-muted">Wheels turned {{ last.commandedM.toFixed(2) }} m</p>
+    <p class="text-xs text-muted">
+      Wheels turned <span class="readout min-w-[4ch]">{{ last.commandedM.toFixed(2) }}</span> m
+    </p>
     <svg
       data-test="slip-track"
       :data-level="level"
@@ -87,7 +91,9 @@ const covered = computed(() => (1 - last.value.slip) * 100)
       />
     </svg>
     <div class="flex justify-between gap-2 text-xs text-muted">
-      <span>Ground covered {{ last.actualM.toFixed(2) }} m</span>
+      <span>
+        Ground covered <span class="readout min-w-[4ch]">{{ last.actualM.toFixed(2) }}</span> m
+      </span>
       <span>stuck below {{ Math.round((1 - stuckAbove) * 100) }} % covered</span>
     </div>
   </UCard>

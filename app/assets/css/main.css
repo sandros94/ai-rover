@@ -34,3 +34,13 @@
   --viz-grid: #2c2c2a;
   --viz-axis: #383835;
 }
+
+/*
+ * A number that changes while it is read: digits of one width, right-aligned in a box set as wide
+ * as its widest value with `min-w-[Nch]`, so nothing beside it moves as it counts.
+ */
+@utility readout {
+  display: inline-block;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
