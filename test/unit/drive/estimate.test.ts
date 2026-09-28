@@ -20,7 +20,7 @@ describe('the planned drive time', () => {
   const flat = navDisk({ size: 241, radius: 120 })
   const seen = new Uint8Array(241 * 241).fill(1)
 
-  it('is the path at its speed, an imaging stop every 25 m short of the goal, and the turns', () => {
+  it('is the path at its speed, an imaging stop every 25 m away from either end, and the turns', () => {
     const straight = planSegment(flat, {
       revealed: seen,
       start: { x: -50, y: 0 },
@@ -49,7 +49,12 @@ describe('the planned drive time', () => {
       if (motion.type === 'turn') turned += Math.abs(motion.angleRad)
     expect(turned).toBeGreaterThan(0)
     const { pathLengthM } = around.metrics
-    const imaging = (Math.ceil(pathLengthM / 25) - 1) * imagingStopS
+    // Stops at 25 m steps, none in the first or last 5 % of the path.
+    let stops = 0
+    for (let at = 25; at < pathLengthM; at += 25) {
+      if (at >= 0.05 * pathLengthM && pathLengthM - at >= 0.05 * pathLengthM) stops++
+    }
+    const imaging = stops * imagingStopS
     expect(around.metrics.estimatedDriveS).toBeCloseTo(
       pathLengthM / AUTONAV_EFFECTIVE_MPS + imaging + turned / DEFAULT_SPEED_MODEL.turnRateRadPerS,
       6,

@@ -23,7 +23,14 @@ export type {
 } from './segment'
 export { DEFAULT_SLIP_MODEL, driveSegment } from './segment'
 export type { SpeedModel, StopModel } from './models'
-export { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from './models'
+export {
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  groundSpeedMps,
+  IMAGING_END_MARGIN,
+  imagingAllowed,
+  imagingStopCount,
+} from './models'
 export type { DriveStatus, StatusRun } from './status'
 export { statusAt, statusRuns } from './status'
 export type { JourneyKey } from './keys'
