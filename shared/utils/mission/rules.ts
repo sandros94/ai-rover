@@ -1,3 +1,4 @@
+import { DEFAULT_STOP_RADIUS } from '../terrain/disk'
 import { MissionError } from './errors'
 
 /**
@@ -5,6 +6,12 @@ import { MissionError } from './errors'
  * equal to the radius counts as within.
  */
 export interface MissionRules {
+  /**
+   * Radius of every stop disk, metres: the ground a stop publishes and goals are planned over.
+   * A goal made during a drive is in band from the anchor yet planned over the disk of the stop
+   * left, so the radius is at least twice `segmentDistanceBand.maxM`.
+   */
+  stopRadiusM: number
   /** Allowed straight-line distance from the segment start to a submitted goal, metres. */
   segmentDistanceBand: { minM: number; maxM: number }
   failureZone: {
@@ -46,6 +53,7 @@ export interface MissionRules {
 }
 
 export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
+  stopRadiusM: DEFAULT_STOP_RADIUS,
   segmentDistanceBand: Object.freeze({ minM: 50, maxM: 250 }),
   failureZone: Object.freeze({
     destinationRadiusM: 30,

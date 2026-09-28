@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { BufferAttribute, BufferGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
+import {
+  BufferAttribute,
+  BufferGeometry,
+  Group,
+  Mesh,
+  MeshDepthMaterial,
+  MeshLambertMaterial,
+} from 'three'
 import type { GridRect } from '#shared/utils/client'
 import { maskChange } from '#shared/utils/client'
 import type { ChunkFog, ChunkMesh, LodLevel, TerrainChunk } from '#shared/utils/client/scene'
@@ -29,8 +36,8 @@ const props = defineProps<{
   /** World height at a point, for shading chunk edges from their neighbours. */
   heightAt?: (x: number, y: number) => number | undefined
   /**
-   * The stop disk's fog. A new value with `rects` redraws only the chunks meeting those
-   * rectangles of the disk grid; without `rects`, every chunk.
+   * The stop disk's fog, drawn in the scene's fog colour. A new value with `rects` redraws only
+   * the chunks meeting those rectangles of the disk grid; without `rects`, every chunk.
    */
   fog?: ChunkFog & { rects?: GridRect[] }
   /**
@@ -61,8 +68,42 @@ interface Drawn {
 }
 
 const root = new Group()
-// Shading is baked into the vertex colours, so the terrain needs no lights.
-const material = new MeshBasicMaterial({ vertexColors: true })
+const material = new MeshLambertMaterial({ vertexColors: true })
+material.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      '#include <common>\nattribute float fogAmount;\nvarying float vFogAmount;',
+    )
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFogAmount = fogAmount;')
+  // three applies fog after tone mapping and in the output colour space, as it clears to the
+  // background: fogged ground mixed to the fog colour here is the sky's colour exactly, at any
+  // exposure. The scene always has fog, so the mix is never left out.
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vFogAmount;')
+    .replace(
+      '#include <fog_fragment>',
+      '#include <fog_fragment>\n#ifdef USE_FOG\ngl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, vFogAmount );\n#endif',
+    )
+}
+/**
+ * The shadow pass draws the ground without its skirts. A skirt's top edge lies on the ground,
+ * and where a coarse chunk meets a fine one it stands a few centimetres proud of it: a low sun
+ * would draw every chunk seam as a line of shadow. Skirt fragments, and only theirs, have a
+ * `skirt` above 0.
+ */
+const depthMaterial = new MeshDepthMaterial()
+depthMaterial.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      '#include <common>\nattribute float skirt;\nvarying float vSkirt;',
+    )
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkirt = skirt;')
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vSkirt;')
+    .replace('void main() {', 'void main() {\n  if ( vSkirt > 0.0 ) discard;')
+}
 const drawn = new Map<string, Drawn>()
 let lastFocus: { x: number; y: number } | undefined
 
@@ -94,6 +135,10 @@ function build(entry: Drawn, level: Level): NonNullable<Drawn['built'][number]> 
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new BufferAttribute(arrays.positions, 3))
   geometry.setAttribute('color', new BufferAttribute(arrays.colors, 3))
+  geometry.setAttribute('normal', new BufferAttribute(arrays.normals, 3))
+  geometry.setAttribute('fogAmount', new BufferAttribute(arrays.fogAmounts, 1))
+  const skirt = new Uint8Array(arrays.fogAmounts.length).fill(1, arrays.side * arrays.side)
+  geometry.setAttribute('skirt', new BufferAttribute(skirt, 1))
   geometry.setIndex(new BufferAttribute(arrays.indices, 1))
   geometry.computeBoundingSphere()
   return { geometry, arrays }
@@ -143,8 +188,9 @@ function applyFog(): void {
 }
 
 /**
- * Rewrites heights and colours of the levels built so far to the current fog and neighbours,
- * keeping their geometry, and moves to the fog level or back as the fog now asks.
+ * Rewrites heights, colours, normals and fog amounts of the levels built so far to the current
+ * fog and neighbours, keeping their geometry, and moves to the fog level or back as the fog now
+ * asks.
  */
 function repaint(entry: Drawn): void {
   const chunk = entry.source.chunk
@@ -152,8 +198,8 @@ function repaint(entry: Drawn): void {
   entry.built.forEach((built, level) => {
     if (!built) return
     refogChunkMesh(built.arrays, chunk, meshOptions(chunk, level as Level))
-    built.geometry.getAttribute('position').needsUpdate = true
-    built.geometry.getAttribute('color').needsUpdate = true
+    for (const name of ['position', 'color', 'normal', 'fogAmount'])
+      built.geometry.getAttribute(name).needsUpdate = true
     built.geometry.computeBoundingSphere()
   })
   entry.fogged = isFogged(chunk)
@@ -192,6 +238,9 @@ function sync(): void {
     let entry = drawn.get(key)
     if (!entry) {
       const mesh = new Mesh(undefined, material)
+      mesh.castShadow = true
+      mesh.customDepthMaterial = depthMaterial
+      mesh.receiveShadow = true
       const { cx, cy, vertexCount, cellSize } = source.chunk
       const size = (vertexCount - 1) * cellSize
       mesh.position.set(cx * size, cy * size, 0)
@@ -262,6 +311,7 @@ onBeforeUnmount(() => {
   for (const entry of drawn.values()) drop(entry)
   drawn.clear()
   material.dispose()
+  depthMaterial.dispose()
 })
 </script>
 

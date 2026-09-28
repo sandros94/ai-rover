@@ -19,7 +19,17 @@ import {
 } from '#shared/utils/drive'
 import { parseStopManifest, revealedKey, stopManifestKey } from '#shared/utils/terrain'
 import { forced, stopShortAt } from './forced'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, T0, tableCounts, users } from './helpers'
+import {
+  at,
+  createTestDb,
+  fakeJev,
+  memoryStore,
+  MINUTE,
+  SMALL_RULES,
+  T0,
+  tableCounts,
+  users,
+} from './helpers'
 
 vi.mock('#shared/utils/drive/segment', async (original) =>
   (await import('./forced')).forcedDriveSegment(original),
@@ -38,6 +48,7 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
     store,
     seed: 'mars',
     at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
     now: T0,
   })
   const missionId = created.mission.id
@@ -67,7 +78,7 @@ describe('an idle rover and the grace window', () => {
   it('closes the round five minutes after the first submission, then starts the drive', async () => {
     const m = await landed()
     const submittedAt = at(T0, 60 * MINUTE)
-    const { submission } = await m.submit(m.ada.id, { x: 0, y: 80 }, submittedAt)
+    const { submission } = await m.submit(m.ada.id, { x: 0, y: 20 }, submittedAt)
 
     const early = await m.tick(at(submittedAt, 5 * MINUTE - 1))
     expect(early).toEqual({ settled: null, closed: null, started: null, opened: null })
@@ -115,7 +126,7 @@ describe('an idle rover and the grace window', () => {
       opensAt: now,
       fromStopId: m.stop.id,
       anchorX: 0,
-      anchorY: 80,
+      anchorY: 20,
     })
     expect((await getMission(db, m.missionId)).currentStopId).toBe(m.stop.id)
     expect(await listStops(db, m.missionId)).toHaveLength(1)
@@ -124,7 +135,7 @@ describe('an idle rover and the grace window', () => {
 
   it('shows the drive and the anchor, without the outcome or the end, until it is released', async () => {
     const m = await landed()
-    const winner = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const winner = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const now = at(T0, 10 * MINUTE)
     const tick = await m.tick(now)
     const state = await publicMissionState(db, { missionId: m.missionId, now })
@@ -153,22 +164,22 @@ describe('an idle rover and the grace window', () => {
       opensAt: now,
       closesAt: null,
       fromStopId: m.stop.id,
-      anchor: { x: 0, y: 80 },
+      anchor: { x: 0, y: 20 },
       submissions: [],
     })
   })
 
   it('plans a submission made during the drive from the anchor over what was seen before it', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     await m.tick(at(T0, 6 * MINUTE))
     const during = at(T0, 10 * MINUTE)
-    // 220 m from the anchor, 300 m from the stop the rover left: the band is the anchor's.
-    const far = await m.submit(m.bob.id, { x: 0, y: 300 }, during)
+    // 55 m from the anchor, 75 m from the stop the rover left: the band is the anchor's.
+    const far = await m.submit(m.bob.id, { x: 0, y: 75 }, during)
     expect(far.accepted).toBe(true)
-    const beside = await m.submit(m.cy.id, { x: 80, y: 80 }, during)
-    expect(beside.submission!.metrics.straightLineM).toBe(80)
-    expect(beside.submission!.summary.destination.straight_line_m).toBe(80)
+    const beside = await m.submit(m.cy.id, { x: 20, y: 20 }, during)
+    expect(beside.submission!.metrics.straightLineM).toBe(20)
+    expect(beside.submission!.summary.destination.straight_line_m).toBe(20)
     // Stop 0's mask is what the plan saw; nothing from the drive leaked into it.
     expect(await m.published(1)).toBe(false)
   })
@@ -177,7 +188,7 @@ describe('an idle rover and the grace window', () => {
 describe('settlement', () => {
   it('creates and publishes the stop the drive reached only once the drive ends', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const started = (await m.tick(at(T0, 6 * MINUTE))).started!
     const driving = await getSegment(db, started.segmentId)
     expect(driving.outcome!.kind).toBe('arrived')
@@ -213,7 +224,7 @@ describe('settlement', () => {
     expect(await getOpenRound(db, m.missionId)).toMatchObject({
       fromStopId: stop1!.id,
       anchorX: 0,
-      anchorY: 80,
+      anchorY: 20,
     })
     // Nobody submitted during the drive: the rover idles at its new stop.
     const state = await publicMissionState(db, { missionId: m.missionId, now: driving.endsAt })
@@ -237,10 +248,10 @@ describe('settlement', () => {
 
   it('closes the next round when the drive ends if a submission was waiting', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const first = (await m.tick(at(T0, 6 * MINUTE))).started!
     const driving = await getSegment(db, first.segmentId)
-    const goal = { x: 80, y: 80 }
+    const goal = { x: 20, y: 20 }
     const { submission } = await m.submit(m.bob.id, goal, at(T0, 10 * MINUTE))
 
     // It closes with the drive, whose end stays private while it plays.
@@ -265,27 +276,27 @@ describe('settlement', () => {
 
   it('re-plans and re-judges the waiting submissions from where a drive stopped short', async () => {
     const m = await landed()
-    forced.outcomes.push(stopShortAt({ x: 0, y: 40 }))
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    forced.outcomes.push(stopShortAt({ x: 0, y: 10 }))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     const beside = (await getOpenRound(db, m.missionId))!
     const during = at(T0, 10 * MINUTE)
-    // Against the anchor (0, 80) all three are in the band; from (0, 40) only Cy's still is.
-    const tooFar = await m.submit(m.bob.id, { x: 10, y: 320 }, during)
-    const valid = await m.submit(m.cy.id, { x: 80, y: 80 }, during)
-    const tooNear = await m.submit(m.dee.id, { x: 0, y: -5 }, during)
+    // Against the anchor (0, 20) all three are in the band; from (0, 10) only Cy's still is.
+    const tooFar = await m.submit(m.bob.id, { x: 2, y: 80 }, during)
+    const valid = await m.submit(m.cy.id, { x: 20, y: 20 }, during)
+    const tooNear = await m.submit(m.dee.id, { x: 0, y: -1 }, during)
     for (const result of [tooFar, valid, tooNear]) expect(result.accepted).toBe(true)
-    expect(valid.submission!.metrics.straightLineM).toBe(80)
+    expect(valid.submission!.metrics.straightLineM).toBe(20)
     const asked = m.jev.summaries.length
 
     const tick = await m.tick(driving.endsAt)
     expect(tick.settled).toEqual({ segmentId: driving.id, status: 'stopped-short' })
     const stop1 = await getStop(db, (await getMission(db, m.missionId)).currentStopId!)
-    expect(stop1).toMatchObject({ index: 1, x: 0, y: 40, fromSegmentId: driving.id })
+    expect(stop1).toMatchObject({ index: 1, x: 0, y: 10, fromSegmentId: driving.id })
     expect(await getRound(db, beside.id)).toMatchObject({
       fromStopId: stop1.id,
       anchorX: 0,
-      anchorY: 40,
+      anchorY: 10,
     })
     for (const refused of [tooFar, tooNear]) {
       expect(await getSubmission(db, refused.submission!.id)).toMatchObject({
@@ -296,7 +307,7 @@ describe('settlement', () => {
     // Only the survivor was judged again, over the plan from the real stop; it then won.
     expect(m.jev.summaries).toHaveLength(asked + 1)
     const judged = await getSubmission(db, valid.submission!.id)
-    expect(judged.metrics.straightLineM).toBeCloseTo(Math.hypot(80, 40), 9)
+    expect(judged.metrics.straightLineM).toBeCloseTo(Math.hypot(20, 10), 9)
     expect(judged.summary).toEqual(m.jev.summaries.at(-1))
     expect(judged.summary).not.toEqual(valid.submission!.summary)
     expect(tick.closed).toEqual({ roundId: beside.id, winnerSubmissionId: judged.id })
@@ -306,7 +317,7 @@ describe('settlement', () => {
 
   it('changes nothing when ticked twice at the same instant', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const now = at(T0, 6 * MINUTE)
     const started = (await m.tick(now)).started!
     const idle = { settled: null, closed: null, started: null, opened: null }
@@ -329,8 +340,8 @@ describe('settlement', () => {
 describe('likes and ranking', () => {
   it('lets likes decide the winner', async () => {
     const m = await landed()
-    const a = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const b = await m.submit(m.bob.id, { x: 60, y: 0 }, at(T0, 2 * MINUTE))
+    const a = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const b = await m.submit(m.bob.id, { x: 15, y: 0 }, at(T0, 2 * MINUTE))
     await like(db, b.submission!.id, { userId: m.cy.id })
     await like(db, b.submission!.id, { userId: m.bob.id })
     await like(db, a.submission!.id, { userId: m.ada.id })
@@ -355,8 +366,8 @@ describe('likes and ranking', () => {
         probabilities: [0.2, 0.7, 0.1, 0],
       },
     }))
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const east = await m.submit(m.bob.id, { x: 60, y: 0 }, at(T0, 2 * MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const east = await m.submit(m.bob.id, { x: 15, y: 0 }, at(T0, 2 * MINUTE))
     const tick = await m.tick(at(T0, 6 * MINUTE))
     expect(tick.closed?.winnerSubmissionId).toBe(east.submission!.id)
   })
@@ -365,14 +376,14 @@ describe('likes and ranking', () => {
 describe('the public state', () => {
   it('lists open submissions with like counts, public judgment fields and the summary', async () => {
     const m = await landed()
-    const a = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const a = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const state = await publicMissionState(db, { missionId: m.missionId, now: at(T0, MINUTE) })
     expect(state.mission).toMatchObject({ id: m.missionId, status: 'active' })
     expect(state.mission).not.toHaveProperty('seed')
     expect(state.round!.submissions).toEqual([
       {
         id: a.submission!.id,
-        goal: { x: 0, y: 80 },
+        goal: { x: 0, y: 20 },
         createdAt: at(T0, MINUTE),
         // Submitting is an LGTM on your own entry.
         likes: 1,

@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import type { ToneMapping } from 'three'
 import type { FogSurface, GridRect, GroundView, MapObject, RoverObject } from '#shared/utils/client'
 import { fogSurface, gridHeightAt, liftSeen, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
-import { chunkFromGrid, chunksFromGrid, flatFrame, FOG_FILL } from '#shared/utils/client/scene'
+import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
@@ -57,6 +58,8 @@ const props = withDefaults(
     objects?: readonly MapObject[]
     /** The rover, inspectable. */
     roverObject?: RoverObject
+    /** The time of the sol, an exposure offset and a tone mapping to compare, as `StopScene` takes them. */
+    lighting?: { solFraction?: number; exposureBias?: number; toneMapping?: ToneMapping }
   }>(),
   {
     seen: undefined,
@@ -71,6 +74,7 @@ const props = withDefaults(
     reveals: () => [],
     objects: () => [],
     roverObject: undefined,
+    lighting: () => ({}),
   },
 )
 
@@ -106,7 +110,6 @@ const fade = useRevealFade(
   () => shownSeen.value,
   () => props.terrain.grid,
 )
-const colorMode = useColorMode()
 
 /** Mean height of the ground the stop itself has seen, over the ground in so far. */
 const stopMean = computed(() => {
@@ -136,8 +139,8 @@ let surface: FogSurface | undefined
 /** The mean the surface was computed with, and how many placed rectangles it covers. */
 let surfaced = { mean: 0, placed: 0 }
 watch(
-  [fade, () => colorMode.value, () => props.terrain] as const,
-  ([frame, mode, terrain], previous) => {
+  [fade, () => props.terrain] as const,
+  ([frame, terrain], previous) => {
     const placed = terrain.placed ?? []
     if (!frame) {
       surface = undefined
@@ -146,10 +149,10 @@ watch(
       return
     }
     const { grid } = terrain
-    const same = !!surface && previous?.[1] === mode && previous[2]?.grid === grid
+    const same = !!surface && previous?.[1]?.grid === grid
     const refade = frame !== previous?.[0]
     const whole = { i0: 0, j0: 0, i1: grid.width, j1: grid.height }
-    // A new stop, colour mode or fade without rectangles redraws everything.
+    // A new stop or a fade without rectangles redraws everything.
     let rects: GridRect[] | undefined = []
     if (!same || (refade && !frame.rects)) {
       surface = fogSurface(grid, frame.fog, { fallback: stopMean.value })
@@ -172,7 +175,6 @@ watch(
     fog.value = {
       surface: surface!,
       layout: layout.value,
-      rgb: FOG_FILL[mode === 'dark' ? 'dark' : 'light'],
       rects,
     }
   },
@@ -275,6 +277,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
     class="relative h-full w-full touch-none overflow-hidden bg-(--ui-bg-muted)"
   >
     <StopScene
+      v-bind="lighting"
       :frame="frame"
       :chunks="chunks"
       :height-range="heightRange"

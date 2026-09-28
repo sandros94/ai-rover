@@ -37,11 +37,16 @@ export function missionWorld(
   return remember(worlds, WORLD_LIMIT, mission.id, world)
 }
 
-/** The disk around a stop, centred on its position. */
-export function stopDisk(world: World, stop: Pick<Stop, 'id' | 'x' | 'y'>): StopDisk {
+/** The disk of `radius` metres around a stop, centred on its position. */
+export function stopDisk(
+  world: World,
+  stop: Pick<Stop, 'id' | 'x' | 'y'>,
+  options: { radius: number },
+): StopDisk {
   const cached = disks.get(stop.id)
   if (cached) return touch(disks, stop.id, cached)
-  return remember(disks, DISK_LIMIT, stop.id, computeStopDisk(world, { center: stop }))
+  const disk = computeStopDisk(world, { center: stop, radius: options.radius })
+  return remember(disks, DISK_LIMIT, stop.id, disk)
 }
 
 /** The journey's revealed mask as of the stop, from its published blob. */

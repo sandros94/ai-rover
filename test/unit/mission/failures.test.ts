@@ -10,7 +10,7 @@ import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
 import { failAt, forced } from './forced'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
+import { at, createTestDb, fakeJev, memoryStore, MINUTE, SMALL_RULES, T0, users } from './helpers'
 
 vi.mock('#shared/utils/drive/segment', async (original) =>
   (await import('./forced')).forcedDriveSegment(original),
@@ -29,6 +29,7 @@ async function landed() {
     store,
     seed: 'mars',
     at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
     now: T0,
   })
   const missionId = created.mission.id
@@ -52,19 +53,19 @@ describe('failures', () => {
     const m = await landed()
 
     // Stop 1, reached for real.
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const reach = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     await m.tick(reach.endsAt)
     const stop1 = await getStop(db, (await getMission(db, m.missionId)).currentStopId!)
     expect(stop1.index).toBe(1)
 
-    // Three failures from stop 1, their deaths pairwise within 50 m, away from the route east.
+    // Three failures from stop 1, their deaths pairwise within 12.5 m, away from the route east.
     const deaths = [
-      { x: -40, y: -40 },
-      { x: -45, y: -40 },
-      { x: -40, y: -45 },
+      { x: -10, y: -10 },
+      { x: -11.25, y: -10 },
+      { x: -10, y: -11.25 },
     ]
-    const goal = { x: stop1.x + 80, y: stop1.y }
+    const goal = { x: stop1.x + 20, y: stop1.y }
     const authors = [m.bob, m.ada, m.bob]
     let now = at(reach.endsAt, MINUTE)
     let last = reach
@@ -125,8 +126,8 @@ describe('failures', () => {
     expect(await getSegment(db, last.id)).toMatchObject({
       status: 'failed',
       toStopId: null,
-      deathX: stop1.x - 40,
-      deathY: stop1.y - 45,
+      deathX: stop1.x - 10,
+      deathY: stop1.y - 11.25,
     })
     expect(await listDeaths(db, m.missionId, { fromStopId: stop1.id })).toHaveLength(3)
     const stop0 = m.stop
@@ -158,12 +159,12 @@ describe('failures', () => {
 
   it('voids the round beside a failed drive: its open submissions are lost, a fresh round opens', async () => {
     const m = await landed()
-    forced.outcomes.push(failAt(m.stop, { x: 0, y: 60 }))
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    forced.outcomes.push(failAt(m.stop, { x: 0, y: 15 }))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const started = (await m.tick(at(T0, 6 * MINUTE))).started!
     const segment = await getSegment(db, started.segmentId)
     const beside = (await getOpenRound(db, m.missionId))!
-    const waiting = await m.submit(m.bob.id, { x: 80, y: 80 }, at(T0, 10 * MINUTE))
+    const waiting = await m.submit(m.bob.id, { x: 20, y: 20 }, at(T0, 10 * MINUTE))
     expect(waiting.accepted).toBe(true)
 
     const tick = await m.tick(segment.endsAt)
@@ -184,10 +185,10 @@ describe('failures', () => {
     expect((await getMission(db, m.missionId)).currentStopId).toBe(m.stop.id)
 
     const later = at(segment.endsAt, MINUTE)
-    expect(await m.submit(m.bob.id, { x: 10, y: 75 }, later)).toMatchObject({
+    expect(await m.submit(m.bob.id, { x: 2, y: 19 }, later)).toMatchObject({
       accepted: false,
       reason: 'near-death-zone',
     })
-    expect(await m.submit(m.bob.id, { x: 0, y: -80 }, later)).toMatchObject({ accepted: true })
+    expect(await m.submit(m.bob.id, { x: 0, y: -20 }, later)).toMatchObject({ accepted: true })
   })
 })

@@ -16,6 +16,7 @@ const start = { x: 0, y: 0 }
 describe('DEFAULT_MISSION_RULES', () => {
   it('carries the documented constants and is frozen', () => {
     expect(rules).toEqual({
+      stopRadiusM: 500,
       segmentDistanceBand: { minM: 50, maxM: 250 },
       failureZone: { destinationRadiusM: 30, pathRadiusM: 15, clusterRadiusM: 50, strikes: 3 },
       graceWindowMs: 300_000,
@@ -32,6 +33,8 @@ describe('DEFAULT_MISSION_RULES', () => {
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
     expect(Object.isFrozen(rules.notMoving)).toBe(true)
+    // A goal in band from an anchor in band lies on the disk of the stop left.
+    expect(rules.stopRadiusM).toBeGreaterThanOrEqual(2 * rules.segmentDistanceBand.maxM)
   })
 })
 

@@ -15,7 +15,7 @@ import {
 } from '#server/utils/mission/http'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
+import { at, createTestDb, fakeJev, memoryStore, MINUTE, SMALL_RULES, T0, users } from './helpers'
 
 vi.mock('#server/utils/mission/tick', async (original) => {
   const actual = await original<typeof import('#server/utils/mission/tick')>()
@@ -38,6 +38,7 @@ async function landed() {
     store,
     seed: 'mars',
     at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
     now: T0,
   })
   const jev = fakeJev()
@@ -68,7 +69,7 @@ describe('syncMission', () => {
       jev: m.jev.client,
       missionId: m.mission.id,
       userId: ada!.id,
-      goal: { x: 0, y: 80 },
+      goal: { x: 0, y: 20 },
       now: at(T0, MINUTE),
     })
     // Due five minutes after the first submission; a read just before still does not tick.
@@ -85,7 +86,7 @@ describe('syncMission', () => {
       jev: m.jev.client,
       missionId: m.mission.id,
       userId: ada!.id,
-      goal: { x: 0, y: 80 },
+      goal: { x: 0, y: 20 },
       now: at(T0, MINUTE),
     })
     expect(await m.sync('read', at(T0, 6 * MINUTE))).toBeNull()

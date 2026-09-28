@@ -13,9 +13,8 @@ import {
   refogChunkMesh,
 } from '#shared/utils/client/scene/terrain-mesh'
 import {
-  FOG_FILL,
   groundRgb,
-  reliefLight,
+  HILLSHADE_EXAGGERATION,
   reliefRgb,
   srgbToLinear,
 } from '#shared/utils/client/scene/palette'
@@ -119,19 +118,32 @@ describe('chunkMesh', () => {
     }
   })
 
-  it('colours by the relief ramp and light in linear space, as the 2D map does in sRGB', () => {
+  it('colours by the relief ramp in linear space, as the 2D map tints in sRGB', () => {
     const mesh = chunkMesh(
       chunk(3, () => 5),
       { heightRange: RANGE },
     )
-    const light = reliefLight(Math.sin(Math.PI / 4))
-    const expected = reliefRgb(0.5).map((c) => srgbToLinear(c * light))
+    const expected = reliefRgb(0.5).map(srgbToLinear)
     for (let k = 0; k < 9; k++) {
       for (let c = 0; c < 3; c++) expect(mesh.colors[3 * k + c]).toBeCloseTo(expected[c]!, 5)
+      // `+ 0` folds the -0 of a flat slope's negated gradient.
+      expect(vertex(mesh.normals, k).map((c) => c + 0)).toEqual([0, 0, 1])
     }
   })
 
-  it('lays fogged vertices on the fog surface in the flat fog colour', () => {
+  it('gives each vertex the unit normal of its slope, scaled as the 2D hillshade scales it', () => {
+    const mesh = chunkMesh(
+      chunk(3, (a) => 0.2 * a),
+      { heightRange: RANGE },
+    )
+    const g = 0.2 * HILLSHADE_EXAGGERATION
+    const expected = [-g, 0, 1].map((c) => c / Math.hypot(g, 1))
+    for (let k = 0; k < 9; k++) {
+      vertex(mesh.normals, k).forEach((c, i) => expect(c).toBeCloseTo(expected[i]!, 6))
+    }
+  })
+
+  it('lays fogged vertices on the fog surface, flat and fully fogged, hiding the true ground', () => {
     const c = chunk(5, (a, b) => 2 * a + b)
     // The chunk is the whole 5 × 5 disk grid; only the west column is revealed.
     const grid = { heights: c.heights, width: 5, height: 5, cellSize: 1 }
@@ -139,28 +151,44 @@ describe('chunkMesh', () => {
     for (let b = 0; b < 5; b++) seen[b * 5] = 1
     const surface = fogSurface(grid, { seen })
     const layout = { width: 5, origin: { i: 0, j: 0 } }
-    const mesh = chunkMesh(c, {
-      heightRange: RANGE,
-      fog: { surface, layout, rgb: FOG_FILL.dark, sight: seen },
-    })
+    const mesh = chunkMesh(c, { heightRange: RANGE, fog: { surface, layout, sight: seen } })
     const plain = chunkMesh(c, { heightRange: RANGE })
-    const fogLinear = FOG_FILL.dark.map(srgbToLinear)
     const at = (array: Float32Array, k: number, c: number) => array[3 * k + c]!
     const revealed = [0, 5, 10, 15, 20]
     const fogged = Array.from({ length: 25 }, (_, k) => k).filter((k) => !seen[k])
     for (const k of revealed) {
       expect(at(mesh.positions, k, 2)).toBe(c.heights[k])
       for (let ch = 0; ch < 3; ch++) expect(at(mesh.colors, k, ch)).toBe(at(plain.colors, k, ch))
+      for (let ch = 0; ch < 3; ch++) expect(at(mesh.normals, k, ch)).toBe(at(plain.normals, k, ch))
+      expect(mesh.fogAmounts[k]).toBe(0)
     }
     for (const k of fogged) {
       expect(at(mesh.positions, k, 2)).toBeCloseTo(surface.heights[k]!, 6)
-      for (let ch = 0; ch < 3; ch++) expect(at(mesh.colors, k, ch)).toBeCloseTo(fogLinear[ch]!, 6)
+      expect(mesh.fogAmounts[k]).toBe(surface.amount[k])
+      if (surface.amount[k] !== 1) continue
+      expect(vertex(mesh.colors, k)).toEqual([0, 0, 0])
+      expect(vertex(mesh.normals, k)).toEqual([0, 0, 1])
     }
     // No fogged vertex shows its true height.
     expect(mesh.positions[3 * 24 + 2]).not.toBeCloseTo(c.heights[24]!, 1)
   })
 
-  it('shades edge vertices from the neighbour heights, so seams match across chunks', () => {
+  it('leans the normal from the slope to the vertical as the fog thickens', () => {
+    const c = chunk(3, (a) => 0.4 * a)
+    const layout = { width: 3, origin: { i: 0, j: 0 } }
+    const tilt = (amount: number) => {
+      const surface = { heights: c.heights, amount: new Float32Array(9).fill(amount) }
+      const n = vertex(chunkMesh(c, { heightRange: RANGE, fog: { surface, layout } }).normals, 4)
+      expect(Math.hypot(n[0]!, n[1]!, n[2]!)).toBeCloseTo(1, 6)
+      return Math.acos(n[2]!)
+    }
+    const [bare, half, full] = [tilt(0), tilt(0.5), tilt(1)]
+    expect(bare).toBeGreaterThan(half)
+    expect(half).toBeGreaterThan(full)
+    expect(full).toBe(0)
+  })
+
+  it('orients edge normals by the neighbour heights, so light matches across chunk seams', () => {
     const slope = (i: number, j: number) => 0.4 * i + 0.1 * j * j
     const left = chunk(3, (a, b) => slope(a, b))
     const right = chunk(3, (a, b) => slope(a + 2, b), 1, 0)
@@ -168,7 +196,7 @@ describe('chunkMesh', () => {
     const a = chunkMesh(left, { heightRange: RANGE, heightOutside: outside })
     const b = chunkMesh(right, { heightRange: RANGE, heightOutside: outside })
     // Vertex (2, 1) of the left chunk is vertex (0, 1) of the right one.
-    for (let c = 0; c < 3; c++) expect(a.colors[3 * 5 + c]).toBeCloseTo(b.colors[3 * 3 + c]!, 6)
+    for (let c = 0; c < 3; c++) expect(a.normals[3 * 5 + c]).toBeCloseTo(b.normals[3 * 3 + c]!, 6)
   })
 })
 
@@ -269,19 +297,21 @@ describe('fog on chunks', () => {
       const after = fogSurface(disk, { seen: lifted, revealedAt, now })
       for (const step of [1, 4, 8]) {
         const options = { heightRange: RANGE, step, skirtM: 3 }
-        const fog = { layout, rgb: FOG_FILL.light }
+        const fog = { layout }
         const mesh = chunkMesh(c, { ...options, fog: { ...fog, surface: before } })
         refogChunkMesh(mesh, c, { ...options, fog: { ...fog, surface: after } })
         const fresh = chunkMesh(c, { ...options, fog: { ...fog, surface: after } })
         expect(Array.from(mesh.positions)).toEqual(Array.from(fresh.positions))
         expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
+        expect(Array.from(mesh.normals)).toEqual(Array.from(fresh.normals))
+        expect(Array.from(mesh.fogAmounts)).toEqual(Array.from(fresh.fogAmounts))
       }
     }
     // Once the fade is over, a revealed vertex sits on its true height.
     const done = fogSurface(disk, { seen: lifted, revealedAt, now: 100 + 600 })
     const mesh = chunkMesh(c, {
       heightRange: RANGE,
-      fog: { surface: done, layout, rgb: FOG_FILL.light },
+      fog: { surface: done, layout },
     })
     expect(mesh.positions[3 * (4 * 9 + 4) + 2]).toBe(c.heights[4 * 9 + 4])
   })
@@ -298,11 +328,9 @@ describe('fog on chunks', () => {
     for (let j = 0; j < 3; j++) sight[j * 5 + 2] = 1
     const mesh = chunkMesh(flat, {
       heightRange: RANGE,
-      fog: { surface, layout: flatLayout, rgb: FOG_FILL.dark, sight },
+      fog: { surface, layout: flatLayout, sight },
     })
-    const light = reliefLight(Math.sin(Math.PI / 4))
-    const linear = (inSight: boolean) =>
-      groundRgb(0.5, inSight).map((channel) => srgbToLinear(channel * light))
+    const linear = (inSight: boolean) => groundRgb(0.5, inSight).map(srgbToLinear)
     for (let k = 0; k < 9; k++) {
       const expected = linear(k % 3 === 0)
       for (let ch = 0; ch < 3; ch++) expect(mesh.colors[3 * k + ch]).toBeCloseTo(expected[ch]!, 6)
@@ -310,22 +338,26 @@ describe('fog on chunks', () => {
     expect(linear(true)).not.toEqual(linear(false))
   })
 
-  it('recolours in place to a fresh build for a new sight, heights untouched', () => {
+  it('recolours in place to a fresh build for a new sight, heights, normals and fog untouched', () => {
     const surface = fogSurface(disk, { seen: everywhere })
     const before = new Uint8Array(17 * 9)
     const after = new Uint8Array(17 * 9)
     for (let j = 0; j < 9; j++) for (let i = 10; i < 17; i++) after[j * 17 + i] = 1
     for (const step of [1, 4, 8]) {
       const options = { heightRange: RANGE, step, skirtM: 3 }
-      const fog = { surface, layout, rgb: FOG_FILL.light }
+      const fog = { surface, layout }
       const mesh = chunkMesh(c, { ...options, fog: { ...fog, sight: before } })
       const positions = mesh.positions.slice()
+      const normals = mesh.normals.slice()
+      const fogAmounts = mesh.fogAmounts.slice()
       const colors = mesh.colors.slice()
       recolourChunkMesh(mesh, c, { ...options, fog: { ...fog, sight: after } })
       const fresh = chunkMesh(c, { ...options, fog: { ...fog, sight: after } })
       expect(Array.from(mesh.colors)).toEqual(Array.from(fresh.colors))
       expect(Array.from(mesh.colors)).not.toEqual(Array.from(colors))
       expect(mesh.positions).toEqual(positions)
+      expect(mesh.normals).toEqual(normals)
+      expect(mesh.fogAmounts).toEqual(fogAmounts)
     }
   })
 })

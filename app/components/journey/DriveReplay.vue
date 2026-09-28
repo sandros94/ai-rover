@@ -7,7 +7,7 @@ import {
   ROVER_ID,
   roverObject,
 } from '#shared/utils/client'
-import { slopeProfile } from '#shared/utils/client/instruments'
+import { slopeProfile, solTime } from '#shared/utils/client/instruments'
 import { revealedVertexCount } from '#shared/utils/terrain'
 import type { PanelId } from '#shared/utils/client/hud'
 import { DRIVE_GROUPS } from '~/components/dashboard/Instrument.vue'
@@ -155,6 +155,11 @@ const stage = computed((): StageProps => ({
   frame: playback.frame.value,
   keyframes: snapshot.value.keyframes,
   t: snapshot.value.t,
+  // The sun as it stood at that moment of the drive.
+  solFraction: solTime(
+    new Date(props.mission.solsEpoch).getTime(),
+    new Date(drive.value.startedAt).getTime() + snapshot.value.t * 1000,
+  ).fraction,
   objects: objects.value,
   roverObject: roverObject(rover.value ?? { ...drive.value.from, headingRad: 0 }, {
     status: 'driving',

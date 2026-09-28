@@ -23,4 +23,5 @@ allowBuilds:
   vue-demi: false
 
 patchedDependencies:
+  '@netlify/database-dev': .patches/@netlify__database-dev.patch
   '@nuxt/test-utils-nightly': .patches/@nuxt__test-utils-nightly.patch

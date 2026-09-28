@@ -30,6 +30,7 @@ import {
   fakeJev,
   memoryStore,
   MINUTE,
+  SMALL_RULES,
   syntheticRecord,
   T0,
   users,
@@ -99,6 +100,7 @@ async function landed(judge: Judge = () => ({})) {
     store,
     seed: 'mars',
     at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
     now: T0,
   })
   const missionId = created.mission.id
@@ -122,16 +124,16 @@ async function landed(judge: Judge = () => ({})) {
   }
 }
 
-/** A drive from the landing stop to (0, 80) that stops short at (0, 40), with two goals waiting. */
+/** A drive from the landing stop to (0, 20) that stops short at (0, 10), with two goals waiting. */
 async function stoppingShort(judge?: Judge) {
   const m = await landed(judge)
-  forced.outcomes.push(stopShortAt({ x: 0, y: 40 }))
-  await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+  forced.outcomes.push(stopShortAt({ x: 0, y: 10 }))
+  await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
   const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
   const beside = (await getOpenRound(db, m.missionId))!
   const during = at(T0, 10 * MINUTE)
-  const east = await m.submit(m.bob.id, { x: 80, y: 80 }, during)
-  const west = await m.submit(m.cy.id, { x: -80, y: 80 }, during)
+  const east = await m.submit(m.bob.id, { x: 20, y: 20 }, during)
+  const west = await m.submit(m.cy.id, { x: -20, y: 20 }, during)
   expect(east.accepted && west.accepted).toBe(true)
   return { ...m, driving, beside, east: east.submission!, west: west.submission! }
 }
@@ -251,11 +253,11 @@ describe('settling a drive that stopped short', () => {
     settling = true
     const tick = await m.tick(m.driving.endsAt)
     expect(tick.settled).toEqual({ segmentId: m.driving.id, status: 'stopped-short' })
-    expect(await getRound(db, m.beside.id)).toMatchObject({ anchorX: 0, anchorY: 40 })
+    expect(await getRound(db, m.beside.id)).toMatchObject({ anchorX: 0, anchorY: 10 })
     expect((await getSubmission(db, m.west.id)).status).toBe('withdrawn')
     // The other goal was revised from the stop reached and won the round.
     const east = await getSubmission(db, m.east.id)
-    expect(east.metrics.straightLineM).toBeCloseTo(Math.hypot(80, 40), 9)
+    expect(east.metrics.straightLineM).toBeCloseTo(Math.hypot(20, 10), 9)
     expect(east.status).toBe('won')
   })
 
@@ -269,7 +271,7 @@ describe('settling a drive that stopped short', () => {
     })
     let lateId: string | undefined
     late = async () => {
-      const result = await m.submit(m.dee.id, { x: 0, y: 160 }, at(m.driving.endsAt, -1))
+      const result = await m.submit(m.dee.id, { x: 0, y: 40 }, at(m.driving.endsAt, -1))
       lateId = result.submission?.id
     }
     const tick = await m.tick(m.driving.endsAt)
@@ -285,8 +287,8 @@ describe('settling a drive that stopped short', () => {
 describe('starting the winner', () => {
   it('rejects a winner whose drive cannot be computed and starts the next ranked', async () => {
     const m = await landed()
-    const first = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const second = await m.submit(m.bob.id, { x: -80, y: 80 }, at(T0, 2 * MINUTE))
+    const first = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const second = await m.submit(m.bob.id, { x: -20, y: 20 }, at(T0, 2 * MINUTE))
     await like(db, first.submission!.id, { userId: m.cy.id })
     forced.errors.push(new NavError('OUT_OF_DISK', 'The goal lies beyond the disk.'))
     const tick = await m.tick(at(T0, 6 * MINUTE))
@@ -303,7 +305,7 @@ describe('starting the winner', () => {
 
   it('voids the round and opens a fresh one from the same stop when no candidate drives', async () => {
     const m = await landed()
-    const only = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const only = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     forced.errors.push(new DriveError('INVALID_INPUT', 'The start pose is off the disk.'))
     const now = at(T0, 6 * MINUTE)
     const tick = await m.tick(now)
@@ -320,14 +322,14 @@ describe('starting the winner', () => {
     expect(tick.opened).toEqual({ roundId: fresh.id })
     expect(fresh).toMatchObject({ fromStopId: m.stop.id, anchorX: 0, anchorY: 0, opensAt: now })
     // The mission carries on: the user may submit again in the fresh round.
-    expect((await m.submit(m.ada.id, { x: 0, y: 80 }, at(now, MINUTE))).accepted).toBe(true)
+    expect((await m.submit(m.ada.id, { x: 0, y: 20 }, at(now, MINUTE))).accepted).toBe(true)
   })
 })
 
 describe('closing a round', () => {
   it('locks the round for update before reading the standings it closes on', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     queries.length = 0
     expect((await m.tick(at(T0, 6 * MINUTE))).closed).not.toBeNull()
     const lock = queries.findIndex((q) => /from "round".* for update/s.test(q))
@@ -338,7 +340,7 @@ describe('closing a round', () => {
 
   it('has a like share-lock the round, so a like waits for a closing round or is counted', async () => {
     const m = await landed()
-    const { submission } = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const { submission } = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     queries.length = 0
     await like(db, submission!.id, { userId: m.bob.id })
     expect(queries.some((q) => /"round"/.test(q) && / for share/.test(q))).toBe(true)
@@ -355,7 +357,7 @@ describe('the next due instant', () => {
 
     // The first submission opens the grace window.
     const submittedAt = at(T0, 2 * MINUTE)
-    await m.submit(m.ada.id, { x: 0, y: 80 }, submittedAt)
+    await m.submit(m.ada.id, { x: 0, y: 20 }, submittedAt)
     expect(await due()).toEqual(at(submittedAt, 5 * MINUTE))
 
     const started = (await m.tick(at(submittedAt, 5 * MINUTE))).started!
@@ -368,20 +370,20 @@ describe('the next due instant', () => {
 })
 
 describe('the author of the drive in progress', () => {
-  /** Ada's drive to (0, 80) playing, and the round beside it. */
+  /** Ada's drive to (0, 20) playing, and the round beside it. */
   async function adaDriving() {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     return { ...m, driving, during: at(T0, 10 * MINUTE) }
   }
 
   it('may submit, starting with their own LGTM, and ranks after everyone else', async () => {
     const m = await adaDriving()
-    const mine = await m.submit(m.ada.id, { x: 0, y: 160 }, m.during)
+    const mine = await m.submit(m.ada.id, { x: 0, y: 40 }, m.during)
     expect(mine.accepted).toBe(true)
     expect(await countLikes(db, mine.submission!.id)).toBe(1)
-    const other = await m.submit(m.bob.id, { x: 80, y: 80 }, m.during)
+    const other = await m.submit(m.bob.id, { x: 20, y: 20 }, m.during)
     await like(db, mine.submission!.id, { userId: m.cy.id })
     await like(db, mine.submission!.id, { userId: m.dee.id })
 
@@ -395,7 +397,7 @@ describe('the author of the drive in progress', () => {
 
   it('wins when nobody else submitted during the drive', async () => {
     const m = await adaDriving()
-    const mine = await m.submit(m.ada.id, { x: 0, y: 160 }, m.during)
+    const mine = await m.submit(m.ada.id, { x: 0, y: 40 }, m.during)
     const tick = await m.tick(m.driving.endsAt)
     expect(tick.closed?.winnerSubmissionId).toBe(mine.submission!.id)
   })
@@ -413,10 +415,10 @@ describe('a drive that stops moving', () => {
     forced.records.push((real) =>
       syntheticRecord({ start: real.start, stopAfterS: 1200, durationS: 3600 }),
     )
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     const beside = (await getOpenRound(db, m.missionId))!
-    await m.submit(m.bob.id, { x: 80, y: 80 }, at(driving.startedAt, MINUTE))
+    await m.submit(m.bob.id, { x: 20, y: 20 }, at(driving.startedAt, MINUTE))
     const flag = (userId: string, afterStartMs: number) =>
       flagSegment(db, driving.id, { userId, now: at(driving.startedAt, afterStartMs) })
     return { ...m, driving, beside, flag, start: driving.outcome!.endPose }
@@ -470,7 +472,7 @@ describe('a drive that stops moving', () => {
     forced.records.push((real) =>
       syntheticRecord({ start: real.start, stopAfterS: 1200, durationS: 3600 }),
     )
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     // At the release of slice 69 (2100 s) the frames up to 2099.5 s show 0.05 m over 900 s.
     expect(driving.endsAt).toEqual(at(driving.startedAt, 71 * SLICE_MS))
@@ -511,8 +513,8 @@ describe('the mission lock', () => {
 
   it('drops a prepared close whose ranking changed meanwhile, writing nothing, and redoes it', async () => {
     const m = await landed()
-    const first = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
-    const second = await m.submit(m.bob.id, { x: -80, y: 80 }, at(T0, 2 * MINUTE))
+    const first = await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const second = await m.submit(m.bob.id, { x: -20, y: 20 }, at(T0, 2 * MINUTE))
     // While Ada's drive is published, a like puts Bob's goal ahead.
     let liked = false
     onPut = async (key) => {
@@ -548,7 +550,7 @@ describe('the mission lock', () => {
 
   it('applies nothing when another tick settled the drive while this one prepared it', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
     let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
     onPut = async (key) => {
@@ -614,7 +616,7 @@ describe('the mission lock', () => {
 
   it('skips a tick that does not wait while the lock is held, applying nothing', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const busy = contended(() => ({ rows: [{ locked: false }] }))
     const now = at(T0, 6 * MINUTE)
     const tick = await tickMission(busy, {
@@ -637,7 +639,7 @@ describe('the mission lock', () => {
 
   it('skips a tick that does not wait when a lock wait times out', async () => {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     const slow = contended(() => Promise.reject(lockTimeout()))
     const tick = await tickMission(slow, {
       store: m.store,
@@ -671,7 +673,7 @@ describe('a tick cut short', () => {
   /** Ada's goal due to close at 6 minutes, with no drive yet. */
   async function closing() {
     const m = await landed()
-    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
     return { ...m, now: at(T0, 6 * MINUTE) }
   }
 

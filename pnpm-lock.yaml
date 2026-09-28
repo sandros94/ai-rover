@@ -9,6 +9,7 @@ overrides:
   '@electric-sql/pglite': 0.5.8
 
 patchedDependencies:
+  '@netlify/database-dev': 9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27
   '@nuxt/test-utils-nightly': 092d4f2275d450055011b7bf9c322768a93927717427179974924c29c8ed0484
 
 importers:
@@ -96,7 +97,7 @@ importers:
         version: 0.1.10
       '@netlify/database-dev':
         specifier: npm:@netlify/database-dev@^1.0.1
-        version: 1.0.1
+        version: 1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)
       '@netlify/nuxt':
         specifier: npm:@netlify/nuxt@^1.0.1
         version: 1.0.1(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(magic-string@1.4.2)(magicast@0.5.5)(rolldown@1.2.10)(srvx@0.11.22)(supports-color@7.2.0)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))
@@ -1481,8 +1482,8 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@nuxt/cli-nightly@4.0.0-20260924-135740-11226da':
-    resolution: {integrity: sha512-Ps012vc5sIKOZWZuR+n0+ufsrZYf8Yl2i8LTsdZTOff9dvTaSlon9oviM8Fo3wp4H18NtnCu8qSUemCglIOmjA==}
+  '@nuxt/cli-nightly@4.0.0-20260928-093848-54eebce':
+    resolution: {integrity: sha512-e0sZNA7bpoI55jDjV78t1AlW+951Z8+yVVGNUuF4CUPaDYAN5/JKV++sSNQyX5Q7j+99eYy51nqQpwFHbyFnxA==}
     engines: {node: ^22.19.0 || ^24.11.0 || >=26.0.0}
     hasBin: true
     peerDependencies:
@@ -5151,8 +5152,8 @@ packages:
   muggle-string@0.4.1:
     resolution: {integrity: sha512-VNTrAak/KhO2i8dqqnqnAHOa3cYBwXEZe9h+D5h/1ZqFSTEFHdM65lR7RoIqq3tBBYavsOXV84NoHXZ0AkPyqQ==}
 
-  my-bad@0.2.8:
-    resolution: {integrity: sha512-cJE39jKmqz/B1D2/vbDAuHUiwIGyGTqF4M7yxfj1txWx0W4TaJNE6ach1kyMrN5XgewsYU95DsnyTgXZdVTA9Q==}
+  my-bad@0.2.9:
+    resolution: {integrity: sha512-Aa24qKJ506aElWe0x1C55flgeZOnQYm6BE3SG8bz4vbGrOkXnwvEqZNVF/L/HrUrKAvu/BlvK9bD1G5EU3QfbA==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       vite: '>=6'
@@ -8004,7 +8005,7 @@ snapshots:
       yargs: 17.7.3
       zod: 4.6.5
 
-  '@netlify/database-dev@1.0.1':
+  '@netlify/database-dev@1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)':
     dependencies:
       '@electric-sql/pglite': 0.5.8
       pg-gateway: 0.3.0-beta.4
@@ -8058,7 +8059,7 @@ snapshots:
       '@netlify/ai': 1.0.1
       '@netlify/blobs': 11.1.1(supports-color@7.2.0)
       '@netlify/config': 25.2.5
-      '@netlify/database-dev': 1.0.1
+      '@netlify/database-dev': 1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)
       '@netlify/dev-utils': 6.0.1
       '@netlify/edge-functions-dev': 2.0.1
       '@netlify/functions-dev': 2.0.8(supports-color@7.2.0)
@@ -8346,7 +8347,7 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@nuxt/cli-nightly@4.0.0-20260924-135740-11226da(@nuxt/schema-nightly@5.0.0-29796419.a2fd06ab)(jiti@2.7.0)(rolldown@1.2.10)(vite@8.3.0)':
+  '@nuxt/cli-nightly@4.0.0-20260928-093848-54eebce(@nuxt/schema-nightly@5.0.0-29796419.a2fd06ab)(jiti@2.7.0)(rolldown@1.2.10)(vite@8.3.0)':
     dependencies:
       '@clack/prompts': 1.8.1
       args-tokenizer: 0.3.0
@@ -8357,7 +8358,7 @@ snapshots:
       exsolve: 1.1.1
       fuzzysort: 4.0.2
       get-port-please: 3.2.0
-      my-bad: 0.2.8(vite@8.3.0)
+      my-bad: 0.2.9(vite@8.3.0)
       obug: 3.0.0
       pathe: 2.0.3
       perfect-debounce: 2.1.0
@@ -12271,7 +12272,7 @@ snapshots:
 
   muggle-string@0.4.1: {}
 
-  my-bad@0.2.8(vite@8.3.0):
+  my-bad@0.2.9(vite@8.3.0):
     dependencies:
       clickable-path: 0.1.1
       errx: 0.2.2
@@ -12440,7 +12441,7 @@ snapshots:
   nuxt-nightly@5.0.0-29796419.a2fd06ab(24da80127963f050249d5922fd39790c):
     dependencies:
       '@dxup/nuxt': 0.5.10(esbuild@0.28.1)(magicast@0.5.5)(rolldown@1.2.10)(vite@8.3.0)
-      '@nuxt/cli': '@nuxt/cli-nightly@4.0.0-20260924-135740-11226da(@nuxt/schema-nightly@5.0.0-29796419.a2fd06ab)(jiti@2.7.0)(rolldown@1.2.10)(vite@8.3.0)'
+      '@nuxt/cli': '@nuxt/cli-nightly@4.0.0-20260928-093848-54eebce(@nuxt/schema-nightly@5.0.0-29796419.a2fd06ab)(jiti@2.7.0)(rolldown@1.2.10)(vite@8.3.0)'
       '@nuxt/devtools': 4.0.0-beta.2(c66eb87384aba431466b3bfca2f01af9)
       '@nuxt/kit': '@nuxt/kit-nightly@5.0.0-29796419.a2fd06ab(confbox@0.2.4)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.2)(mlly@1.8.2)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))'
       '@nuxt/nitro-server': '@nuxt/nitro-server-nightly@5.0.0-29796419.a2fd06ab(@electric-sql/pglite@0.5.8)(@netlify/blobs@11.1.1(supports-color@7.2.0))(@oxc-project/types@0.151.0)(chokidar@5.0.0)(confbox@0.2.4)(db0@0.3.4(@electric-sql/pglite@0.5.8)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(drizzle-orm@1.0.0-rc.4(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(lightningcss@1.33.0)(mlly@1.8.2)(nuxt-nightly@5.0.0-29796419.a2fd06ab)(ofetch@2.0.0-alpha.3)(rolldown@1.2.10)(typescript@7.0.2)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.10)(vite@8.3.0))(vite@8.3.0)'

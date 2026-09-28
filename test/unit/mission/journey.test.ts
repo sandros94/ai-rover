@@ -15,12 +15,16 @@ const plus = (ms: number) => new Date(JOURNEY_T0.getTime() + ms)
 
 let db: DB
 let close: () => Promise<void>
-beforeAll(async () => ({ db, close } = await createTestDb()))
+/** The journey every test reads; a test that writes to it seeds its own. */
+let j: Awaited<ReturnType<typeof seedJourney>>
+beforeAll(async () => {
+  ;({ db, close } = await createTestDb())
+  j = await seedJourney(db)
+})
 afterAll(() => close())
 
 describe('journeyPage', () => {
   it('lists settled drives only, newest first, with the public judgment and no outcome', async () => {
-    const j = await seedJourney(db)
     const page = await journeyPage(db, { missionId: j.mission.id, page: 1 })
     expect(page).toMatchObject({ page: 1, pageSize: 50, total: 2 })
     expect(page.drives.map((d) => d.id)).toEqual([j.failure.id, j.arrival.id])
@@ -44,7 +48,6 @@ describe('journeyPage', () => {
   })
 
   it('answers an empty page past the end', async () => {
-    const j = await seedJourney(db)
     const page = await journeyPage(db, { missionId: j.mission.id, page: 2 })
     expect(page).toMatchObject({ page: 2, total: 2, drives: [] })
   })
@@ -52,7 +55,6 @@ describe('journeyPage', () => {
 
 describe('journeyPage over a range', () => {
   it('lists the settled drives numbered from and to, oldest first, as a playlist plays them', async () => {
-    const j = await seedJourney(db)
     const both = await journeyPage(db, {
       missionId: j.mission.id,
       page: 1,
@@ -73,7 +75,6 @@ describe('journeyPage over a range', () => {
   })
 
   it('lists the drives that ended after `since`, never the one still playing', async () => {
-    const j = await seedJourney(db)
     const page = (since: Date) =>
       journeyPage(db, { missionId: j.mission.id, page: 1, range: { since } })
     const all = await page(plus(-HOUR))
@@ -88,7 +89,6 @@ describe('journeyPage over a range', () => {
   })
 
   it('combines `since` with numbers', async () => {
-    const j = await seedJourney(db)
     const page = await journeyPage(db, {
       missionId: j.mission.id,
       page: 1,
@@ -126,7 +126,6 @@ describe('parseJourneyRange', () => {
 
 describe('journeyDrive', () => {
   it('gives one settled drive with the mission clock, rules and the stops up to its start', async () => {
-    const j = await seedJourney(db)
     const one = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.failure.id })
     expect(one.drive).toMatchObject({
       id: j.failure.id,
@@ -152,29 +151,28 @@ describe('journeyDrive', () => {
   })
 
   it('gives the deaths public when the drive started, with the facts the live map shows', async () => {
-    const j = await seedJourney(db)
-    await settleSegment(db, j.driving.id, {
-      now: j.driving.endsAt,
+    const own = await seedJourney(db)
+    await settleSegment(db, own.driving.id, {
+      now: own.driving.endsAt,
       status: 'failed',
       death: { x: 5, y: 85 },
     })
-    const third = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.driving.id })
+    const third = await journeyDrive(db, { missionId: own.mission.id, segmentId: own.driving.id })
     expect(third.deaths).toEqual([
       {
         x: 30,
         y: 100,
-        segmentId: j.failure.id,
+        segmentId: own.failure.id,
         number: 2,
         fromIndex: 1,
-        reasons: j.failure.outcome!.reasons,
-        at: j.failure.endsAt,
-        distanceM: j.failure.outcome!.distanceM,
+        reasons: own.failure.outcome!.reasons,
+        at: own.failure.endsAt,
+        distanceM: own.failure.outcome!.distanceM,
       },
     ])
   })
 
   it('names the settled drive after it, if any, to continue with', async () => {
-    const j = await seedJourney(db)
     const first = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.arrival.id })
     expect(first.next).toEqual({ id: j.failure.id, number: 2 })
     // The drive after the latest settled one is still playing: nothing to continue with.
@@ -183,7 +181,6 @@ describe('journeyDrive', () => {
   })
 
   it('refuses the drive still playing as not found, leaking nothing', async () => {
-    const j = await seedJourney(db)
     const error = await dbErrorOf(
       journeyDrive(db, { missionId: j.mission.id, segmentId: j.driving.id }),
     )

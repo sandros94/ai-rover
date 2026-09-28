@@ -8,7 +8,17 @@ import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
 import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
-import { at, createTestDb, dbErrorOf, fakeJev, memoryStore, MINUTE, T0, users } from './helpers'
+import {
+  at,
+  createTestDb,
+  dbErrorOf,
+  fakeJev,
+  memoryStore,
+  MINUTE,
+  SMALL_RULES,
+  T0,
+  users,
+} from './helpers'
 
 vi.setConfig({ testTimeout: 60_000 })
 
@@ -23,6 +33,7 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
     store,
     seed: 'mars',
     at: { x: 0, y: 0 },
+    rules: SMALL_RULES,
     now: T0,
   })
   const jev = fakeJev(judge)
@@ -35,12 +46,12 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
 describe('submitGoal', () => {
   it('refuses goals outside the distance band without asking Jev', async () => {
     const { ada, submit, jev, round } = await landed()
-    expect(await submit(ada.id, { x: 0, y: 20 })).toEqual({
+    expect(await submit(ada.id, { x: 0, y: 5 })).toEqual({
       accepted: false,
       reason: 'too-near',
       submission: null,
     })
-    expect(await submit(ada.id, { x: 0, y: 300 })).toEqual({
+    expect(await submit(ada.id, { x: 0, y: 75 })).toEqual({
       accepted: false,
       reason: 'too-far',
       submission: null,
@@ -51,7 +62,7 @@ describe('submitGoal', () => {
 
   it('stores a valid goal as an open submission with its judgment, metrics and summary', async () => {
     const { ada, submit, jev, round } = await landed()
-    const result = await submit(ada.id, { x: 0.4, y: 80.3 })
+    const result = await submit(ada.id, { x: 0.4, y: 20.3 })
     expect(result.accepted).toBe(true)
     const { submission } = result
     expect(submission).toMatchObject({
@@ -59,7 +70,7 @@ describe('submitGoal', () => {
       userId: ada.id,
       status: 'open',
       goalX: 0,
-      goalY: 80,
+      goalY: 20,
       createdAt: at(T0, MINUTE),
       judgment: { verdict: 'accept', risk: { score: 1 } },
       metrics: { reached: true },
@@ -77,10 +88,12 @@ describe('submitGoal', () => {
       seed: 'mars',
       at: { x: 0, y: 0 },
       world,
+      rules: SMALL_RULES,
       now: T0,
     })
     const disk = computeStopDisk(defineWorld({ seed: 'mars', ...world }), {
       center: { x: 0, y: 0 },
+      radius: SMALL_RULES.stopRadiusM,
     })
     const { width } = disk.grid
     const pathable = (x: number, y: number) => {
@@ -90,9 +103,10 @@ describe('submitGoal', () => {
     // A blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
     let edge: { x: number; y: number } | undefined
     let island: { x: number; y: number } | undefined
-    for (let y = 60; y <= 200 && !(edge && island); y++) {
-      for (let x = -200; x <= 200 && !(edge && island); x++) {
-        if (pathable(x, y)) continue
+    for (let y = -55; y <= 55 && !(edge && island); y++) {
+      for (let x = -55; x <= 55 && !(edge && island); x++) {
+        const distance = Math.hypot(x, y)
+        if (distance < 20 || distance > 55 || pathable(x, y)) continue
         let near = false
         for (let dy = -5; dy <= 5; dy++) {
           for (let dx = -5; dx <= 5; dx++) {
@@ -131,12 +145,13 @@ describe('submitGoal', () => {
   })
 
   it('refuses a goal on ground the rover has not seen, without asking Jev', async () => {
-    // Accepted before goals were limited to revealed ground: fogged, yet pathable and in band.
+    // Fogged, yet pathable and in band: only what the rover has seen may be a goal.
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
       seed: 'fogged-goal',
       at: { x: 0, y: 0 },
+      rules: SMALL_RULES,
       now: T0,
     })
     const jev = fakeJev()
@@ -146,7 +161,7 @@ describe('submitGoal', () => {
       jev: jev.client,
       missionId: created.mission.id,
       userId: ada!.id,
-      goal: { x: -15, y: -239 },
+      goal: { x: -36, y: -40 },
       now: at(T0, MINUTE),
     })
     expect(result).toEqual({ accepted: false, reason: 'unrevealed', submission: null })
@@ -156,7 +171,7 @@ describe('submitGoal', () => {
 
   it('stores a rejected verdict as a rejected submission and reports it', async () => {
     const { ada, submit, round } = await landed(() => ({ feasible: 0.1, verdict: 'reject' }))
-    const result = await submit(ada.id, { x: 0, y: 80 })
+    const result = await submit(ada.id, { x: 0, y: 20 })
     expect(result).toMatchObject({
       accepted: false,
       reason: 'judged-infeasible',
@@ -169,19 +184,19 @@ describe('submitGoal', () => {
     // A rejection holds no place in the round: the user may submit again.
     const [listed] = await listRoundSubmissions(db, round.id)
     expect(listed?.status).toBe('rejected')
-    expect((await submit(ada.id, { x: 60, y: 0 })).submission?.status).toBe('rejected')
+    expect((await submit(ada.id, { x: 15, y: 0 })).submission?.status).toBe('rejected')
   })
 
   it('refuses a second open submission by the same user, and accepts one after withdrawal', async () => {
     const { ada, submit, jev } = await landed()
-    const first = await submit(ada.id, { x: 0, y: 80 })
-    const error = await dbErrorOf(submit(ada.id, { x: 60, y: 0 }))
+    const first = await submit(ada.id, { x: 0, y: 20 })
+    const error = await dbErrorOf(submit(ada.id, { x: 15, y: 0 }))
     expect(error?.code).toBe('ALREADY_SUBMITTED')
     // Refused before planning, so Jev is not paid for it.
     expect(jev.summaries).toHaveLength(1)
     await withdrawSubmission(db, first.submission!.id, { userId: ada.id })
-    const again = await submit(ada.id, { x: 60, y: 0 })
-    expect(again).toMatchObject({ accepted: true, submission: { status: 'open', goalX: 60 } })
+    const again = await submit(ada.id, { x: 15, y: 0 })
+    expect(again).toMatchObject({ accepted: true, submission: { status: 'open', goalX: 15 } })
   })
 
   it('refuses a sixth attempt in a round before planning, counting withdrawals and rejections', async () => {
@@ -192,19 +207,19 @@ describe('submitGoal', () => {
     expect(mission.config.rules.maxJudgedPerRound).toBe(5)
     // Three withdrawn, one rejected by Jev, one still open: five attempts.
     for (let k = 0; k < 3; k++) {
-      const { submission } = await submit(ada.id, { x: 0, y: 80 + k })
+      const { submission } = await submit(ada.id, { x: 0, y: 20 + k })
       await withdrawSubmission(db, submission!.id, { userId: ada.id })
     }
     // A refusal by rule stores nothing and pays no Jev, so it is not an attempt.
-    expect(await submit(ada.id, { x: 0, y: 20 })).toMatchObject({ reason: 'too-near' })
+    expect(await submit(ada.id, { x: 0, y: 5 })).toMatchObject({ reason: 'too-near' })
     verdict = 'reject'
-    expect(await submit(ada.id, { x: 0, y: 90 })).toMatchObject({ reason: 'judged-infeasible' })
+    expect(await submit(ada.id, { x: 0, y: 23 })).toMatchObject({ reason: 'judged-infeasible' })
     verdict = 'accept'
-    const open = await submit(ada.id, { x: 0, y: 95 })
+    const open = await submit(ada.id, { x: 0, y: 24 })
     await withdrawSubmission(db, open.submission!.id, { userId: ada.id })
     const asked = jev.summaries.length
 
-    expect(await submit(ada.id, { x: 0, y: 100 })).toEqual({
+    expect(await submit(ada.id, { x: 0, y: 25 })).toEqual({
       accepted: false,
       reason: 'too-many-attempts',
       submission: null,
@@ -213,7 +228,7 @@ describe('submitGoal', () => {
     expect(jev.summaries).toHaveLength(asked)
     expect(await listRoundSubmissions(db, round.id)).toHaveLength(5)
     // The cap is per user.
-    expect((await submit(bob.id, { x: 0, y: 80 })).accepted).toBe(true)
+    expect((await submit(bob.id, { x: 0, y: 20 })).accepted).toBe(true)
   })
 
   it('refuses as round-changed a goal whose round moved while Jev judged it', async () => {
@@ -223,8 +238,8 @@ describe('submitGoal', () => {
       return {}
     })
     // The round is re-anchored mid-judgment, as a settlement after a stop short would do.
-    move = () => reanchorRound(db, m.round.id, { fromStopId: m.stop.id, anchor: { x: 0, y: 10 } })
-    expect(await m.submit(m.ada.id, { x: 0, y: 80 })).toEqual({
+    move = () => reanchorRound(db, m.round.id, { fromStopId: m.stop.id, anchor: { x: 0, y: 2.5 } })
+    expect(await m.submit(m.ada.id, { x: 0, y: 20 })).toEqual({
       accepted: false,
       reason: 'round-changed',
       submission: null,
@@ -232,23 +247,23 @@ describe('submitGoal', () => {
     expect(await listRoundSubmissions(db, m.round.id)).toEqual([])
     // Planned again from the round as it now is, the goal goes through.
     move = undefined
-    expect((await m.submit(m.ada.id, { x: 0, y: 80 })).accepted).toBe(true)
+    expect((await m.submit(m.ada.id, { x: 0, y: 20 })).accepted).toBe(true)
   })
 
   it("starts an accepted goal with its author's LGTM", async () => {
     const { ada, submit } = await landed()
-    const result = await submit(ada.id, { x: 0, y: 80 })
+    const result = await submit(ada.id, { x: 0, y: 20 })
     expect(await countLikes(db, result.submission!.id)).toBe(1)
   })
 
   it('refuses every goal while the mission is paused, with the pause message', async () => {
     const { ada, submit, mission, jev } = await landed()
     await pauseMission(db, mission.id, { message: 'Dust storm.', pausedBy: ada.id, at: T0 })
-    const refused = await submit(ada.id, { x: 0, y: 80 }).catch((error: unknown) => error)
+    const refused = await submit(ada.id, { x: 0, y: 20 }).catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(LifecycleError)
     expect(refused).toMatchObject({ code: 'MISSION_PAUSED', message: 'Dust storm.' })
     expect(jev.summaries).toHaveLength(0)
     await resumeMission(db, mission.id, { at: at(T0, MINUTE) })
-    expect((await submit(ada.id, { x: 0, y: 80 })).accepted).toBe(true)
+    expect((await submit(ada.id, { x: 0, y: 20 })).accepted).toBe(true)
   })
 })

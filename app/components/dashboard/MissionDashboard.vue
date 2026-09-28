@@ -2,7 +2,7 @@
 import type { PlaybackRate } from '#shared/utils/client'
 import { destinationObject, mapObjects, ROVER_ID } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
-import { revealedAreaM2, slopeProfile } from '#shared/utils/client/instruments'
+import { revealedAreaM2, slopeProfile, solTime } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
 import type { PanelId } from '#shared/utils/client/hud'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
@@ -156,6 +156,14 @@ const track: MapTrack = {
   keyframes: computed(() => snapshot.value.keyframes),
   t: computed(() => snapshot.value.t),
   motion,
+  // The sun of the moment a drive shows while it plays, else of now.
+  solFraction: computed(() => {
+    const s = props.state
+    if (!s) return undefined
+    const p = playing.value
+    const at = p?.driving ? new Date(p.startedAt).getTime() + snapshot.value.t * 1000 : nowMs.value
+    return solTime(new Date(s.mission.solsEpoch).getTime(), at).fraction
+  }),
 }
 
 const instruments = computed(() => {

@@ -112,7 +112,7 @@ export async function submitGoal(
 
   const world = missionWorld(mission)
   const from = await getStop(db, round.fromStopId)
-  const disk = stopDisk(world, from)
+  const disk = stopDisk(world, from, { radius: mission.config.rules.stopRadiusM })
   const revealed = revealedOverDisk(await loadRevealedMask(store, from), disk)
   const snapped = snapToPathable(disk, options.goal, { revealed })
   if (!snapped.ok) return { accepted: false, reason: snapped.reason, submission: null }

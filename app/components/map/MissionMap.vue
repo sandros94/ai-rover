@@ -25,6 +25,8 @@ export interface MapTrack {
   t: Ref<number>
   /** The rover's speed and share of the segment driven, for its card; none without a drive. */
   motion: Ref<{ speedMps: number; progress: number | null } | undefined>
+  /** Time of the sol the view shows, for the 3D sun. */
+  solFraction: Ref<number | undefined>
 }
 </script>
 
@@ -196,6 +198,7 @@ const stage = computed((): StageProps => {
     preview: preview.result.value,
     picked: picked.value,
     objects: props.objects,
+    solFraction: track.solFraction.value,
     roverObject: roverObject(rover, {
       status,
       speedMps: motion?.speedMps ?? null,

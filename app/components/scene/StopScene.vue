@@ -1,17 +1,24 @@
+<script lang="ts">
+import { installAgXLook } from '#shared/utils/client/scene/tonemap'
+
+// Before any material of the scene compiles: three builds every shader from the chunk.
+if (import.meta.client) installAgXLook()
+</script>
+
 <script setup lang="ts">
 import { TresCanvas } from '@tresjs/core'
-import { GridHelper, NoToneMapping, Vector3 } from 'three'
+import type { ToneMapping } from 'three'
+import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
-  FOG_FILL,
   framePlacement,
   fullModelLedger,
-  HILLSHADE_LIGHT,
   LOD_FAR_M,
-  rgbHex,
   routeApproach,
   routeDestination,
+  skyLighting,
+  sunPosition,
 } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
@@ -24,6 +31,8 @@ import RoverModel from './RoverModel.vue'
 import type { Pickable } from './ScenePicker.vue'
 import ScenePicker from './ScenePicker.vue'
 import SceneAtmosphere from './SceneAtmosphere.vue'
+import SceneSky from './SceneSky.vue'
+import SceneSun from './SceneSun.vue'
 import TerrainChunks from './TerrainChunks.vue'
 import TrailLayer from './TrailLayer.vue'
 
@@ -63,6 +72,12 @@ const props = withDefaults(
     focusTarget?: { x: number; y: number; z: number }
     /** Changes with every focus, so the camera eases to the new target. */
     focusKey?: number
+    /** Time of the sol, 0 and 1 midnight, 0.5 noon: sets the sun, the sky and the exposure. */
+    solFraction?: number
+    /** Exposure offset in stops over the automatic exposure. */
+    exposureBias?: number
+    /** three's tone mapping; another than the scene's AgX look only to compare against it. */
+    toneMapping?: ToneMapping
   }>(),
   {
     geometry: undefined,
@@ -84,6 +99,9 @@ const props = withDefaults(
     focusedId: null,
     focusTarget: undefined,
     focusKey: 0,
+    solFraction: 0.4,
+    exposureBias: 0,
+    toneMapping: CustomToneMapping,
   },
 )
 
@@ -114,23 +132,20 @@ const destination = computed(() => {
 /** The open round's goals were picked around the current stop. */
 const currentStop = computed(() => props.stops.find((stop) => stop.current))
 
+/** The sun at the scene's time, and the light, sky and exposure that go with it. */
+const sun = computed(() => sunPosition(props.solFraction))
+const lighting = computed(() => skyLighting(sun.value.elevationDeg))
+/** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
+const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
 /**
- * Lighting for the rover only (the terrain's shading is baked): the hillshade's sun from the
- * north-west and a sky-to-ground hemisphere fill, so the model's sides away from the sun still
- * read against the ground. A directional light shines from its position towards its target at
- * the world origin, so the position is the direction alone. three.js divides Lambert light by
- * π, hence the factor on the intensities.
+ * Haze, sky at the horizon and unseen ground in one colour, the sky's horizon at the sun's
+ * elevation whatever the page's colour mode, so what is too far to make out and what has not been
+ * seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
  */
-const SUN = new Vector3(HILLSHADE_LIGHT.x, HILLSHADE_LIGHT.y, HILLSHADE_LIGHT.z)
-/** Fill from a pale dusty sky above and the warm ground below. */
-const HEMISPHERE = { sky: '#e8dccb', ground: '#6b5a48' }
-/**
- * Sky and distance fog in the colour of unseen ground, so what is too far to make out and what
- * has not been seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
- */
-const colorMode = useColorMode()
-const sky = computed(() => rgbHex(FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light']))
+const atmosphere = computed(() => lighting.value.horizon)
 const HAZE = { near: LOD_FAR_M, far: 4 * LOD_FAR_M }
+/** three dropped `PCFSoftShadowMap`; PCF blurs by each light's `shadow.radius` instead. */
+const SHADOW_MAP = PCFShadowMap
 
 /** Ground for a scene without terrain: a 1 m grid in the rover's ground plane. */
 const plane = new GridHelper(40, 40, '#a8a29e', '#57534e')
@@ -143,21 +158,25 @@ onBeforeUnmount(() => plane.dispose())
   <TresCanvas
     :dpr="[1, 2]"
     power-preference="high-performance"
-    :tone-mapping="NoToneMapping"
-    :clear-color="sky"
+    :tone-mapping="toneMapping"
+    :output-color-space="SRGBColorSpace"
+    shadows
+    :shadow-map-type="SHADOW_MAP"
+    :clear-color="atmosphere"
   >
-    <SceneAtmosphere :color="sky" :near="HAZE.near" :far="HAZE.far" />
+    <SceneAtmosphere :color="atmosphere" :near="HAZE.near" :far="HAZE.far" />
+    <SceneSky :direction="sun.direction" :lighting="lighting" />
+    <SceneSun
+      :direction="sun.direction"
+      :lighting="lighting"
+      :target="target"
+      :exposure-bias="exposureBias"
+    />
     <FollowCamera
       :target="target"
       :target-key="focusKey"
       :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]"
     />
-    <TresHemisphereLight
-      :sky-color="HEMISPHERE.sky"
-      :ground-color="HEMISPHERE.ground"
-      :intensity="0.55 * Math.PI"
-    />
-    <TresDirectionalLight :position="SUN" :intensity="0.9 * Math.PI" />
     <TerrainChunks
       v-if="chunks.length > 0"
       :chunks="chunks"
@@ -191,6 +210,7 @@ onBeforeUnmount(() => plane.dispose())
       :geometry="geometry"
       :variant="roverVariant"
       :ledger="ledger"
+      :lamp="lamp"
       @ready="emit('roverReady', $event)"
     />
     <ScenePicker

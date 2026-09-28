@@ -2,8 +2,7 @@ import type { Chunk } from '../../terrain/chunk'
 import type { GridCell, HeightGrid } from '../../terrain/grid'
 import { ClientError } from '../errors'
 import type { FogSurface, GridRect } from '../fog'
-import type { Rgb } from './palette'
-import { groundRgb, hillshadeAt, reliefLight, srgbToLinear } from './palette'
+import { groundRgb, HILLSHADE_EXAGGERATION, srgbToLinear } from './palette'
 
 /** Vertex strides of the terrain levels: full resolution, then one vertex in four each way. */
 export const LOD_STEPS = [1, 4] as const
@@ -29,7 +28,7 @@ export interface ChunkMeshOptions {
   step?: number
   /** Depth of the skirt hung below the edges; 0 (the default) hangs none. */
   skirtM?: number
-  /** The disk's fog, laid out by `layout`, drawn in `rgb`; absent means nothing is fogged. */
+  /** The disk's fog, laid out by `layout`; absent means nothing is fogged. */
   fog?: ChunkFog
   /**
    * Height at a world vertex index outside the chunk, so edge shading uses the neighbour's
@@ -42,7 +41,6 @@ export interface ChunkMeshOptions {
 export interface ChunkFog {
   surface: FogSurface
   layout: DiskLayout
-  rgb: Readonly<Rgb>
   /**
    * One byte per disk vertex, laid out by `layout`, 1 where in the rover's line of sight now;
    * revealed ground elsewhere, or everywhere without it, takes the seen-before tint.
@@ -58,18 +56,26 @@ export interface ChunkMesh {
   /** x, y, z per vertex: the surface grid row by row, then the skirt. */
   positions: Float32Array
   /**
-   * Linear r, g, b per vertex: the tint of the vertex's ground state × hillshade, blended to the
-   * fog colour by the fog amount.
+   * Linear r, g, b per vertex: the tint of the vertex's ground state, black where fog covers the
+   * vertex fully.
    */
   colors: Float32Array
+  /**
+   * Unit normal per vertex, from the true slopes scaled by {@link HILLSHADE_EXAGGERATION} as the
+   * 2D map's hillshade scales them, turned up towards the vertical by the fog amount so light
+   * never shows the relief the fog hides.
+   */
+  normals: Float32Array
+  /** Fog amount per vertex, 0 to 1: how much the drawn ground is the scene's fog colour. */
+  fogAmounts: Float32Array
   indices: Uint16Array | Uint32Array
 }
 
 /**
  * Triangle mesh of a chunk at a vertex stride. The surface is one indexed grid, so each vertex
  * is shared by every triangle around it; with a skirt, the edge vertices are repeated `skirtM`
- * lower and joined to the edge by outward-facing walls. Shading is baked into the colours with
- * the 2D map's hillshade, so the scene needs no terrain lighting.
+ * lower and joined to the edge by outward-facing walls. The ground is lit by the scene, from the
+ * normals; what fog covers is drawn in the scene's fog colour by the fog amounts.
  */
 export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): ChunkMesh {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
@@ -97,6 +103,9 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
   const total = side * side + skirt
   const positions = new Float32Array(total * 3)
   const colors = new Float32Array(total * 3)
+  const normals = new Float32Array(total * 3)
+  const fogAmounts = new Float32Array(total)
+  const out = { positions, colors, normals, fogAmounts }
   for (let q = 0; q < side; q++) {
     for (let p = 0; p < side; p++) {
       const a = p * step
@@ -104,7 +113,7 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
       const k = q * side + p
       positions[3 * k] = a * cellSize
       positions[3 * k + 1] = b * cellSize
-      paint(positions, colors, k, a, b)
+      paint(out, k, a, b)
     }
   }
   for (let e = 0; e < skirt; e++) {
@@ -113,7 +122,7 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
     positions[3 * to] = positions[3 * from]!
     positions[3 * to + 1] = positions[3 * from + 1]!
   }
-  hangSkirt(positions, colors, side, skirtM)
+  hangSkirt(out, side, skirtM)
 
   const count = (side - 1) * (side - 1) * 6 + skirt * 6
   const indices = total > 0xffff ? new Uint32Array(count) : new Uint16Array(count)
@@ -144,27 +153,27 @@ export function chunkMesh(chunk: TerrainChunk, options: ChunkMeshOptions): Chunk
     side,
     positions,
     colors,
+    normals,
+    fogAmounts,
     indices,
   }
 }
 
+/** The vertex arrays a paint writes: always the colours, the rest where given. */
+type PaintTarget = Pick<ChunkMesh, 'colors'> &
+  Partial<Pick<ChunkMesh, 'positions' | 'normals' | 'fogAmounts'>>
+
 /**
- * Writes the height (unless `positions` is absent) and linear colour of chunk vertex (a, b) to
- * vertex `k`: the tint × hillshade from central differences over the step on the true heights,
- * and, with fog, the drawn height, the tint by the fog's sight and the blend to the fog colour
- * from the disk's fog surface. The one rule {@link chunkMesh}, {@link refogChunkMesh} and
+ * Writes to vertex `k` what `out` carries of chunk vertex (a, b): the drawn height, the linear
+ * tint of its ground state (in the fog's sight or seen before), the normal from central
+ * differences over the step on the true heights, and the fog amount, the fog-driven parts from
+ * the disk's fog surface. The one rule {@link chunkMesh}, {@link refogChunkMesh} and
  * {@link recolourChunkMesh} use, so a repainted vertex equals a rebuilt one.
  */
 function vertexPainter(
   chunk: TerrainChunk,
   options: ChunkMeshOptions,
-): (
-  positions: Float32Array | undefined,
-  colors: Float32Array,
-  k: number,
-  a: number,
-  b: number,
-) => void {
+): (out: PaintTarget, k: number, a: number, b: number) => void {
   const { vertexCount: n, cellSize, heights, cx, cy } = chunk
   const { heightRange, step = 1, fog, heightOutside } = options
   const cells = n - 1
@@ -172,7 +181,6 @@ function vertexPainter(
   const baseJ = cy * cells
   const span = heightRange.max - heightRange.min || 1
   const diskIndex = fog && diskIndexer(chunk, fog)
-  const fogLinear = fog && fog.rgb.map(srgbToLinear)
 
   const heightAt = (a: number, b: number): number | undefined => {
     if (a >= 0 && a < n && b >= 0 && b < n) return heights[b * n + a]
@@ -189,31 +197,37 @@ function vertexPainter(
     return 0
   }
 
-  return (positions, colors, k, a, b) => {
+  return ({ positions, colors, normals, fogAmounts }, k, a, b) => {
     const d = diskIndex?.(a, b)
     const amount = d === undefined ? 0 : fog!.surface.amount[d]!
     if (positions) {
       positions[3 * k + 2] = d === undefined ? heights[b * n + a]! : fog!.surface.heights[d]!
     }
-    let r = 0
-    let g = 0
-    let bl = 0
+    if (fogAmounts) fogAmounts[k] = amount
     if (amount < 1) {
-      const light = reliefLight(hillshadeAt(gradient(a, b, 1, 0), gradient(a, b, 0, 1)))
       const inSight = !fog || (d !== undefined && fog.sight?.[d] === 1)
       const tint = groundRgb((heights[b * n + a]! - heightRange.min) / span, inSight)
-      r = srgbToLinear(tint[0] * light)
-      g = srgbToLinear(tint[1] * light)
-      bl = srgbToLinear(tint[2] * light)
+      colors[3 * k] = srgbToLinear(tint[0])
+      colors[3 * k + 1] = srgbToLinear(tint[1])
+      colors[3 * k + 2] = srgbToLinear(tint[2])
+    } else {
+      colors.fill(0, 3 * k, 3 * k + 3)
     }
-    if (amount > 0) {
-      r += (fogLinear![0]! - r) * amount
-      g += (fogLinear![1]! - g) * amount
-      bl += (fogLinear![2]! - bl) * amount
+    if (!normals) return
+    let nx = 0
+    let ny = 0
+    if (amount < 1) {
+      const gx = gradient(a, b, 1, 0) * HILLSHADE_EXAGGERATION
+      const gy = gradient(a, b, 0, 1) * HILLSHADE_EXAGGERATION
+      const scale = (1 - amount) / Math.sqrt(gx * gx + gy * gy + 1)
+      nx = -gx * scale
+      ny = -gy * scale
     }
-    colors[3 * k] = r
-    colors[3 * k + 1] = g
-    colors[3 * k + 2] = bl
+    // The slope normal's horizontal part shrinks with the fog amount; the vertical keeps it unit.
+    const nz = Math.sqrt(1 - Math.min(1, nx * nx + ny * ny))
+    normals[3 * k] = nx
+    normals[3 * k + 1] = ny
+    normals[3 * k + 2] = nz
   }
 }
 
@@ -235,12 +249,12 @@ function diskIndexer(
 }
 
 /**
- * Sets the skirt, hung `skirtM` below the edge, to the edge's colours and, unless `positions` is
- * absent, its heights.
+ * Sets the skirt, hung `skirtM` below the edge, to what `out` carries of the edge: heights,
+ * colours, normals and fog. Lit as the edge above it, a skirt showing through a seam matches the
+ * ground around the seam.
  */
 function hangSkirt(
-  positions: Float32Array | undefined,
-  colors: Float32Array,
+  { positions, colors, normals, fogAmounts }: PaintTarget,
   side: number,
   skirtM: number,
 ): void {
@@ -251,13 +265,15 @@ function hangSkirt(
     const to = side * side + e
     if (positions) positions[3 * to + 2] = positions[3 * from + 2]! - skirtM
     colors.copyWithin(3 * to, 3 * from, 3 * from + 3)
+    normals?.copyWithin(3 * to, 3 * from, 3 * from + 3)
+    if (fogAmounts) fogAmounts[to] = fogAmounts[from]!
   }
 }
 
 /**
- * Rewrites, in place, the heights and colours of a mesh {@link chunkMesh} built with the same
- * step and skirt, to `options.fog`: what a reveal changes. Plan positions and indices are
- * untouched, so a fog change costs no new geometry.
+ * Rewrites, in place, the heights, colours, normals and fog amounts of a mesh {@link chunkMesh}
+ * built with the same step and skirt, to `options.fog`: what a reveal changes. Plan positions and
+ * indices are untouched, so a fog change costs no new geometry.
  */
 export function refogChunkMesh(
   mesh: ChunkMesh,
@@ -268,14 +284,14 @@ export function refogChunkMesh(
   const side = mesh.side
   const paint = vertexPainter(chunk, options)
   for (let q = 0; q < side; q++)
-    for (let p = 0; p < side; p++)
-      paint(mesh.positions, mesh.colors, q * side + p, p * step, q * step)
-  hangSkirt(mesh.positions, mesh.colors, side, skirtM)
+    for (let p = 0; p < side; p++) paint(mesh, q * side + p, p * step, q * step)
+  hangSkirt(mesh, side, skirtM)
 }
 
 /**
  * Rewrites, in place, only the colours of a mesh {@link chunkMesh} built with the same step and
- * skirt, to `options`: what a change of the rover's sight changes, the fog surface staying put.
+ * skirt, to `options`: what a change of the rover's sight changes, the fog surface, and with it
+ * the heights, normals and fog amounts, staying put.
  */
 export function recolourChunkMesh(
   mesh: ChunkMesh,
@@ -285,9 +301,10 @@ export function recolourChunkMesh(
   const { step = 1, skirtM = 0 } = options
   const side = mesh.side
   const paint = vertexPainter(chunk, options)
+  const colours = { colors: mesh.colors }
   for (let q = 0; q < side; q++)
-    for (let p = 0; p < side; p++) paint(undefined, mesh.colors, q * side + p, p * step, q * step)
-  hangSkirt(undefined, mesh.colors, side, skirtM)
+    for (let p = 0; p < side; p++) paint(colours, q * side + p, p * step, q * step)
+  hangSkirt(colours, side, skirtM)
 }
 
 /** Whether the fog covers every vertex of the chunk fully, so it may be drawn at {@link FOG_STEP}. */

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
-import { useCurrentSight } from '#imports'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { LinearToneMapping } from 'three'
+import { useCurrentSight, useRoute } from '#imports'
 import { createTerrainSampler, destinationObject, liftSeen } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
@@ -30,6 +31,46 @@ const DEMO_STOPS = [
   { distanceM: 12, offRad: 0.5 },
   { distanceM: 24, offRad: -0.4 },
 ]
+
+/**
+ * Lighting controls: the time of the sol and an exposure offset, opened from `?sol=` and
+ * `?bias=` for repeatable screenshots, and `?look=linear` for three's plain linear tone mapping
+ * in place of the scene's AgX look.
+ */
+const route = useRoute()
+const queryNumber = (name: string, fallback: number) => {
+  const value = Number(route.query[name])
+  return typeof route.query[name] === 'string' && Number.isFinite(value) ? value : fallback
+}
+const sol = ref(queryNumber('sol', 0.4))
+const bias = ref(queryNumber('bias', 0))
+const linear = route.query.look === 'linear'
+/** A cycle plays a whole sol in this many seconds. */
+const CYCLE_S = 60
+const cycling = ref(false)
+let raf = 0
+let last = 0
+function turn(now: number): void {
+  sol.value = (sol.value + (now - last) / 1000 / CYCLE_S) % 1
+  last = now
+  raf = requestAnimationFrame(turn)
+}
+watch(cycling, (on) => {
+  cancelAnimationFrame(raf)
+  if (!on) return
+  last = performance.now()
+  raf = requestAnimationFrame(turn)
+})
+onBeforeUnmount(() => cancelAnimationFrame(raf))
+const lighting = computed(() => ({
+  solFraction: sol.value,
+  exposureBias: bias.value,
+  ...(linear ? { toneMapping: LinearToneMapping } : {}),
+}))
+const clock = computed(() => {
+  const minutes = Math.floor(sol.value * 24 * 60)
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+})
 
 const field = (name: (typeof KEYFRAME_FIELDS)[number]) => KEYFRAME_FIELDS.indexOf(name)
 
@@ -108,6 +149,19 @@ const deaths = computed(() => {
 
 <template>
   <div v-if="disk && terrain" class="space-y-2">
+    <div class="flex flex-wrap items-center gap-4 text-sm">
+      <label class="flex min-w-64 flex-1 items-center gap-2">
+        <span class="w-24 font-mono tabular-nums">Sol {{ clock }}</span>
+        <USlider v-model="sol" :min="0" :max="1" :step="0.001" aria-label="Time of the sol" />
+      </label>
+      <label class="flex min-w-48 items-center gap-2">
+        <span class="w-24 font-mono tabular-nums"
+          >{{ bias >= 0 ? '+' : '' }}{{ bias.toFixed(1) }} EV</span
+        >
+        <USlider v-model="bias" :min="-3" :max="3" :step="0.1" aria-label="Exposure bias" />
+      </label>
+      <USwitch v-model="cycling" :label="`Cycle a sol in ${CYCLE_S} s`" />
+    </div>
     <div class="mx-auto max-w-[min(100%,70vh)] overflow-hidden rounded-md border border-default">
       <ClientOnly>
         <DiskScene
@@ -126,6 +180,7 @@ const deaths = computed(() => {
           :deaths="deaths"
           :reveals="reveals"
           :objects="objects"
+          :lighting="lighting"
         />
       </ClientOnly>
     </div>

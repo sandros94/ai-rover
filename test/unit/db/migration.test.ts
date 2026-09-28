@@ -170,3 +170,33 @@ describe('the ai_judgment migration', () => {
     }
   })
 })
+
+describe('the stop_radius_rule migration', () => {
+  it('gives the rules of existing missions the stop radius their stops were published with', async () => {
+    const server = new NetlifyDB({ logger: () => {} })
+    const connection = getDatabase({ connectionString: await server.start() })
+    const db = drizzle({ client: connection, relations })
+    try {
+      const names = readdirSync(MIGRATIONS_DIR).toSorted()
+      const at = names.findIndex((name) => name.endsWith('_stop_radius_rule'))
+      expect(at).toBeGreaterThan(0)
+      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+
+      const { stopRadiusM: _radius, ...older } = DEFAULT_MISSION_RULES
+      const config = JSON.stringify({ world: {}, rules: older })
+      const small = JSON.stringify({ world: {}, rules: { ...older, stopRadiusM: 120 } })
+      await db.execute(raw`
+        insert into mission (id, seed, world_hash, config) values
+          ('01900000-0000-7000-8000-000000000001', 'mars', '0123456789abcdef', ${config}),
+          ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${small})`)
+
+      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      const missions = await db.execute<{ radius: number }>(raw`
+        select (config -> 'rules' -> 'stopRadiusM')::int as radius from mission order by id`)
+      expect(missions.rows).toEqual([{ radius: 500 }, { radius: 120 }])
+    } finally {
+      await connection.pool.end()
+      await server.stop()
+    }
+  })
+})

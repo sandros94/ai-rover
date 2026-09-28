@@ -51,7 +51,7 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
   const config = { world: input.world ?? {}, rules: input.rules ?? DEFAULT_MISSION_RULES }
   const world = defineWorld({ seed, ...config.world })
   const hash = worldHash(world)
-  const disk = computeStopDisk(world, { center: at })
+  const disk = computeStopDisk(world, { center: at, radius: config.rules.stopRadiusM })
   const mask = revealDisk(createRevealedMask(world), disk)
   const missionId = uuidv7()
   const published = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
