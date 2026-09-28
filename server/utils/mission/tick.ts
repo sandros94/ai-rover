@@ -340,11 +340,14 @@ async function prepareSettlement(
   const from = await getStop(db, driving.fromStopId)
   const seen = revealVertices(
     await loadRevealedMask(store, from),
-    stopDisk(world, from),
+    stopDisk(world, from, { radius: mission.config.rules.stopRadiusM }),
     await loadRecordReveals(store, driving),
   )
   const { x, y } = outcome.endPose
-  const disk = computeStopDisk(world, { center: { x, y } })
+  const disk = computeStopDisk(world, {
+    center: { x, y },
+    radius: mission.config.rules.stopRadiusM,
+  })
   const mask = revealDisk(seen, disk)
   const assessments = new Map<string, Assessment>()
 
@@ -476,7 +479,7 @@ async function prepareClose(
   const world = missionWorld(mission)
   // The round closes only once the drive beside it has settled, so the rover is at its stop.
   const from = await getStop(db, open.fromStopId)
-  const disk = stopDisk(world, from)
+  const disk = stopDisk(world, from, { radius: rules.stopRadiusM })
   const revealed = await loadRevealedMask(store, from)
   const refused = new Set<string>()
   run.step('close-plan')
