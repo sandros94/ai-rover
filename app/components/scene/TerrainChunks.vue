@@ -13,6 +13,7 @@ import type { GridRect } from '#shared/utils/client'
 import { maskChange } from '#shared/utils/client'
 import type { ChunkFog, ChunkMesh, LodLevel, TerrainChunk } from '#shared/utils/client/scene'
 import {
+  chunkCastsShadow,
   chunkDistance,
   chunkFogged,
   chunkLevel,
@@ -50,6 +51,11 @@ const props = defineProps<{
   sight?: Uint8Array
   /** The stop's survey, world metres: ground beyond it is not drawn. Absent: none is cut. */
   survey?: { center: { x: number; y: number }; radius: number }
+  /**
+   * Ground within `rangeM` of the point casts shadows, farther ground only receives; without
+   * casters no ground casts. Re-evaluated as the point moves, like the levels.
+   */
+  casters?: { x: number; y: number; rangeM: number } | null
 }>()
 
 /** Distance the focus must move before levels are re-evaluated. */
@@ -138,6 +144,7 @@ depthMaterial.onBeforeCompile = (shader) => {
 }
 const drawn = new Map<string, Drawn>()
 let lastFocus: { x: number; y: number } | undefined
+let lastCasters: { x: number; y: number; rangeM: number } | null | undefined
 
 const keyOf = (chunk: TerrainChunk) => `${chunk.cx},${chunk.cy}`
 
@@ -270,7 +277,7 @@ function sync(): void {
     let entry = drawn.get(key)
     if (!entry) {
       const mesh = new Mesh(undefined, material)
-      mesh.castShadow = true
+      mesh.castShadow = chunkCastsShadow(source.chunk, props.casters ?? null)
       mesh.customDepthMaterial = depthMaterial
       mesh.receiveShadow = true
       const { cx, cy, vertexCount, cellSize } = source.chunk
@@ -320,7 +327,28 @@ function sync(): void {
   lastFocus = { ...props.focus }
 }
 
+/** Which chunks cast shadows, from the casters as they are now. */
+function applyCasters(): void {
+  const casters = props.casters ?? null
+  for (const entry of drawn.values())
+    entry.mesh.castShadow = chunkCastsShadow(entry.source.chunk, casters)
+  lastCasters = casters && { ...casters }
+}
+
 watch(() => props.chunks, sync, { immediate: true })
+watch(
+  () => props.casters,
+  (casters) => {
+    const last = lastCasters
+    const moved =
+      !casters ||
+      !last ||
+      casters.rangeM !== last.rangeM ||
+      Math.hypot(casters.x - last.x, casters.y - last.y) >= REFRESH_M
+    if (moved) applyCasters()
+  },
+  { immediate: true },
+)
 watch(() => props.fog, applyFog)
 watch(() => props.sight, applySight)
 watch(

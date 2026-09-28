@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  chunkCastsShadow,
   chunkDistance,
   chunkLevel,
   chunkMesh,
@@ -220,6 +221,36 @@ describe('chunkDistance', () => {
     expect(chunkDistance(c, { x: 70, y: 10 })).toBe(0)
     expect(chunkDistance(c, { x: 60, y: 10 })).toBe(4)
     expect(chunkDistance(c, { x: 60, y: -3 })).toBe(5)
+  })
+})
+
+describe('chunkCastsShadow', () => {
+  const c = { cx: 1, cy: 0, vertexCount: 65, cellSize: 1 }
+
+  it("casts within the range of the point, measured to the chunk's nearest edge, and only receives beyond", () => {
+    expect(chunkCastsShadow(c, { x: 70, y: 10, rangeM: 0 })).toBe(true)
+    expect(chunkCastsShadow(c, { x: 60, y: -3, rangeM: 5 })).toBe(true)
+    expect(chunkCastsShadow(c, { x: 60, y: -3, rangeM: 4.9 })).toBe(false)
+    expect(chunkCastsShadow(c, { x: -100, y: 10, rangeM: 64 })).toBe(false)
+  })
+
+  it('casts nothing without casters', () => {
+    expect(chunkCastsShadow(c, null)).toBe(false)
+  })
+
+  it('picks, from a disk of chunks, those that meet the circle around the point', () => {
+    const chunks: { cx: number; cy: number; vertexCount: number; cellSize: number }[] = []
+    for (let cy = -3; cy <= 3; cy++)
+      for (let cx = -3; cx <= 3; cx++) chunks.push({ cx, cy, vertexCount: 65, cellSize: 1 })
+    const casting = (rangeM: number) =>
+      chunks.filter((chunk) => chunkCastsShadow(chunk, { x: 32, y: 32, rangeM }))
+    // The point is the middle of chunk (0, 0): its ring of eight is 32 to 45 m away.
+    expect(casting(64)).toHaveLength(9)
+    expect(casting(64).every((chunk) => Math.abs(chunk.cx) <= 1 && Math.abs(chunk.cy) <= 1)).toBe(
+      true,
+    )
+    // Past 96 m, the next chunk along each axis too.
+    expect(casting(100)).toHaveLength(13)
   })
 })
 

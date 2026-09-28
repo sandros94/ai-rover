@@ -25,7 +25,7 @@ const props = withDefaults(
 /** The scene is z-up like the terrain data, so no axis swap anywhere. */
 const UP = new Vector3(0, 0, 1)
 const camera = shallowRef<PerspectiveCamera>()
-const { renderer } = useTres()
+const { renderer, invalidate } = useTres()
 const { onBeforeRender } = useLoop()
 const goal = new Vector3()
 let controls: OrbitControls | undefined
@@ -71,10 +71,12 @@ onBeforeRender(() => {
     if (x === props.target.x && y === props.target.y && z === props.target.z) ease = undefined
   }
   goal.set(x, y, z)
+  const carried = !goal.equals(controls.target)
   // Carry the camera with the target so the orbit offset the user chose is kept.
   camera.value.position.add(goal).sub(controls.target)
   controls.target.copy(goal)
-  controls.update()
+  // `update` reports a view that moved; damping left below its threshold is not drawn.
+  if (controls.update() || carried) invalidate()
 })
 
 onBeforeUnmount(() => controls?.dispose())

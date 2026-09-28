@@ -5,6 +5,7 @@ const nextModelId = () => ++modelIds
 </script>
 
 <script setup lang="ts">
+import { useLoop, useTres } from '@tresjs/core'
 import type { Material, Mesh, Object3D } from 'three'
 import {
   BoxGeometry,
@@ -52,6 +53,11 @@ const props = withDefaults(
     ledger?: FullModelLedger
     /** Brightness of the arm turret's white LEDs, 0 off to 1 full; the rover's only lamp. */
     lamp?: number
+    /**
+     * Camera distance beyond which the rover draws its low-poly model in place of the full one,
+     * metres; `null` never. Not for a ghost.
+     */
+    lodDistanceM?: number | null
   }>(),
   {
     geometry: () => DEFAULT_ROVER_GEOMETRY,
@@ -60,6 +66,7 @@ const props = withDefaults(
     variant: 'model',
     ledger: undefined,
     lamp: 0,
+    lodDistanceM: null,
   },
 )
 
@@ -69,6 +76,8 @@ const emit = defineEmits<{
 }>()
 
 const baseURL = useRuntimeConfig().app.baseURL
+const { camera, invalidate } = useTres()
+const { onBeforeRender } = useLoop()
 
 const partsAt = (frame: Float32Array) => roverParts(frameAttitude(frame), props.geometry)
 const initial = partsAt(props.frame)
@@ -166,6 +175,20 @@ interface Posed {
 let model: Posed | undefined
 /** A focused ghost's full model, over or in place of its silhouette. */
 let detail: Posed | undefined
+/**
+ * The rover's low-poly model (the ghosts' silhouette, a fiftieth of the full model's triangles):
+ * the shadow caster for the full model, which casts none, and what is drawn in its place beyond
+ * `lodDistanceM`. A shadow a few texels of 3 to 12 cm wide shows none of the detail the full
+ * model spends its triangles on, and the shadow pass drew them all a second time.
+ */
+let low: Posed | undefined
+/** Writes neither colour nor depth: the low-poly model is then in the shadow pass alone. */
+const shadowOnly = new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+const lowShade = new MeshLambertMaterial({ color: ROVER_TONES.deck, flatShading: true })
+/** Whether the camera is beyond `lodDistanceM`. */
+let far = false
+/** How much nearer than `lodDistanceM` the camera must come back to bring the full model back. */
+const LOD_MARGIN = 0.1
 const turn = new Quaternion()
 
 function posed(object: Object3D): Posed {
@@ -182,7 +205,7 @@ function pose(frame: Float32Array): void {
   const rig = rigTransforms(frame)
   root.position.set(rig.position.x, rig.position.y, rig.position.z)
   root.quaternion.set(rig.quaternion.x, rig.quaternion.y, rig.quaternion.z, rig.quaternion.w)
-  for (const posedModel of [model, detail]) {
+  for (const posedModel of [model, detail, low]) {
     for (const { node, rest, name } of posedModel?.joints ?? []) {
       const q = rig.joints[name]
       node.quaternion.copy(rest).multiply(turn.set(q.x, q.y, q.z, q.w))
@@ -205,11 +228,59 @@ function showModel(object: Object3D | undefined): void {
     if (props.ghost) paint(object, material)
     else
       object.traverse((child) => {
-        child.castShadow = child.receiveShadow = true
+        child.receiveShadow = true
       })
     root.add(object)
   }
+  applyLod()
   pose(props.frame)
+  invalidate()
+}
+
+/** Shows the full model or the low-poly one for the camera distance, and who casts the shadow. */
+function applyLod(): void {
+  if (props.ghost) return
+  const caster = !!low
+  model?.object.traverse((child) => {
+    child.castShadow = !caster
+  })
+  if (model) model.object.visible = !(far && low)
+  if (!low) return
+  low.object.visible = !!model
+  paint(low.object, far ? lowShade : shadowOnly)
+}
+
+if (!props.ghost) {
+  loadRoverModel(baseURL, 'ghost')
+    .then((loaded) => {
+      if (unmounted) return
+      const object = loaded.scene.clone()
+      object.traverse((child) => {
+        child.castShadow = true
+        child.receiveShadow = true
+      })
+      low = posed(object)
+      root.add(object)
+      applyLod()
+      pose(props.frame)
+      invalidate()
+    })
+    .catch((error: unknown) => {
+      // The full model casts its own shadow and stays at any distance.
+      console.warn('RoverModel: the low-poly model did not load.', error)
+    })
+
+  onBeforeRender(() => {
+    const cam = camera.value
+    const limit = props.lodDistanceM
+    if (!cam || !low || !model) return
+    const distance = cam.position.distanceTo(root.position)
+    const next = limit !== null && distance > limit * (far ? 1 - LOD_MARGIN : 1)
+    if (next === far) return
+    far = next
+    applyLod()
+    invalidate()
+  })
 }
 
 /* The full model: the rover's own, or a focused ghost's. At most two exist per scene. */
@@ -242,6 +313,7 @@ function fadeIn(): void {
     detailMaterial!.opacity = GHOST_OPACITY.detailed * p
     material.opacity = GHOST_OPACITY.silhouette * (1 - p)
     if (model) model.object.visible = p < 1
+    invalidate()
     fade = p < 1 ? requestAnimationFrame(step) : 0
   }
   step()
@@ -261,6 +333,7 @@ async function showDetail(): Promise<void> {
     placeholder.visible = false
     root.add(object)
     pose(props.frame)
+    invalidate()
     fadeIn()
   } catch (error) {
     // The silhouette stays.
@@ -280,6 +353,7 @@ function dropDetail(): void {
   if (detailMaterial) detailMaterial.opacity = 0
   if (holding) props.ledger?.release(ledgerId)
   holding = false
+  invalidate()
 }
 
 let unmounted = false
@@ -345,6 +419,8 @@ onBeforeUnmount(() => {
   unitCylinder.dispose()
   material.dispose()
   detailMaterial?.dispose()
+  shadowOnly.dispose()
+  lowShade.dispose()
   turretLamp?.dispose()
 })
 </script>
