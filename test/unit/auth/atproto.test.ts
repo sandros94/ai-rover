@@ -127,7 +127,9 @@ function appOver(
           options.complete
             ? options.complete(result)
             : completeSignIn(event, { db, sessions: auth.sessions }, result),
-        ...(options.redirectErrors && { onError: failSignIn }),
+        ...(options.redirectErrors && {
+          onError: (event, error) => failSignIn(event, error, auth.sessions),
+        }),
       }),
     )
     .get('/api/auth/atproto/client-metadata.json', createClientMetadataHandler(auth))

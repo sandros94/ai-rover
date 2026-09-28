@@ -24,14 +24,14 @@ export interface OAuthResult {
  * - `refused`: the authorization server refused the authorization.
  * - `handle`: the atproto handle or DID leads to no usable account.
  * - `link-changed`: the signed-in user changed while linking.
- * - `account-taken`: the identity already belongs to another user.
+ * - `link-conflict`: the identity cannot join the signed-in user's account.
  */
 export type OAuthFailure =
   | 'state-mismatch'
   | 'refused'
   | 'handle'
   | 'link-changed'
-  | 'account-taken'
+  | 'link-conflict'
 
 /** An HTTPError carrying `reason`, for {@link oauthFailureOf}. */
 export function oauthError(
@@ -61,7 +61,7 @@ const REASONS = new Set<OAuthFailure>([
   'refused',
   'handle',
   'link-changed',
-  'account-taken',
+  'link-conflict',
 ])
 
 export interface OAuthHandlerOptions {

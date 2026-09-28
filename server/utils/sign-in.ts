@@ -1,6 +1,6 @@
 import type { H3Event, HTTPError } from 'nitro/h3'
 import { redirect } from 'nitro/h3'
-import type { AuthProvider } from '#auth'
+import type { AuthProvider, User } from '#auth'
 import type { SignInErrorCode } from '#shared/utils/sign-in'
 import type { OAuthResult } from '../../modules/auth/runtime/server/lib/oauth'
 import {
@@ -11,61 +11,76 @@ import {
 import type { UserSessions } from '../../modules/auth/runtime/server/lib/session'
 import type { DB } from '../database/db'
 import { DbError, postgresErrorOf } from '../database/errors'
-import { createUser, findUserByIdentity, linkIdentity } from '../repositories/users'
+import type { UserAccount } from '../database/schema'
+import type { ProvenIdentity } from '../repositories/users'
+import {
+  createUserWithIdentity,
+  findUser,
+  linkIdentity,
+  mergeUsers,
+  recordSignIn,
+} from '../repositories/users'
 
 /**
- * Turns a proven identity into the signed-in user: the account already holding the identity,
- * else the signed-in account when the flow asked to link, else a new account from the provider
- * profile. Then sets the session and lands on the requested path.
+ * Turns a proven identity into the signed-in user. Signing in: the account holding the identity,
+ * else a new account from it. Linking (the flow names the signed-in user): an unclaimed identity
+ * joins the signed-in account; one held by another account brings that whole account over (see
+ * `mergeUsers`). Then sets the session and lands on the requested path.
  */
 export async function completeSignIn(
   event: H3Event,
   { db, sessions }: { db: DB; sessions: UserSessions },
   result: OAuthResult,
 ) {
-  const identity = { provider: result.provider, subject: result.subject }
-  let user = await findUserByIdentity(db, identity)
-  if (user && result.linkTo && user.id !== result.linkTo) {
-    throw oauthError('account-taken', {
-      status: 409,
-      message: `This ${result.provider} account already belongs to another user; sign in with it instead.`,
+  const identity: ProvenIdentity = {
+    provider: result.provider,
+    subject: result.subject,
+    profile: {
+      displayName: result.profile.displayName,
+      avatarUrl: result.profile.avatarUrl ?? null,
+      handle: result.profile.handle ?? null,
+    },
+  }
+  let user = await recordSignIn(db, identity)
+  const { linkTo } = result
+  if (linkTo && user?.id !== linkTo) {
+    const holder = user
+    user = await refusingConflicts(async () => {
+      if (holder) return mergeUsers(db, { into: linkTo, from: holder.id })
+      await linkIdentity(db, linkTo, identity)
+      return (await findUser(db, linkTo))!
     })
   }
-  if (!user) {
-    const userId = result.linkTo ?? (await createUser(db, profileRow(result))).id
-    try {
-      await linkIdentity(db, userId, identity)
-    } catch (error) {
-      if (error instanceof DbError) {
-        throw oauthError('account-taken', { status: 409, message: error.message, cause: error })
-      }
-      throw error
-    }
-    user = (await findUserByIdentity(db, identity))!
-  }
+  user ??= await createUserWithIdentity(db, identity)
 
   const previous = (await sessions.get(event)).user
   const providers: AuthProvider[] =
     previous?.id === user.id
       ? [...new Set([...previous.providers, result.provider])]
       : [result.provider]
-  await sessions.replace(event, {
-    user: {
-      id: user.id,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl ?? undefined,
-      handle: user.handle ?? undefined,
-      providers,
-    },
-  })
+  await sessions.replace(event, { user: sessionUser(user, providers) })
   return redirect(result.redirect, 302)
 }
 
-function profileRow({ profile }: OAuthResult) {
+/** The session's view of `account`, with the providers proven in this browser session. */
+export function sessionUser(account: UserAccount, providers: AuthProvider[]): User {
   return {
-    displayName: profile.displayName,
-    avatarUrl: profile.avatarUrl ?? null,
-    handle: profile.handle ?? null,
+    id: account.id,
+    displayName: account.displayName,
+    avatarUrl: account.avatarUrl ?? undefined,
+    handle: account.handle ?? undefined,
+    providers,
+  }
+}
+
+async function refusingConflicts(run: () => Promise<UserAccount>): Promise<UserAccount> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof DbError && error.code === 'INVALID_STATE') {
+      throw oauthError('link-conflict', { status: 409, message: error.message, cause: error })
+    }
+    throw error
   }
 }
 
@@ -78,8 +93,11 @@ export function signInErrorCode(error: HTTPError): SignInErrorCode {
   return 'sign-in-failed'
 }
 
-/** `onError` of the sign-in routes: logs the failure and lands on the login page with its code. */
-export function failSignIn(event: H3Event, error: HTTPError) {
+/**
+ * `onError` of the sign-in routes: logs the failure and lands with its code on the login page,
+ * or on the settings page when someone is signed in, since only linking fails for them.
+ */
+export async function failSignIn(event: H3Event, error: HTTPError, sessions: UserSessions) {
   const code = signInErrorCode(error)
   const log = error.status >= 500 ? console.error : console.warn
   const cause = oauthCauseOf(error)
@@ -87,5 +105,6 @@ export function failSignIn(event: H3Event, error: HTTPError) {
     `[auth] sign-in failed (${code}): ${error.status} ${error.message}`,
     ...(cause ? [cause] : []),
   )
-  return redirect(`/login?${new URLSearchParams({ error: code })}`, 302)
+  const page = (await sessions.get(event)).user ? '/settings' : '/login'
+  return redirect(`${page}?${new URLSearchParams({ error: code })}`, 302)
 }

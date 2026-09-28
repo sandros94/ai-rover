@@ -64,6 +64,7 @@ function appWith(handler = vi.fn<Handler>(async (_event, context) => context.use
           provider: 'github',
           subject: 'gone',
           userId: '0192f000-0000-7000-8000-00000000dead',
+          displayName: 'Gone',
         })
         return 'written'
       }),

@@ -174,7 +174,11 @@ describe('GitHub sign-in', () => {
 
   it('links the identity to the signed-in user when the flow asked to link', async () => {
     const existing = await createUser(db, { displayName: 'Existing' })
-    await linkIdentity(db, existing.id, { provider: 'atproto', subject: 'did:plc:existing' })
+    await linkIdentity(db, existing.id, {
+      provider: 'atproto',
+      subject: 'did:plc:existing',
+      profile: { displayName: 'Existing', avatarUrl: null, handle: null },
+    })
     const app = appOver(testAuth(github({ id: 777, login: 'linker', name: 'L' }).fetch))
     const login = await app.request(`${ORIGIN}/test/login-as/${existing.id}`, { method: 'POST' })
     const { res, location } = await start(app, '?link=1', cookieHeader(login))
