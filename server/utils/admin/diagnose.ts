@@ -35,6 +35,8 @@ const MISSION_PROBE_TIMEOUT_MS = 50_000
 const STUCK_AFTER_MS = 5_000
 /** Blob prefixes the app writes under. */
 const BLOB_PREFIXES = ['missions/', 'terrain/']
+/** What a recorded migration's name looks like: a timestamp, an underscore, a slug. */
+const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+$/
 /** The blob count stops at this. */
 const MAX_BLOB_KEYS = 1000
 
@@ -172,10 +174,21 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
       sql`select to_regclass('netlify.migrations') is not null as present`,
     )
     if (tracking?.present) {
-      const ran = await rows<{ name: string }>(
-        sql`select name from netlify.migrations order by name`,
+      /*
+       * The platform's tracking table and the local emulation's do not share a column layout, so
+       * each row is read whole and the migration is whatever value looks like a migration name.
+       */
+      const ran = await rows<{ row: Record<string, unknown> }>(
+        sql`select to_jsonb(m) as row from netlify.migrations m`,
       )
-      migrations.push(...ran.map((row) => row.name))
+      migrations.push(
+        ...ran
+          .map((r) =>
+            Object.values(r.row).find((v) => typeof v === 'string' && MIGRATION_NAME.test(v)),
+          )
+          .filter((v): v is string => typeof v === 'string')
+          .toSorted(),
+      )
     }
     const present = new Set(
       (
