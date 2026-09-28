@@ -4,7 +4,15 @@ import {
   DEFAULT_ROVER_GEOMETRY,
   ROVER_MAX_SPEED_MPS,
 } from '#shared/utils/rover'
-import { DEFAULT_STOP_MODEL, driveSegment, statusAt, statusRuns } from '#shared/utils/drive'
+import {
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  driveSegment,
+  statusAt,
+  statusRuns,
+  steeringFor,
+} from '#shared/utils/drive'
+import type { DriveEvent } from '#shared/utils/drive'
 import { driveErrorOf, F, frame, revealedAfterStop, syntheticDisk, syntheticWorld } from './helpers'
 
 const r = DEFAULT_ROVER_GEOMETRY.wheelRadius
@@ -94,8 +102,8 @@ describe('driveSegment on flat ground', () => {
 
   it('samples keyframes at 2 Hz from t = 0 to the end', () => {
     expect(keyframes.hz).toBe(2)
-    expect(keyframes.stride).toBe(19)
-    expect(keyframes.data.length).toBe(19 * keyframes.count)
+    expect(keyframes.stride).toBe(23)
+    expect(keyframes.data.length).toBe(23 * keyframes.count)
     expect(Math.abs(keyframes.count - outcome.durationS * 2)).toBeLessThanOrEqual(1)
     for (let k = 0; k < keyframes.count; k++) expect(frame(keyframes, k)[F.t]).toBe(k / 2)
     expect(frame(keyframes, keyframes.count - 1)[F.t]).toBe(outcome.durationS)
@@ -184,6 +192,29 @@ describe('driveSegment through a blended corner', () => {
     expect(record.plan.motions.some((m) => m.type === 'arc' && m.curvature !== 0)).toBe(true)
   })
 
+  it('steers standing still into the arc and out of it, driving the arc on its Ackermann angles', () => {
+    const steering = record.events.filter((event) => event.type === 'steering')
+    const turns = record.events.filter((event) => event.type === 'turning').length
+    // Into and out of each turn in place, then into and out of the one blend arc.
+    expect(steering).toHaveLength(2 * turns + 2)
+    const arc = record.plan.motions.find((m) => m.type === 'arc' && m.curvature !== 0)!
+    const { angles } = steeringFor(arc)
+    const into = steering.at(-2)!
+    const on = frame(
+      keyframes,
+      Math.ceil((into.t + (into.details!.durationS as number)) * keyframes.hz) + 1,
+    )
+    expect(on[F.speed]).toBeGreaterThan(0)
+    expect([on[F.steerFL], on[F.steerFR], on[F.steerRL], on[F.steerRR]]).toEqual(
+      angles.map(Math.fround),
+    )
+    // A right turn: the right wheels are inner and steer harder, the rear ones the other way.
+    expect(on[F.steerFR]!).toBeLessThan(on[F.steerFL]!)
+    expect(on[F.steerFL]!).toBeLessThan(0)
+    expect(on[F.steerRR]!).toBeGreaterThan(on[F.steerRL]!)
+    expect(on[F.steerRL]!).toBeGreaterThan(0)
+  })
+
   it('turns the inner wheels less than the outer ones by the differential-odometry ratio', () => {
     const last = frame(keyframes, keyframes.count - 1)
     let turned = outcome.endPose.headingRad - start.headingRad
@@ -209,18 +240,68 @@ describe('driveSegment with a turn in place', () => {
     start: { x: 0, y: 0, headingRad: Math.PI / 2 },
     goal: { x: 20, y: 0 },
   })
+  const { keyframes } = record
 
-  it('turns 90° right at 3°/s before driving, as a turning stop', () => {
+  const { turnRateRadPerS, steerRateRadPerS } = DEFAULT_SPEED_MODEL
+  const { frontWheel } = DEFAULT_ROVER_GEOMETRY
+  // Straight to the turn-in-place stance: the front wheels steer farthest, atan(1.185 / 1.065).
+  const steerS = Math.atan2(frontWheel.x, frontWheel.y) / steerRateRadPerS
+  const turnS = Math.PI / 2 / turnRateRadPerS
+
+  it('steers into the turn-in-place stance, turns 90° right, steers straight, then drives', () => {
     expect(record.outcome.kind).toBe('arrived')
-    const turning = record.events.filter((event) => event.type === 'turning')
-    expect(turning).toHaveLength(1)
-    expect(turning[0]).toMatchObject({ t: 0, type: 'turning' })
-    expect(turning[0]!.details!.angleDeg).toBeCloseTo(-90, 6)
-    expect(turning[0]!.details!.durationS).toBeCloseTo(30, 6)
-    expect(statusAt(record.events, 10)).toMatchObject({ status: 'turning', angleDeg: -90 })
-    expect(statusAt(record.events, 31).status).toBe('driving')
-    // 30 s turning plus 20 m at the AutoNav rate; no imaging stop short of 25 m.
-    expect(record.outcome.durationS).toBeCloseTo(30 + 20 / 0.033, -1)
+    const stops = record.events.filter((e) => e.type === 'steering' || e.type === 'turning')
+    expect(stops.map((e) => e.type)).toEqual(['steering', 'turning', 'steering'])
+    const [into, turning, out] = stops as [DriveEvent, DriveEvent, DriveEvent]
+    expect(into.t).toBe(0)
+    expect(into.details!.durationS).toBeCloseTo(steerS, 9)
+    expect(turning.t).toBeCloseTo(steerS, 9)
+    expect(turning.details!.angleDeg).toBeCloseTo(-90, 6)
+    expect(turning.details!.durationS).toBeCloseTo(turnS, 9)
+    expect(out.t).toBeCloseTo(steerS + turnS, 9)
+    expect(out.details!.durationS).toBeCloseTo(steerS, 9)
+    expect(statusAt(record.events, 1)).toMatchObject({ status: 'steering' })
+    expect(statusAt(record.events, steerS + 10)).toMatchObject({ status: 'turning', angleDeg: -90 })
+    expect(statusAt(record.events, 2 * steerS + turnS + 1).status).toBe('driving')
+    // Steering twice, about 60 s turning at 1.5°/s, and 20 m at the AutoNav rate; no imaging
+    // stop short of 25 m.
+    expect(record.outcome.durationS).toBeCloseTo(2 * steerS + turnS + 20 / 0.033, -1)
+  })
+
+  it('holds the wheels toward the centre mid-turn, the two sides rolling opposite ways', () => {
+    const mid = frame(keyframes, Math.round((steerS + turnS / 2) * keyframes.hz))
+    const { angles } = steeringFor({ type: 'turn', angleRad: -Math.PI / 2 })
+    expect([mid[F.steerFL], mid[F.steerFR], mid[F.steerRL], mid[F.steerRR]]).toEqual(
+      angles.map(Math.fround),
+    )
+    const before = frame(keyframes, Math.round((steerS + 1) * keyframes.hz))
+    // A right turn: the left wheels roll forward, the right ones back.
+    for (const w of [F.spinFL, F.spinML, F.spinRL]) expect(mid[w]! - before[w]!).toBeGreaterThan(0)
+    for (const w of [F.spinFR, F.spinMR, F.spinRR]) expect(mid[w]! - before[w]!).toBeLessThan(0)
+    // The corner wheels ride a wider circle than the middle ones.
+    expect(mid[F.spinFL]! - before[F.spinFL]!).toBeGreaterThan(mid[F.spinML]! - before[F.spinML]!)
+  })
+
+  it('turns the wheels at the steering rate while standing still, the spins held', () => {
+    const halfway = frame(keyframes, Math.round((steerS / 2) * keyframes.hz))
+    const t = halfway[F.t]!
+    const first = frame(keyframes, 0)
+    expect(halfway[F.speed]).toBe(0)
+    expect(halfway[F.x]).toBe(first[F.x])
+    for (const w of SPINS) expect(halfway[w]).toBe(first[w])
+    const { angles } = steeringFor({ type: 'turn', angleRad: -Math.PI / 2 })
+    const got = [halfway[F.steerFL], halfway[F.steerFR], halfway[F.steerRL], halfway[F.steerRR]]
+    for (const [k, angle] of angles.entries()) {
+      expect(got[k]).toBeCloseTo((angle * t) / steerS, 5)
+    }
+    // Straight again once driving.
+    const driving = frame(keyframes, keyframes.count - 1)
+    expect([
+      driving[F.steerFL],
+      driving[F.steerFR],
+      driving[F.steerRL],
+      driving[F.steerRR],
+    ]).toEqual([0, 0, 0, 0])
   })
 })
 

@@ -22,8 +22,17 @@ import type { World } from '../terrain/world'
 import { DriveError } from './errors'
 import type { KeyframeBlock } from './keyframes'
 import { KEYFRAME_STRIDE } from './keyframes'
-import type { SpeedModel, StopModel } from './models'
-import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps, imagingAllowed } from './models'
+import type { SpeedModel, SteeringAngles, StopModel } from './models'
+import {
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  groundSpeedMps,
+  imagingAllowed,
+  minArcRadiusM,
+  steerDurationS,
+  steeringFor,
+  STRAIGHT_WHEELS,
+} from './models'
 
 /**
  * Wheel slip `s = min(max, loose · gain · (tan slope / tan slopeLimit)²)`: commanded travel
@@ -92,11 +101,12 @@ export interface DriveOptions {
 
 /**
  * Closed set: callers may match on it exhaustively, so adding a type is a breaking change. The
- * stops carry `durationS`: `turning` also its signed `angleDeg` (positive to the left),
- * `assessing` the `cause` of the replan it precedes.
+ * stops (`steering`, `turning`, `assessing`, `imaging`) carry `durationS`: `turning` also its
+ * signed `angleDeg` (positive to the left), `assessing` the `cause` of the replan it precedes.
  */
 export type DriveEventType =
   | 'start'
+  | 'steering'
   | 'turning'
   | 'assessing'
   | 'replan'
@@ -174,9 +184,11 @@ const SLOPE_HALF_SPAN_M = 0.5
  *
  * Driving is continuous: after each metre the rover reveals a viewshed of `revealRadiusM` and
  * checks the next `lookaheadM` of path without stopping. It stops only for a reason (see
- * {@link StopModel}): to turn in place, to image every `imagingEveryM`, and to assess before it
- * replans, which it does when seen ground blocks its route within `replanHorizonM` or the
- * lookahead finds a hazard; when no route is left it stops short. A limit failure under the rover
+ * {@link StopModel}): to steer, to turn in place, to image every `imagingEveryM`, and to assess
+ * before it replans, which it does when seen ground blocks its route within `replanHorizonM` or
+ * the lookahead finds a hazard; when no route is left it stops short. Steering happens standing
+ * still before each motion whose wheel angles differ from the current ones (see `steeringFor`):
+ * every turn in place, and each arc entered or left. A limit failure under the rover
  * itself, or sustained slip, fails the segment.
  */
 export function driveSegment(
@@ -203,6 +215,7 @@ interface Resolved {
   limits: RoverLimits | undefined
   ground: Pick<Required<SpeedModel>, 'cruiseSpeedMps' | 'slopeSlowdown'>
   turnRate: number
+  steerRate: number
   imagingEveryM: number
   imagingSteps: number
   assessSteps: number
@@ -228,6 +241,16 @@ interface Cursor {
   motion: number
   /** Progress into the current motion: metres of arc or radians of turn. */
   along: number
+  /** Whether the wheels stand as the current motion needs; until then the rover steers. */
+  steered: boolean
+}
+
+/** A steering in progress: the corner wheels turning from one set of angles to the next. */
+interface SteerPhase {
+  from: SteeringAngles
+  to: SteeringAngles
+  durationS: number
+  elapsedS: number
 }
 
 type Probe = { ok: true } | { ok: false; x: number; y: number; reasons: string[] }
@@ -244,8 +267,6 @@ class Drive {
   private readonly seen: Uint8Array
   /** The disk's traversable mask with hazards the rover found closed off. */
   private readonly believed: Uint8Array
-  private readonly wheelX: number[]
-  private readonly wheelY: number[]
 
   private motions: Motion[] = []
   /** Disk-grid vertices the current route crosses → route distance to them from its start. */
@@ -264,6 +285,8 @@ class Drive {
   private slipMetre = -1
   private speed = 0
   private readonly spins = new Float64Array(6)
+  private wheels: SteeringAngles = [...STRAIGHT_WHEELS]
+  private steering: SteerPhase | undefined
   private readonly frames: number[] = []
   private readonly events: DriveEvent[] = []
   private readonly reveals: SegmentRecord['reveals'] = []
@@ -295,10 +318,14 @@ class Drive {
     }
     this.believed = disk.traversable.slice()
     this.tanLimit = Math.tan(world.config.slopeLimitDeg * DEG)
-    const { frontWheel: f, middleWheel: m, rearWheel: r } = this.o.geometry
-    this.wheelX = [f.x, f.x, m.x, m.x, r.x, r.x]
-    this.wheelY = [f.y, -f.y, m.y, -m.y, r.y, -r.y]
-    this.cursor = { x: start.x, y: start.y, heading: start.headingRad, motion: 0, along: 0 }
+    this.cursor = {
+      x: start.x,
+      y: start.y,
+      heading: start.headingRad,
+      motion: 0,
+      along: 0,
+      steered: false,
+    }
     this.nextImaging = this.o.imagingEveryM
   }
 
@@ -457,7 +484,8 @@ class Drive {
       blendRadiusM: this.options.plan?.blendRadiusM,
       initialHeadingRad: heading,
     })
-    this.cursor = { x, y, heading, motion: 0, along: 0 }
+    this.cursor = { x, y, heading, motion: 0, along: 0, steered: false }
+    this.steering = undefined
     const { width, cellSize } = this.options.disk.grid
     const { waypoints } = plan.route
     this.route = new Map()
@@ -483,25 +511,30 @@ class Drive {
     const { o, cursor: c } = this
     let remaining = 1 / o.simHz
     let moved = 0
+    const stepS = 1 / o.simHz
     while (remaining > 0 && c.motion < this.motions.length) {
       const motion = this.motions[c.motion]!
+      if (!c.steered) {
+        remaining = this.steer(steeringFor(motion, o.geometry).angles, remaining, stepS)
+        continue
+      }
+      const { roll } = steeringFor(motion, o.geometry)
       if (motion.type === 'turn') {
         if (c.along === 0) {
-          this.emit('turning', {
-            angleDeg: motion.angleRad / DEG,
-            durationS: Math.abs(motion.angleRad) / o.turnRate,
-          })
+          this.emit(
+            'turning',
+            {
+              angleDeg: motion.angleRad / DEG,
+              durationS: Math.abs(motion.angleRad) / o.turnRate,
+            },
+            stepS - remaining,
+          )
         }
         const left = Math.abs(motion.angleRad) - c.along
         const turn = Math.min(left, o.turnRate * remaining)
-        const signed = Math.sign(motion.angleRad) * turn
-        c.heading += signed
+        c.heading += Math.sign(motion.angleRad) * turn
         if (turn === left) remaining -= turn / o.turnRate
-        for (let w = 0; w < 6; w++) {
-          const x = this.wheelX[w]!
-          const y = this.wheelY[w]!
-          this.spins[w]! -= (Math.sign(y) * signed * Math.hypot(x, y)) / o.geometry.wheelRadius
-        }
+        for (let w = 0; w < 6; w++) this.spins[w]! += (roll[w]! * turn) / o.geometry.wheelRadius
         if (turn === left) {
           this.nextMotion()
         } else {
@@ -526,12 +559,7 @@ class Drive {
       this.moveAlong(motion.curvature, actual)
       moved += actual
       this.odometer += actual
-      for (let w = 0; w < 6; w++) {
-        const forward = 1 - motion.curvature * this.wheelY[w]!
-        const lateral = motion.curvature * this.wheelX[w]!
-        this.spins[w]! +=
-          (commanded * Math.sign(forward) * Math.hypot(forward, lateral)) / o.geometry.wheelRadius
-      }
+      for (let w = 0; w < 6; w++) this.spins[w]! += (commanded * roll[w]!) / o.geometry.wheelRadius
       this.stuckRun = slip >= o.stuckAbove ? this.stuckRun + commanded : 0
       const metre = Math.floor(this.odometer)
       if (slip > o.slipEventAbove && metre !== this.slipMetre) {
@@ -545,9 +573,40 @@ class Drive {
     this.speed = moved * o.simHz
   }
 
+  /**
+   * Steers the corner wheels toward `target` standing still, for up to `remaining` seconds of
+   * the step that is `stepS` long; returns the seconds left. A steering starts with its
+   * `steering` event, and when the wheels already stand within the threshold the motion starts
+   * at once.
+   */
+  private steer(target: SteeringAngles, remaining: number, stepS: number): number {
+    if (!this.steering) {
+      const durationS = steerDurationS(this.wheels, target, this.o.steerRate)
+      if (durationS === 0) {
+        this.cursor.steered = true
+        return remaining
+      }
+      this.steering = { from: this.wheels, to: target, durationS, elapsedS: 0 }
+      this.emit('steering', { durationS }, stepS - remaining)
+    }
+    const s = this.steering
+    const spent = Math.min(remaining, s.durationS - s.elapsedS)
+    s.elapsedS += spent
+    const u = s.elapsedS / s.durationS
+    this.wheels = s.from.map((a, k) => a + (s.to[k]! - a) * u) as SteeringAngles
+    if (s.elapsedS >= s.durationS) {
+      this.wheels = s.to
+      this.steering = undefined
+      this.cursor.steered = true
+      return remaining - spent
+    }
+    return 0
+  }
+
   private nextMotion(): void {
     this.cursor.motion++
     this.cursor.along = 0
+    this.cursor.steered = false
   }
 
   private moveAlong(curvature: number, distance: number): void {
@@ -721,6 +780,7 @@ class Drive {
       p?.rocker.right ?? 0,
       p?.bogie.left ?? 0,
       p?.bogie.right ?? 0,
+      ...this.wheels,
     )
   }
 
@@ -766,8 +826,14 @@ class Drive {
     }
   }
 
-  private emit(type: DriveEventType, details?: Record<string, DriveEventDetail>): void {
-    const event: DriveEvent = { t: this.time(), type, x: this.cursor.x, y: this.cursor.y }
+  /** Records an event `intoStepS` seconds into the step being simulated, at the cursor. */
+  private emit(
+    type: DriveEventType,
+    details?: Record<string, DriveEventDetail>,
+    intoStepS = 0,
+  ): void {
+    const t = this.step / this.o.simHz + intoStepS
+    const event: DriveEvent = { t, type, x: this.cursor.x, y: this.cursor.y }
     if (details && Object.keys(details).length > 0) event.details = details
     this.events.push(event)
   }
@@ -793,6 +859,7 @@ function resolve(options: DriveOptions): Resolved {
     cruiseSpeedMps = S.cruiseSpeedMps,
     slopeSlowdown = S.slopeSlowdown,
     turnRateRadPerS = S.turnRateRadPerS,
+    steerRateRadPerS = S.steerRateRadPerS,
   } = speed
   const P = DEFAULT_STOP_MODEL
   const {
@@ -841,6 +908,15 @@ function resolve(options: DriveOptions): Resolved {
   positive('speed.cruiseSpeedMps', cruiseSpeedMps)
   unit('speed.slopeSlowdown', slopeSlowdown, '<')
   positive('speed.turnRateRadPerS', turnRateRadPerS)
+  positive('speed.steerRateRadPerS', steerRateRadPerS)
+  const blendRadiusM = options.plan?.blendRadiusM
+  const tightest = minArcRadiusM(geometry)
+  if (blendRadiusM !== undefined && blendRadiusM < tightest) {
+    throw new DriveError(
+      'INVALID_INPUT',
+      `driveSegment: plan.blendRadiusM is ${blendRadiusM}; pass at least ${tightest.toFixed(3)} m, the tightest arc the corner steering reaches.`,
+    )
+  }
   check(imagingEveryM > 0, 'stops.imagingEveryM', imagingEveryM, 'metres greater than 0')
   const seconds = (name: string, value: number): void =>
     check(Number.isFinite(value) && value >= 0, name, value, 'finite seconds ≥ 0')
@@ -857,6 +933,7 @@ function resolve(options: DriveOptions): Resolved {
     limits,
     ground: { cruiseSpeedMps, slopeSlowdown },
     turnRate: turnRateRadPerS,
+    steerRate: steerRateRadPerS,
     imagingEveryM,
     imagingSteps: Math.round(imagingStopS * simHz),
     assessSteps: Math.round(assessStopS * simHz),

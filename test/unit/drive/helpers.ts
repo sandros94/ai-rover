@@ -8,7 +8,7 @@ import {
 } from '#shared/utils/terrain'
 import type { RoverPose } from '#shared/utils/rover'
 import type { SegmentRecord } from '#shared/utils/drive'
-import { DriveError, KEYFRAME_FIELDS } from '#shared/utils/drive'
+import { DriveError, KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 
 /** The DriveError thrown by `fn`, or undefined when it throws nothing or something else. */
 export function driveErrorOf(fn: () => unknown): DriveError | undefined {
@@ -20,7 +20,7 @@ export function driveErrorOf(fn: () => unknown): DriveError | undefined {
   return undefined
 }
 
-/** Index of a keyframe field within its 19-value frame. */
+/** Index of a keyframe field within its 23-value frame. */
 export const F = Object.fromEntries(KEYFRAME_FIELDS.map((name, k) => [name, k])) as Record<
   (typeof KEYFRAME_FIELDS)[number],
   number
@@ -28,7 +28,7 @@ export const F = Object.fromEntries(KEYFRAME_FIELDS.map((name, k) => [name, k]))
 
 /** Frame `k` of a keyframe block. */
 export function frame(keyframes: SegmentRecord['keyframes'], k: number): Float32Array {
-  return keyframes.data.subarray(k * 19, (k + 1) * 19)
+  return keyframes.data.subarray(k * KEYFRAME_STRIDE, (k + 1) * KEYFRAME_STRIDE)
 }
 
 /** A world with the default config (64 m chunks, 1 m cells, 16° limit) over analytic fields. */

@@ -2,15 +2,24 @@ import * as v from 'valibot'
 import type { RouteFailureReason } from '../nav/theta-star'
 import { DriveError } from './errors'
 import { SEGMENT_ID } from './keys'
-import { KEYFRAME_STRIDE } from './keyframes'
+import { KEYFRAME_STRIDE, KEYFRAME_STRIDES, readFrames } from './keyframes'
 import type { DriveEvent, DriveEventType, DriveOutcome, SegmentRecord } from './segment'
 
 /** Slice length used by {@link sliceRecord} unless told otherwise, seconds of sim time. */
 export const DEFAULT_SLICE_SECONDS = 30
-/** Manifest version written by {@link sliceRecord}. */
-export const SEGMENT_MANIFEST_VERSION = 1
-/** Slice format version written by {@link encodeSlice}. */
-export const SLICE_FORMAT_VERSION = 1
+/**
+ * Manifest version written by {@link sliceRecord}. The version states the keyframe layout the
+ * segment was published with: version 1 manifests carry stride 19 (keyframe format v1, no
+ * steering), version 2 stride 23 (keyframe format v2).
+ */
+export const SEGMENT_MANIFEST_VERSION = 2
+/**
+ * Slice format version written by {@link encodeSlice}; a slice's version is its keyframe format
+ * version, so v1 slices hold 19-value frames and v2 slices 23-value frames.
+ */
+export const SLICE_FORMAT_VERSION = 2
+/** Keyframe stride each manifest version states. */
+const MANIFEST_STRIDES: Readonly<Record<number, number>> = Object.freeze({ 1: 19, 2: 23 })
 /**
  * Bytes before the keyframes: magic, version, flags, sliceIndex, keyframeCount, eventBytes,
  * revealCount, hasOutcome.
@@ -34,6 +43,7 @@ export interface SegmentSlice {
 
 const EVENT_TYPES: Record<DriveEventType, true> = {
   start: true,
+  steering: true,
   turning: true,
   assessing: true,
   replan: true,
@@ -61,12 +71,12 @@ const count = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
 const PointSchema = v.strictObject({ x: finite, y: finite })
 const PlanarPoseSchema = v.strictObject({ x: finite, y: finite, headingRad: finite })
 
-/** Segment facts public from its start: the opening plan, start and goal. Never the outcome. */
-export const SegmentManifestSchema = v.strictObject({
-  version: v.literal(SEGMENT_MANIFEST_VERSION),
+const ManifestEntries = {
+  // Blobs are immutable: segments published with the version 1 layout stay readable forever.
+  version: v.picklist([1, SEGMENT_MANIFEST_VERSION]),
   sliceSeconds: v.pipe(v.number(), v.finite(), v.gtValue(0)),
   keyframeHz: v.pipe(v.number(), v.finite(), v.gtValue(0)),
-  stride: v.literal(KEYFRAME_STRIDE),
+  stride: v.picklist([KEYFRAME_STRIDES[1]!, KEYFRAME_STRIDE]),
   plan: v.strictObject({
     polyline: v.array(PointSchema),
     metrics: v.strictObject({
@@ -91,7 +101,19 @@ export const SegmentManifestSchema = v.strictObject({
   }),
   start: PlanarPoseSchema,
   goal: PointSchema,
-})
+}
+
+const strideOfVersion = (manifest: { version: number; stride: number }): boolean =>
+  MANIFEST_STRIDES[manifest.version] === manifest.stride
+const STRIDE_MISMATCH =
+  'the stride is not the one its version states (19 for version 1, 23 for version 2)'
+
+/** Segment facts public from its start: the opening plan, start and goal. Never the outcome. */
+const ManifestObject = v.strictObject(ManifestEntries)
+export const SegmentManifestSchema = v.pipe(
+  ManifestObject,
+  v.check<v.InferOutput<typeof ManifestObject>, string>(strideOfVersion, STRIDE_MISMATCH),
+)
 
 export type SegmentManifest = v.InferOutput<typeof SegmentManifestSchema>
 
@@ -99,11 +121,15 @@ export type SegmentManifest = v.InferOutput<typeof SegmentManifestSchema>
 export type PublishedPlanMetrics = SegmentManifest['plan']['metrics']
 
 /** A manifest as published: the segment's id and its wall-clock start, epoch milliseconds. */
-export const StoredSegmentManifestSchema = v.strictObject({
-  ...SegmentManifestSchema.entries,
+const StoredManifestObject = v.strictObject({
+  ...ManifestEntries,
   segmentId: v.pipe(v.string(), v.regex(SEGMENT_ID)),
   startedAt: count,
 })
+export const StoredSegmentManifestSchema = v.pipe(
+  StoredManifestObject,
+  v.check<v.InferOutput<typeof StoredManifestObject>, string>(strideOfVersion, STRIDE_MISMATCH),
+)
 
 export type StoredSegmentManifest = v.InferOutput<typeof StoredSegmentManifestSchema>
 
@@ -248,10 +274,11 @@ export function sliceGate(
 }
 
 /**
- * Slice format v1, little-endian: `"JRSL"`, u8 version, u8 flags (0), u32 sliceIndex,
+ * Slice format v2, little-endian: `"JRSL"`, u8 version, u8 flags (0), u32 sliceIndex,
  * u32 keyframeCount, u32 eventBytes, u32 revealCount, u8 hasOutcome, then f32 keyframes
- * [19 · keyframeCount], eventBytes of UTF-8 JSON `{ events, reveals: [{ t, count }], outcome? }`,
- * and u32 reveal vertices[revealCount], the reveal groups' vertices back to back.
+ * [23 · keyframeCount], eventBytes of UTF-8 JSON `{ events, reveals: [{ t, count }], outcome? }`,
+ * and u32 reveal vertices[revealCount], the reveal groups' vertices back to back. Version 1 is the
+ * same with 19-value frames.
  */
 export function encodeSlice(slice: SegmentSlice): Uint8Array {
   const { index, keyframes, events, reveals, outcome } = slice
@@ -302,7 +329,10 @@ export function encodeSlice(slice: SegmentSlice): Uint8Array {
   return bytes
 }
 
-/** Decodes format v1 into fresh arrays; the input may be any view, aligned or not. */
+/**
+ * Decodes format v2 or v1 into fresh arrays, the keyframes in the current layout (a v1 frame's
+ * steering angles zero); the input may be any view, aligned or not.
+ */
 export function decodeSlice(bytes: Uint8Array): SegmentSlice {
   if (bytes.byteLength < MAGIC.length) throw truncated(bytes.byteLength)
   for (let k = 0; k < MAGIC.length; k++) {
@@ -319,17 +349,18 @@ export function decodeSlice(bytes: Uint8Array): SegmentSlice {
   if (bytes.byteLength < SLICE_HEADER_BYTES) throw truncated(bytes.byteLength)
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const version = view.getUint8(4)
-  if (version !== SLICE_FORMAT_VERSION) {
+  const stride = KEYFRAME_STRIDES[version]
+  if (stride === undefined) {
     throw new DriveError(
       'UNSUPPORTED_VERSION',
-      `Slice format version is ${version}; this decoder reads version ${SLICE_FORMAT_VERSION} only.`,
+      `Slice format version is ${version}; this decoder reads versions ${Object.keys(KEYFRAME_STRIDES).join(' and ')}.`,
     )
   }
   const flags = view.getUint8(5)
   if (flags !== 0) {
     throw new DriveError(
       'UNSUPPORTED_VERSION',
-      `Slice format v1 flags are 0x${flags.toString(16)}; this decoder reads flags 0 only.`,
+      `Slice format v${version} flags are 0x${flags.toString(16)}; this decoder reads flags 0 only.`,
     )
   }
   const index = view.getUint32(6, true)
@@ -340,11 +371,10 @@ export function decodeSlice(bytes: Uint8Array): SegmentSlice {
   if (hasOutcome > 1) {
     throw new DriveError(
       'INVALID_RECORD',
-      `Slice ${index} hasOutcome byte is ${hasOutcome}; format v1 writes 0 or 1.`,
+      `Slice ${index} hasOutcome byte is ${hasOutcome}; format v${version} writes 0 or 1.`,
     )
   }
-  const frameValues = frameCount * KEYFRAME_STRIDE
-  const jsonAt = SLICE_HEADER_BYTES + frameValues * 4
+  const jsonAt = SLICE_HEADER_BYTES + frameCount * stride * 4
   const revealsAt = jsonAt + eventBytes
   const expected = revealsAt + revealCount * 4
   if (bytes.byteLength < expected) {
@@ -360,10 +390,7 @@ export function decodeSlice(bytes: Uint8Array): SegmentSlice {
     )
   }
 
-  const keyframes = new Float32Array(frameValues)
-  for (let k = 0; k < frameValues; k++) {
-    keyframes[k] = view.getFloat32(SLICE_HEADER_BYTES + k * 4, true)
-  }
+  const keyframes = readFrames(view, SLICE_HEADER_BYTES, frameCount, stride)
   let raw: unknown
   try {
     raw = JSON.parse(

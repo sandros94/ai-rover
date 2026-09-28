@@ -37,7 +37,7 @@ const props = withDefaults(
     /** The stop's survey: ground beyond it is not drawn, a ring marks its edge. */
     survey?: { center: MapPoint; radius: number }
     heightAt: (x: number, y: number) => number | undefined
-    /** The 19 keyframe values at the playback time; without a drive the rover rests at `rest`. */
+    /** The 23 keyframe values at the playback time; without a drive the rover rests at `rest`. */
     frame?: Float32Array
     rest: { x: number; y: number; headingRad: number }
     keyframes?: KeyframeBlock

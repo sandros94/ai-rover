@@ -3,8 +3,9 @@ import type { SegmentRecord } from '#shared/utils/drive'
 import { decodeKeyframes, encodeKeyframes } from '#shared/utils/drive'
 
 /**
- * A `SegmentRecord` that survives `JSON.stringify`: the keyframes as base64 of their format-v1
- * bytes, each reveal's vertex indices as base64 of little-endian u32. Everything else is plain.
+ * A `SegmentRecord` that survives `JSON.stringify`: the keyframes as base64 of their
+ * `encodeKeyframes` bytes, each reveal's vertex indices as base64 of little-endian u32.
+ * Everything else is plain.
  */
 export interface SegmentRecordJson extends Omit<SegmentRecord, 'keyframes' | 'reveals'> {
   keyframes: string

@@ -5,7 +5,7 @@ import type { RoverLook } from '#shared/utils/client/scene/rover-looks'
 import type { LoadedRoverModel, RoverModelFile } from '~/utils/rover-model'
 
 const props = defineProps<{
-  /** The 19 keyframe values at the scrub time. */
+  /** The 23 keyframe values at the scrub time. */
   frame: Float32Array
 }>()
 

@@ -43,7 +43,7 @@ import TrailLayer from './TrailLayer.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** The 19 keyframe values at the playback time. */
+    /** The 23 keyframe values at the playback time. */
     frame: Float32Array
     /** The stop disk's chunks; without any, the rover stands on a flat grid at its own height. */
     chunks?: { chunk: TerrainChunk }[]

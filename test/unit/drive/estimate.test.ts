@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from '#shared/utils/drive'
+import {
+  DEFAULT_SPEED_MODEL,
+  DEFAULT_STOP_MODEL,
+  driveSegment,
+  groundSpeedMps,
+  steeringTimeS,
+} from '#shared/utils/drive'
 import { DEFAULT_COST_MAP, planSegment } from '#shared/utils/nav'
 import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
 import { journeyFixture } from '../client/helpers'
 import { syntheticDisk as navDisk } from '../nav/helpers'
+import { revealedAfterStop, syntheticDisk, syntheticWorld } from './helpers'
 
 describe('groundSpeedMps', () => {
   it('drives at the AutoNav rate on flat ground and half of it at the slope limit and beyond', () => {
@@ -20,7 +27,7 @@ describe('the planned drive time', () => {
   const flat = navDisk({ size: 241, radius: 120 })
   const seen = new Uint8Array(241 * 241).fill(1)
 
-  it('is the path at its speed, an imaging stop every 25 m away from either end, and the turns', () => {
+  it('is the path at its speed, an imaging stop every 25 m away from either end, the turns and the steering', () => {
     const straight = planSegment(flat, {
       revealed: seen,
       start: { x: -50, y: 0 },
@@ -56,9 +63,14 @@ describe('the planned drive time', () => {
     }
     const imaging = stops * imagingStopS
     expect(around.metrics.estimatedDriveS).toBeCloseTo(
-      pathLengthM / AUTONAV_EFFECTIVE_MPS + imaging + turned / DEFAULT_SPEED_MODEL.turnRateRadPerS,
+      pathLengthM / AUTONAV_EFFECTIVE_MPS +
+        imaging +
+        turned / DEFAULT_SPEED_MODEL.turnRateRadPerS +
+        steeringTimeS(around.motions),
       6,
     )
+    // Into and out of each turn-in-place stance.
+    expect(steeringTimeS(around.motions)).toBeGreaterThan(0)
   })
 
   it('drives unseen ground at the speed of ground that costs the unrevealed penalty', () => {
@@ -94,6 +106,28 @@ describe('the planned drive time', () => {
   it('matches the recorded drive within 10 % of the time the producer took', () => {
     const { record } = journeyFixture()
     expect(record.outcome.kind).toBe('arrived')
+    const { estimatedDriveS } = record.plan.metrics
+    expect(Math.abs(estimatedDriveS / record.outcome.durationS - 1)).toBeLessThan(0.1)
+  })
+
+  it('matches a drive through a slalom of walls, seven turns in place steered into and out of, within 10 %', () => {
+    const world = syntheticWorld({})
+    const disk = syntheticDisk(world, {
+      blocked: (x, y) =>
+        (x > -30 && x < -26 && y < 20) ||
+        (x > -6 && x < -2 && y > -20) ||
+        (x > 18 && x < 22 && y < 20),
+    })
+    const { record } = driveSegment(world, {
+      disk,
+      revealed: revealedAfterStop(world, disk),
+      start: { x: -50, y: 0, headingRad: 0 },
+      goal: { x: 50, y: 0 },
+    })
+    expect(record.outcome.kind).toBe('arrived')
+    const count = (type: string) => record.events.filter((event) => event.type === type).length
+    expect(count('turning')).toBeGreaterThanOrEqual(5)
+    expect(count('steering')).toBe(2 * count('turning'))
     const { estimatedDriveS } = record.plan.metrics
     expect(Math.abs(estimatedDriveS / record.outcome.durationS - 1)).toBeLessThan(0.1)
   })

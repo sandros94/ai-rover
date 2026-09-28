@@ -10,6 +10,8 @@ export {
   KEYFRAME_FORMAT_VERSION,
   KEYFRAME_HEADER_BYTES,
   KEYFRAME_STRIDE,
+  KEYFRAME_STRIDES,
+  readFrames,
 } from './keyframes'
 export type {
   DriveEvent,
@@ -22,7 +24,7 @@ export type {
   SlipModel,
 } from './segment'
 export { DEFAULT_SLIP_MODEL, driveSegment } from './segment'
-export type { SpeedModel, StopModel } from './models'
+export type { SpeedModel, Steering, SteeringAngles, StopModel } from './models'
 export {
   DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
@@ -30,6 +32,13 @@ export {
   IMAGING_END_MARGIN,
   imagingAllowed,
   imagingStopCount,
+  minArcRadiusM,
+  STEER_LIMIT_RAD,
+  STEER_THRESHOLD_RAD,
+  steerDurationS,
+  steeringFor,
+  steeringTimeS,
+  STRAIGHT_WHEELS,
 } from './models'
 export type { DriveStatus, StatusRun } from './status'
 export { statusAt, statusRuns } from './status'

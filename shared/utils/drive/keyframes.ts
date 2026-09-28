@@ -3,7 +3,8 @@ import { DriveError } from './errors'
 /**
  * Fields of one keyframe, in storage order: sim time (s), body origin in world metres, the
  * world-from-body quaternion, ground speed (m/s), cumulative wheel rotation (rad, order FL, FR,
- * ML, MR, RL, RR), then the rocker and bogie angles (rad) as `RoverPose` defines them.
+ * ML, MR, RL, RR), the rocker and bogie angles (rad) as `RoverPose` defines them, then the corner
+ * steering angles (rad, order FL, FR, RL, RR) as `SteeringAngles` defines them.
  */
 export const KEYFRAME_FIELDS = [
   't',
@@ -25,11 +26,20 @@ export const KEYFRAME_FIELDS = [
   'rockerR',
   'bogieL',
   'bogieR',
+  'steerFL',
+  'steerFR',
+  'steerRL',
+  'steerRR',
 ] as const
 
-export const KEYFRAME_STRIDE = 19
+export const KEYFRAME_STRIDE = 23
 /** Keyframe format version written by {@link encodeKeyframes}. */
-export const KEYFRAME_FORMAT_VERSION = 1
+export const KEYFRAME_FORMAT_VERSION = 2
+/**
+ * Values per frame by keyframe format version. Version 1 frames end at `bogieR`: they predate
+ * steering, and read as straight wheels.
+ */
+export const KEYFRAME_STRIDES: Readonly<Record<number, number>> = Object.freeze({ 1: 19, 2: 23 })
 /** Bytes before the frames: magic, version, flags, stride, count, hz. */
 export const KEYFRAME_HEADER_BYTES = 16
 
@@ -37,17 +47,17 @@ const MAGIC = new TextEncoder().encode('JRKF')
 const QX = 4
 const QW = 7
 
-/** Frames sampled every `1 / hz` seconds from t = 0; frame k is `data[19k … 19k + 18]`. */
+/** Frames sampled every `1 / hz` seconds from t = 0; frame k is `data[23k … 23k + 22]`. */
 export interface KeyframeBlock {
   hz: number
-  stride: 19
+  stride: 23
   count: number
   data: Float32Array
 }
 
 /**
- * Keyframe format v1, little-endian: `"JRKF"`, u8 version, u8 flags (0), u16 stride (19),
- * u32 count, f32 hz, then f32 data[19 · count].
+ * Keyframe format v2, little-endian: `"JRKF"`, u8 version, u8 flags (0), u16 stride (23),
+ * u32 count, f32 hz, then f32 data[23 · count]. Version 1 is the same with stride 19.
  */
 export function encodeKeyframes(keyframes: KeyframeBlock): Uint8Array {
   assertBlock(keyframes, 'encodeKeyframes', 0)
@@ -71,7 +81,10 @@ export function encodeKeyframes(keyframes: KeyframeBlock): Uint8Array {
   return bytes
 }
 
-/** Decodes format v1 into a fresh block; the input may be any view, aligned or not. */
+/**
+ * Decodes format v2 or v1 into a fresh block of the current layout, a v1 frame's steering angles
+ * zero; the input may be any view, aligned or not.
+ */
 export function decodeKeyframes(bytes: Uint8Array): KeyframeBlock {
   if (bytes.byteLength < MAGIC.length) {
     throw new DriveError(
@@ -98,29 +111,30 @@ export function decodeKeyframes(bytes: Uint8Array): KeyframeBlock {
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const version = view.getUint8(4)
-  if (version !== KEYFRAME_FORMAT_VERSION) {
+  const written = KEYFRAME_STRIDES[version]
+  if (written === undefined) {
     throw new DriveError(
       'UNSUPPORTED_VERSION',
-      `Keyframe format version is ${version}; this decoder reads version ${KEYFRAME_FORMAT_VERSION} only.`,
+      `Keyframe format version is ${version}; this decoder reads versions ${Object.keys(KEYFRAME_STRIDES).join(' and ')}.`,
     )
   }
   const flags = view.getUint8(5)
   if (flags !== 0) {
     throw new DriveError(
       'UNSUPPORTED_VERSION',
-      `Keyframe format v1 flags are 0x${flags.toString(16)}; this decoder reads flags 0 only.`,
+      `Keyframe format v${version} flags are 0x${flags.toString(16)}; this decoder reads flags 0 only.`,
     )
   }
   const stride = view.getUint16(6, true)
   const count = view.getUint32(8, true)
   const hz = view.getFloat32(12, true)
-  if (stride !== KEYFRAME_STRIDE || !(Number.isFinite(hz) && hz > 0)) {
+  if (stride !== written || !(Number.isFinite(hz) && hz > 0)) {
     throw new DriveError(
       'INVALID_RECORD',
-      `Keyframe header declares stride ${stride} and hz ${hz}; format v1 has stride ${KEYFRAME_STRIDE} and a positive rate. Pass bytes produced by encodeKeyframes.`,
+      `Keyframe header declares stride ${stride} and hz ${hz}; format v${version} has stride ${written} and a positive rate. Pass bytes produced by encodeKeyframes.`,
     )
   }
-  const expected = KEYFRAME_HEADER_BYTES + count * KEYFRAME_STRIDE * 4
+  const expected = KEYFRAME_HEADER_BYTES + count * written * 4
   if (bytes.byteLength < expected) {
     throw new DriveError(
       'TRUNCATED',
@@ -133,14 +147,31 @@ export function decodeKeyframes(bytes: Uint8Array): KeyframeBlock {
       `Keyframe buffer is ${bytes.byteLength} bytes; ${count} frames need exactly ${expected}. Pass one block per buffer.`,
     )
   }
-  const data = new Float32Array(count * KEYFRAME_STRIDE)
-  for (let k = 0; k < data.length; k++)
-    data[k] = view.getFloat32(KEYFRAME_HEADER_BYTES + k * 4, true)
+  const data = readFrames(view, KEYFRAME_HEADER_BYTES, count, written)
   return { hz, stride: KEYFRAME_STRIDE, count, data }
 }
 
 /**
- * The 19 keyframe values at time `t`, clamped to the first and last frames: linear between the
+ * `count` little-endian float32 frames of `stride` values from `offset` of `view`, laid out in
+ * the current {@link KEYFRAME_STRIDE}: fields a shorter, older frame lacks stay zero.
+ */
+export function readFrames(
+  view: DataView,
+  offset: number,
+  count: number,
+  stride: number,
+): Float32Array {
+  const data = new Float32Array(count * KEYFRAME_STRIDE)
+  for (let f = 0; f < count; f++) {
+    for (let k = 0; k < stride; k++) {
+      data[f * KEYFRAME_STRIDE + k] = view.getFloat32(offset + (f * stride + k) * 4, true)
+    }
+  }
+  return data
+}
+
+/**
+ * The 23 keyframe values at time `t`, clamped to the first and last frames: linear between the
  * two frames around `t` for every field but the quaternion, which is slerped along the shorter
  * arc. Heights come out linear too, so a renderer that needs wheels on the ground re-solves the
  * pose from the interpolated x, y and heading rather than trusting z.
@@ -193,7 +224,7 @@ export function interpolatePose(keyframes: KeyframeBlock, t: number): Float32Arr
 
 function assertBlock(keyframes: KeyframeBlock, context: string, minCount: number): void {
   const { hz, count, data } = keyframes
-  // Typed as the literal 19; untyped callers can still hand over anything.
+  // Typed as the literal 23; untyped callers can still hand over anything.
   const stride: number = keyframes.stride
   if (stride !== KEYFRAME_STRIDE) {
     throw new DriveError(
