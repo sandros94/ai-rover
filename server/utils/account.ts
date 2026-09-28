@@ -4,7 +4,8 @@ import * as v from 'valibot'
 import type { UserSessions } from '../../modules/auth/runtime/server/lib/session'
 import { useAuthContext } from '../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../database/db'
-import type { IdentityProvider, UserAccount } from '../database/schema'
+import type { AccountView } from '#shared/utils/account'
+import type { UserAccount } from '../database/schema'
 import { IDENTITY_PROVIDERS } from '../database/schema'
 import { listIdentities } from '../repositories/users'
 import { useDB } from './db'
@@ -12,20 +13,6 @@ import { answerRouteError, requireSessionUser } from './mission/http'
 import { sessionUser } from './sign-in'
 
 export const ProviderSchema = v.picklist(IDENTITY_PROVIDERS)
-
-/** The signed-in user's own account as the settings page reads it. */
-export interface AccountView {
-  id: string
-  /** Null only for an account no identity signs into. */
-  primaryProvider: IdentityProvider | null
-  identities: {
-    provider: IdentityProvider
-    displayName: string
-    avatarUrl: string | null
-    handle: string | null
-    linkedAt: Date
-  }[]
-}
 
 export async function accountView(db: DB, account: UserAccount): Promise<AccountView> {
   const identities = await listIdentities(db, account.id)
