@@ -35,7 +35,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Document, Material, Node as GltfNode, Primitive } from '@gltf-transform/core'
 import { NodeIO } from '@gltf-transform/core'
@@ -229,9 +229,20 @@ async function ensureSources(dir: string): Promise<void> {
   for (const kept of [...SUSPENSION, ...WHEELS]) {
     const stem = urdf.links.get(kept.link)?.visual?.stem
     if (!stem) throw new Error(`rover-model: link ${kept.link} has no mesh in the URDF.`)
-    // Only the geometry: the pieces are matched against it, it is never drawn.
-    await download(`${raw}/rover/meshes/${stem}.gltf`, join(dir, 'meshes', `${stem}.gltf`))
-    await download(`${raw}/rover/meshes/${stem}.bin`, join(dir, 'meshes', `${stem}.bin`))
+    // Only the geometry is used (the pieces are matched against it, it is never drawn), but the
+    // glTF reader loads every file the mesh names: its buffer and its texture.
+    const gltf = join(dir, 'meshes', `${stem}.gltf`)
+    await download(`${raw}/rover/meshes/${stem}.gltf`, gltf)
+    const { buffers = [], images = [] } = JSON.parse(readFileSync(gltf, 'utf8')) as {
+      buffers?: { uri?: string }[]
+      images?: { uri?: string }[]
+    }
+    for (const { uri } of [...buffers, ...images]) {
+      if (!uri || uri.startsWith('data:')) continue
+      const file = decodeURI(uri)
+      mkdirSync(dirname(join(dir, 'meshes', file)), { recursive: true })
+      await download(`${raw}/rover/meshes/${uri}`, join(dir, 'meshes', file))
+    }
   }
   const path = NASA.path.split('/').map(encodeURIComponent).join('/')
   await download(
