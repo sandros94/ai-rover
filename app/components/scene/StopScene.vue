@@ -8,7 +8,7 @@ if (import.meta.client) installAgXLook()
 <script setup lang="ts">
 import type { TresContext } from '@tresjs/core'
 import { TresCanvas } from '@tresjs/core'
-import type { ToneMapping, WebGLRenderer } from 'three'
+import type { Texture, ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
@@ -34,6 +34,7 @@ import RoverModel from './RoverModel.vue'
 import type { Pickable } from './ScenePicker.vue'
 import ScenePicker from './ScenePicker.vue'
 import SceneAtmosphere from './SceneAtmosphere.vue'
+import SceneEnvironment from './SceneEnvironment.vue'
 import SceneSky from './SceneSky.vue'
 import SceneSun from './SceneSun.vue'
 import TerrainChunks from './TerrainChunks.vue'
@@ -153,6 +154,8 @@ const currentStop = computed(() => props.stops.find((stop) => stop.current))
 /** The sun at the scene's time, and the light, sky and exposure that go with it. */
 const sun = computed(() => sunPosition(props.solFraction))
 const lighting = computed(() => skyLighting(sun.value.elevationDeg))
+/** The sky as the rover's metals and glass reflect it. */
+const environment = shallowRef<Texture | null>(null)
 /** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
 const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
 /**
@@ -239,6 +242,11 @@ onBeforeUnmount(() => {
   >
     <SceneAtmosphere :color="atmosphere" :near="HAZE.near" :far="HAZE.far" />
     <SceneSky :direction="sun.direction" :lighting="lighting" />
+    <SceneEnvironment
+      :direction="sun.direction"
+      :lighting="lighting"
+      @change="environment = $event"
+    />
     <SceneSun
       :direction="sun.direction"
       :lighting="lighting"
@@ -295,6 +303,7 @@ onBeforeUnmount(() => {
       :ledger="ledger"
       :lamp="lamp"
       :lod-distance-m="quality.roverLodM"
+      :environment="environment"
       @ready="emit('roverReady', $event)"
     />
     <ScenePicker

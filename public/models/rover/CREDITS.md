@@ -1,18 +1,22 @@
 # Rover model credits
 
-`rover.glb` and `rover-ghost.glb` are built by `scripts/rover-model.ts` from NASA/JPL's [m2020-urdf-models](https://github.com/nasa-jpl/m2020-urdf-models) at commit `c422fc6d96f2684521fb64049448d611e670f140` (released 10 June 2022, release IDs URS307049 and URS309682).
+`rover.glb` and `rover-ghost.glb` are built by `scripts/rover-model.ts` from two NASA/JPL sources:
 
-**Credit: NASA/JPL-Caltech.** Rover modeling and texturing by Zareh Gorjian; models courtesy of the Mars 2020 Perseverance team, URDF conversion by the JPL RSVP team (from the source repository's README).
+- NASA's [Mars 2020 Perseverance Rover](https://github.com/nasa/NASA-3D-Resources/tree/master/3D%20Models/Mars%202020%20Perseverance%20Rover) glTF from NASA-3D-Resources at commit `751bf23ccddba9f52bf06f4085e9a1fc59d5e747`: every part drawn, its materials and textures.
+- NASA/JPL's [m2020-urdf-models](https://github.com/nasa-jpl/m2020-urdf-models) at commit `c422fc6d96f2684521fb64049448d611e670f140` (released 10 June 2022, release IDs URS307049 and URS309682): the joints the mobility system and the mast turn about, and the link meshes the suspension is sorted by (not drawn).
+
+**Credit: NASA/JPL-Caltech.** URDF models courtesy of the Mars 2020 Perseverance team, rover modeling and texturing by Zareh Gorjian, URDF conversion by the JPL RSVP team (from the URDF repository's README).
 
 ## What was changed
 
-- Kept: the chassis, the remote sensing mast and its head with its cameras, the centre differential, both rockers and bogies, the four steering links and the six wheels. Dropped: the robotic arm, turret, drill bits, high-gain antenna and helicopter debris shield.
-- Posed: the mast's azimuth and elevation joints are set deployed (head level, facing forward); every other joint is at zero.
-- Joined into one binary glTF with one node per URDF joint, re-expressed in the app's body frame (x forward, y left, z up), at full resolution (242,100 triangles; only bitwise-identical vertices welded), the 2k texture atlas re-encoded as WebP, geometry meshopt-compressed with positions quantized to 14 bits per mesh.
-- `rover-ghost.glb`, the silhouette drawn for the places a rover was lost: the same nodes and pose, each mesh decimated with meshoptimizer after merging vertices by position (8,874 triangles in all), with no texture.
+- Posed: NASA's model at rest (the arm stowed as the rover drives), its remote sensing mast at the frame of its deploy animation where the head holds at the top, the mast cable skinned to that frame and baked; its animations, armature and the pivot markers it leaves in the scene removed.
+- Fitted onto the URDF by the six wheel centres (0.2 mm rms) and re-expressed in the app's body frame (x forward, y left, z up).
+- Cut into one node per URDF joint: the wheels by wheel centre, the suspension's pieces by the URDF link mesh they lie on, the head and mast by NASA's own hierarchy. The differential's crank goes with each rocker; each rod gets a node under the differential bar that keeps it pointing at its crank.
+- Materials kept as NASA made them, except the transmissive glass (camera lenses, name-plate cover), drawn blended at 30 % opacity. Primitives sharing a material within a node joined. Geometry meshopt-compressed with positions quantized to 14 bits per mesh; NASA's WebP textures kept, their JPEG fallbacks dropped.
+- `rover-ghost.glb`, the silhouette drawn for the places a rover was lost: the same nodes and pose, each node's mesh decimated with meshoptimizer after merging vertices by position (9,681 triangles in all), with no texture.
 
 ## Terms
 
-The source repository has no licence file; its README asks for the credit above. NASA's [Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/) state that NASA content, including texture maps and polygon data of 3D models, is generally not subject to copyright in the United States, that NASA should be acknowledged as the source, and that use must not state or imply NASA's endorsement. This project is not affiliated with or endorsed by NASA or JPL.
+The URDF repository has no licence file; its README asks for the credit above. NASA-3D-Resources describes its assets as free to use without copyright, pointing to NASA's [Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/), which state that NASA content, including texture maps and polygon data of 3D models, is generally not subject to copyright in the United States, that NASA should be acknowledged as the source, and that use must not state or imply NASA's endorsement. This project is not affiliated with or endorsed by NASA or JPL.
 
-The texture atlas carries the rover's "Mars 2020" and "Perseverance" nameplates and the mission mark as they appear on the vehicle; it shows no NASA insignia (the "meatball"), logotype or seal, which the guidelines exclude from free use.
+NASA's textures carry the markings painted on the vehicle: the "Mars 2020" and "Perseverance" nameplates and the NASA insignia (the "meatball") on the body. The guidelines exclude the insignia from free use; it appears here only as part of the vehicle's likeness in NASA's own model.

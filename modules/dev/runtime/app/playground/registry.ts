@@ -165,6 +165,16 @@ export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
     (c) => ({ frame: c.frame }),
   ),
   {
+    id: 'rover-joints',
+    title: 'Rover joints (3D)',
+    group: 'scene',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/RoverJoints3D.vue'),
+    needs: [],
+    bind: () => ({}),
+  },
+  {
     id: 'stop-map',
     title: 'Stop map',
     group: 'scene',

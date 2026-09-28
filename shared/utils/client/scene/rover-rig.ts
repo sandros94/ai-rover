@@ -26,11 +26,12 @@ export const ROVER_RIG_NODES = [
 export type RigNode = (typeof ROVER_RIG_NODES)[number]
 
 /**
- * The model's differential bar turns this many radians per radian of left rocker. The URDF gives
- * the bar its own joint but no mesh for the links that couple it to the rockers; the ratio makes
- * the bar ends follow the top of the rocker hub, 9 cm above the rocker pivot, from 65 cm out.
+ * The model's differential bar turns this many radians per radian of left rocker. Each rocker
+ * carries a crank rising 273.6 mm above its pivot, and a rod joins the crank's top to the bar's
+ * end, 639.2 mm out from the bar's pivot (`scripts/rover-model.ts` prints both), so the bar end
+ * follows the crank's top fore and aft.
  */
-export const DIFFERENTIAL_RATIO = 0.09 / 0.65
+export const DIFFERENTIAL_RATIO = 0.2736 / 0.6392
 
 type Articulation = Pick<FrameAttitude, 'rocker' | 'bogie' | 'spins'>
 
@@ -47,7 +48,7 @@ export const RIG_JOINTS: Record<
   differential: {
     urdf: 'CENTER_DIFFERENTIAL',
     axis: { x: 0, y: 0, z: -1 },
-    // The left rocker's hub top swings aft as its front rises, dragging the bar's left end aft:
+    // The left rocker's crank top swings aft as its front rises, dragging the bar's left end aft:
     // a turn about +z, which is a negative value about the URDF's downward axis.
     value: (a) => -DIFFERENTIAL_RATIO * a.rocker.left,
   },

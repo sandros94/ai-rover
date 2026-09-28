@@ -17,7 +17,11 @@ interface GltfNode {
   translation?: [number, number, number]
   rotation?: [number, number, number, number]
   children?: number[]
-  extras?: { joint?: string; axis?: [number, number, number] }
+  extras?: {
+    joint?: string
+    axis?: [number, number, number]
+    aim?: { node: string; point: [number, number, number]; from: [number, number, number] }
+  }
 }
 
 /** The glTF JSON chunk of a binary glTF: the node tree, without any three.js. */
@@ -254,5 +258,58 @@ describe('the rig on rover.glb', () => {
       withField(withField(frameOf(pose), 'bogieL', -pose.bogie.left), 'rockerL', -pose.rocker.left),
     )
     expect(distance(worldOrigin(nodes, flipped, 'wheel_lr'), pose.wheels[4]!)).toBeGreaterThan(0.1)
+  })
+  /** A rod's two ends in the world: its bar end, and where it says its crank's top is. */
+  function rodEnds(rig: ReturnType<typeof rigTransforms>, side: 'left' | 'right') {
+    const rod = `${side}_differential_link`
+    const aim = nodes.get(rod)!.node.extras!.aim!
+    const at = (name: string, [x, y, z]: [number, number, number]) => {
+      const pose = worldPose(nodes, rig, name)
+      const offset = rotate(pose.orientation, { x, y, z })
+      return {
+        x: pose.position.x + offset.x,
+        y: pose.position.y + offset.y,
+        z: pose.position.z + offset.z,
+      }
+    }
+    return { bar: at(rod, [0, 0, 0]), rest: at(rod, aim.from), crank: at(aim.node, aim.point) }
+  }
+
+  it('hangs each differential rod from the bar, aimed at the crank on its rocker', () => {
+    const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+    for (const side of ['left', 'right'] as const) {
+      const rod = nodes.get(`${side}_differential_link`)!
+      expect(rod.parent).toBe('differential')
+      expect(rod.node.extras?.aim?.node).toBe(`${side}_rocker`)
+      const { rest: tip, crank } = rodEnds(rest, side)
+      expect(distance(tip, crank)).toBeLessThan(5e-4)
+    }
+  })
+
+  it('keeps each rod within 3 mm of its length as the rockers swing 7° either way', () => {
+    const rest = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+    for (const side of ['left', 'right'] as const) {
+      const { bar, crank } = rodEnds(rest, side)
+      const length = distance(bar, crank)
+      for (const rocker of [-7 * DEG, 7 * DEG]) {
+        const frame = withField(
+          withField(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }), 'rockerL', rocker),
+          'rockerR',
+          -rocker,
+        )
+        const swung = rodEnds(rigTransforms(frame), side)
+        expect(Math.abs(distance(swung.bar, swung.crank) - length)).toBeLessThan(0.003)
+      }
+    }
+  })
+
+  it('marks the turret lamp at the stowed WATSON camera, ahead of the body on the left', () => {
+    const turret = nodes.get('turret')!
+    expect(turret.parent).toBe('chassis')
+    const [x, y, z] = turret.node.translation!
+    expect(x).toBeGreaterThan(0.9)
+    expect(y).toBeGreaterThan(0.5)
+    expect(z).toBeGreaterThan(1.2)
+    expect(z).toBeLessThan(1.6)
   })
 })

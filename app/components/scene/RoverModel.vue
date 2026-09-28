@@ -6,7 +6,7 @@ const nextModelId = () => ++modelIds
 
 <script setup lang="ts">
 import { useLoop, useTres } from '@tresjs/core'
-import type { Material, Mesh, Object3D } from 'three'
+import type { Material, Mesh, Object3D, Texture } from 'three'
 import {
   BoxGeometry,
   Color,
@@ -33,7 +33,7 @@ import {
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
 import { DEFAULT_ROVER_GEOMETRY } from '#shared/utils/rover'
 import type { RoverVariant } from '~/composables/useRoverVariant'
-import { loadRoverModel } from '~/utils/rover-model'
+import { applyEnvironment, loadRoverModel } from '~/utils/rover-model'
 
 const props = withDefaults(
   defineProps<{
@@ -58,6 +58,13 @@ const props = withDefaults(
      * metres; `null` never. Not for a ghost.
      */
     lodDistanceM?: number | null
+    /** What the model's metals and glass reflect; see `SceneEnvironment`. */
+    environment?: Texture | null
+    /**
+     * URDF joint values, radians, by model node name, over the keyframe's: any node carrying a
+     * joint (steering, mast, or a rig joint) turned by hand.
+     */
+    joints?: Readonly<Record<string, number>>
   }>(),
   {
     geometry: () => DEFAULT_ROVER_GEOMETRY,
@@ -67,6 +74,8 @@ const props = withDefaults(
     ledger: undefined,
     lamp: 0,
     lodDistanceM: null,
+    environment: null,
+    joints: undefined,
   },
 )
 
@@ -115,17 +124,25 @@ for (const mesh of [boxes, cylinders]) {
 
 /**
  * The arm turret's white LEDs (WATSON and PIXL's), the only light the rover carries: a short
- * warm pool on the ground below where the stowed turret sits, at the front of the body. The
- * model has no arm, so the lamp stands where it would be. Always in the scene, at zero by day,
- * so switching it never changes the lit shaders.
+ * warm pool on the ground below and ahead of the stowed turret. It hangs from the model's
+ * `turret` node once the model is in, and where the turret would be on the procedural rover.
+ * Always in the scene, at zero by day, so switching it never changes the lit shaders.
  */
 const LAMP_CANDELA = 1.2
-const turretLamp = props.ghost ? undefined : new SpotLight('#ffe8cc', 0, 1.6, Math.PI / 4, 0.7, 2)
+/** Where the lamp points from the turret, body frame: down to the ground just ahead. */
+const LAMP_AIM = { x: 0.2, y: 0, z: -1 }
+const turretLamp = props.ghost ? undefined : new SpotLight('#ffe8cc', 0, 2.2, Math.PI / 4, 0.7, 2)
 if (turretLamp) {
-  turretLamp.position.set(1.25, 0, 0.55)
-  turretLamp.target.position.set(1.45, 0, 0)
+  hangLamp(new Vector3(1.25, 0, 0.55))
   root.add(turretLamp, turretLamp.target)
   watchEffect(() => (turretLamp.intensity = LAMP_CANDELA * props.lamp))
+}
+
+/** The lamp at `at` (body frame), aimed along {@link LAMP_AIM}. */
+function hangLamp(at: Vector3): void {
+  if (!turretLamp) return
+  turretLamp.position.copy(at)
+  turretLamp.target.position.set(at.x + LAMP_AIM.x, at.y + LAMP_AIM.y, at.z + LAMP_AIM.z)
 }
 const proceduralTriangles =
   (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
@@ -170,6 +187,22 @@ place(initial, props.frame)
 interface Posed {
   object: Object3D
   joints: { node: Object3D; rest: Quaternion; name: RigNode }[]
+  /** Nodes kept pointing at a point on another node: the differential's rods. */
+  aims: Aim[]
+  /** Every node carrying a URDF joint, by name: its rest, axis and the value baked into its rest. */
+  jointed: Map<string, { node: Object3D; rest: Quaternion; axis: Vector3; baked: number }>
+}
+
+/**
+ * A node that turns to keep its rest direction `from` (its own frame) pointing at `point` on
+ * `target` (the target's frame), as the model's `extras.aim` declares.
+ */
+interface Aim {
+  node: Object3D
+  rest: Quaternion
+  target: Object3D
+  point: Vector3
+  from: Vector3
 }
 /** The model drawn: the full one for the rover, the silhouette for a ghost. */
 let model: Posed | undefined
@@ -197,7 +230,52 @@ function posed(object: Object3D): Posed {
     if (!node) throw new Error(`RoverModel: the rover model has no node ${name}.`)
     return { node, rest: node.quaternion.clone(), name }
   })
-  return { object, joints }
+  const aims: Aim[] = []
+  const jointed: Posed['jointed'] = new Map()
+  object.traverse((node) => {
+    const joint = node.userData as {
+      joint?: string
+      axis?: [number, number, number]
+      baked?: number
+    }
+    if (joint.joint && joint.axis) {
+      jointed.set(node.name, {
+        node,
+        rest: node.quaternion.clone(),
+        axis: new Vector3(...joint.axis).normalize(),
+        baked: joint.baked ?? 0,
+      })
+    }
+  })
+  object.traverse((node) => {
+    const aim = node.userData.aim as
+      | { node: string; point: [number, number, number]; from: [number, number, number] }
+      | undefined
+    const target = aim && object.getObjectByName(aim.node)
+    if (!aim || !target) return
+    aims.push({
+      node,
+      rest: node.quaternion.clone(),
+      target,
+      point: new Vector3(...aim.point),
+      from: new Vector3(...aim.from).normalize(),
+    })
+  })
+  return { object, joints, aims, jointed }
+}
+
+const aimAt = new Vector3()
+const aimTurn = new Quaternion()
+/** Turns each aimed node, from its rest, so its `from` direction meets its target point. */
+function aimAll(posedModel: Posed): void {
+  if (!posedModel.aims.length) return
+  posedModel.object.updateMatrixWorld(true)
+  for (const { node, rest, target, point, from } of posedModel.aims) {
+    // The target point in the node's parent frame, then relative to the node at rest.
+    node.parent!.worldToLocal(target.localToWorld(aimAt.copy(point)))
+    aimAt.sub(node.position).applyQuaternion(aimTurn.copy(rest).invert()).normalize()
+    node.quaternion.copy(rest).multiply(aimTurn.setFromUnitVectors(from, aimAt))
+  }
 }
 
 function pose(frame: Float32Array): void {
@@ -206,10 +284,19 @@ function pose(frame: Float32Array): void {
   root.position.set(rig.position.x, rig.position.y, rig.position.z)
   root.quaternion.set(rig.quaternion.x, rig.quaternion.y, rig.quaternion.z, rig.quaternion.w)
   for (const posedModel of [model, detail, low]) {
-    for (const { node, rest, name } of posedModel?.joints ?? []) {
+    if (!posedModel) continue
+    for (const { node, rest, name } of posedModel.joints) {
       const q = rig.joints[name]
       node.quaternion.copy(rest).multiply(turn.set(q.x, q.y, q.z, q.w))
     }
+    for (const [name, value] of Object.entries(props.joints ?? {})) {
+      const joint = posedModel.jointed.get(name)
+      if (!joint) continue
+      joint.node.quaternion
+        .copy(joint.rest)
+        .multiply(turn.setFromAxisAngle(joint.axis, value - joint.baked))
+    }
+    aimAll(posedModel)
   }
 }
 
@@ -226,10 +313,18 @@ function showModel(object: Object3D | undefined): void {
   placeholder.visible = !object && !detail
   if (object) {
     if (props.ghost) paint(object, material)
-    else
+    else {
       object.traverse((child) => {
         child.receiveShadow = true
       })
+      applyEnvironment(object, props.environment)
+      const turret = object.getObjectByName('turret')
+      if (turret) {
+        // Not yet under `root`: the model's own frame is the body frame.
+        object.updateMatrixWorld(true)
+        hangLamp(turret.getWorldPosition(new Vector3()))
+      }
+    }
     root.add(object)
   }
   applyLod()
@@ -283,20 +378,41 @@ if (!props.ghost) {
   })
 }
 
+watch(
+  () => props.environment,
+  (environment) => {
+    if (model && !props.ghost) applyEnvironment(model.object, environment)
+  },
+)
+
 /* The full model: the rover's own, or a focused ghost's. At most two exist per scene. */
 
 const ledgerId = `${props.ghost ? 'ghost' : 'rover'}:${nextModelId()}`
 let holding = false
-/** A focused ghost's full model: tinted and shaded, faded in over its silhouette. */
-const detailMaterial = props.ghost
-  ? new MeshLambertMaterial({
+/**
+ * A focused ghost's full model: tinted and shaded, faded in over its silhouette, each of the
+ * model's materials by its own tinted copy so its textures read through the red.
+ */
+const detailMaterials = new Map<Material, MeshLambertMaterial>()
+let detailOpacity = 0
+function tinted(source: Material): MeshLambertMaterial {
+  let copy = detailMaterials.get(source)
+  if (!copy) {
+    copy = new MeshLambertMaterial({
       color: SCENE_COLORS.death,
+      map: (source as MeshLambertMaterial).map ?? null,
       transparent: true,
-      opacity: 0,
+      opacity: detailOpacity,
       depthWrite: false,
-      flatShading: true,
     })
-  : undefined
+    detailMaterials.set(source, copy)
+  }
+  return copy
+}
+function setDetailOpacity(opacity: number): void {
+  detailOpacity = opacity
+  for (const copy of detailMaterials.values()) copy.opacity = opacity
+}
 let fade = 0
 
 function stopFade(): void {
@@ -310,7 +426,7 @@ function fadeIn(): void {
   const started = performance.now()
   const step = () => {
     const p = Math.min(1, (performance.now() - started) / CROSSFADE_MS)
-    detailMaterial!.opacity = GHOST_OPACITY.detailed * p
+    setDetailOpacity(GHOST_OPACITY.detailed * p)
     material.opacity = GHOST_OPACITY.silhouette * (1 - p)
     if (model) model.object.visible = p < 1
     invalidate()
@@ -324,11 +440,10 @@ async function showDetail(): Promise<void> {
     const full = await loadRoverModel(baseURL, 'full')
     if (unmounted || !props.detailed || detail) return
     const object = full.scene.clone()
-    // The atlas under the tint, so the full model's detail reads through the red.
-    const source = full.scene.getObjectByProperty('isMesh', true) as Mesh | undefined
-    detailMaterial!.map = (source?.material as MeshLambertMaterial | undefined)?.map ?? null
-    detailMaterial!.needsUpdate = true
-    paint(object, detailMaterial!)
+    object.traverse((child) => {
+      const mesh = child as Mesh
+      if (mesh.isMesh) mesh.material = tinted(mesh.material as Material)
+    })
     detail = posed(object)
     placeholder.visible = false
     root.add(object)
@@ -350,7 +465,7 @@ function dropDetail(): void {
   material.opacity = GHOST_OPACITY.silhouette
   if (model) model.object.visible = true
   placeholder.visible = !model
-  if (detailMaterial) detailMaterial.opacity = 0
+  setDetailOpacity(0)
   if (holding) props.ledger?.release(ledgerId)
   holding = false
   invalidate()
@@ -407,6 +522,11 @@ watch(
   { immediate: true },
 )
 watch(() => props.frame, pose)
+watch(
+  () => props.joints,
+  () => pose(props.frame),
+  { deep: true },
+)
 
 onBeforeUnmount(() => {
   unmounted = true
@@ -418,7 +538,7 @@ onBeforeUnmount(() => {
   unitBox.dispose()
   unitCylinder.dispose()
   material.dispose()
-  detailMaterial?.dispose()
+  for (const copy of detailMaterials.values()) copy.dispose()
   shadowOnly.dispose()
   lowShade.dispose()
   turretLamp?.dispose()

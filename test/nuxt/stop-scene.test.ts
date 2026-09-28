@@ -70,7 +70,13 @@ vi.mock('~/components/scene/FollowCamera.vue', async () => {
 })
 vi.mock('~/utils/rover-model', () => ({
   loadRoverModel: () => Promise.reject(new Error('no model in tests')),
+  applyEnvironment: () => {},
 }))
+// Prefiltering the sky for reflections needs a WebGL renderer.
+vi.mock('~/components/scene/SceneEnvironment.vue', async () => {
+  const vue = await import('vue')
+  return { default: vue.defineComponent({ name: 'SceneEnvironment', render: () => null }) }
+})
 
 /** The scene on a one-chunk disk, the rover resting in its middle. */
 function mountScene() {

@@ -94,6 +94,12 @@ importers:
       '@gltf-transform/core':
         specifier: ^4.5.0
         version: 4.5.0
+      '@gltf-transform/extensions':
+        specifier: ^4.5.0
+        version: 4.5.0
+      '@gltf-transform/functions':
+        specifier: ^4.5.0
+        version: 4.5.0(@types/node@26.6.2)
       '@golar/vue':
         specifier: npm:@golar/vue@^0.1.10
         version: 0.1.10
@@ -118,6 +124,9 @@ importers:
       '@vue/test-utils':
         specifier: npm:@vue/test-utils@^2.5.1
         version: 2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@7.0.2))
+      draco3dgltf:
+        specifier: ^1.5.7
+        version: 1.5.7
       drizzle-kit:
         specifier: npm:drizzle-kit@1.0.0-rc.4
         version: 1.0.0-rc.4
