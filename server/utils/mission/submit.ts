@@ -13,19 +13,32 @@ import {
 } from '../../repositories/submissions'
 import type { JevClient } from '../jev/client'
 import type { JourneyStore } from '../journey/store'
-import type { GoalRefusal, MapPoint, MissionRules, SubmissionRefusal } from '#shared/utils/mission'
-import { planGoal } from '#shared/utils/mission'
+import type {
+  MapPoint,
+  MissionHistory,
+  MissionRules,
+  PlanRefusal,
+  SubmissionRefusal,
+} from '#shared/utils/mission'
+import { explorationParts, explorationValue, planGoal } from '#shared/utils/mission'
 import { summarizeSubmission } from '#shared/utils/nav'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import { revealedOverDisk, snapToPathable } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
 import { assertNotPaused } from './pause'
+import { missionHistory } from './history'
 import { recordNextDue } from './round'
 import { loadRevealedMask, missionWorld, stopDisk } from './terrain'
 
 export type SubmitResult =
   | { accepted: true; submission: Submission }
-  | { accepted: false; reason: SubmissionRefusal; submission: Submission | null }
+  | {
+      accepted: false
+      reason: SubmissionRefusal
+      submission: Submission | null
+      /** For `too-short` and `too-long`: the refusal in words, the estimate included. */
+      message?: string
+    }
 
 /** What a goal is planned over: a stop's disk, what was seen there, and where plans start. */
 export interface PlanningGround {
@@ -39,17 +52,24 @@ export interface PlanningGround {
 /**
  * A goal checked against the rules and the settled deaths from `ground.start`, planned over the
  * ground, then judged by Jev; a refusal by rule asks Jev nothing. The judgment may still be a
- * reject, which the caller stores as such.
+ * reject, which the caller stores as such. The exploration value is the mean of the code's value
+ * over its parts, weighted by `rules.explorationWeights`, and Jev's.
  */
 export async function assessGoal(
   ground: PlanningGround,
-  options: { goal: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules; jev: JevClient },
+  options: {
+    goal: MapPoint
+    deaths: readonly MapPoint[]
+    rules: MissionRules
+    history: MissionHistory
+    jev: JevClient
+  },
 ): Promise<
   | { ok: true; assessment: SubmissionAssessment }
-  | { ok: false; reason: GoalRefusal | 'path-near-death-zone' }
+  | { ok: false; reason: PlanRefusal; message?: string }
 > {
   const { world, disk, revealed, start } = ground
-  const { goal, deaths, rules, jev } = options
+  const { goal, deaths, rules, history, jev } = options
   const planned = planGoal(disk, {
     revealed,
     start,
@@ -60,14 +80,33 @@ export async function assessGoal(
   })
   if (!planned.ok) return planned
   const { plan } = planned
-  const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
+  const parts = explorationParts(plan, { disk, revealed, goal, history })
+  const summary = summarizeSubmission(plan, {
+    world,
+    disk,
+    revealed,
+    start,
+    goal,
+    exploration: parts,
+    history,
+  })
   const { cached: _cached, usage: _usage, ...judgment } = await jev.judgeSubmission(summary)
-  return { ok: true, assessment: { judgment, metrics: plan.metrics, summary } }
+  const code = explorationValue(parts, { weights: rules.explorationWeights })
+  return {
+    ok: true,
+    assessment: {
+      judgment,
+      metrics: plan.metrics,
+      summary,
+      exploration: (code + judgment.explorationWeight) / 2,
+      explorationParts: parts,
+    },
+  }
 }
 
 /**
- * Submits a goal to the mission's open round: the goal snapped to the nearest seen pathable vertex,
- * checked against the rules and the settled deaths, planned from the round's anchor over the
+ * Submits a goal to the mission's open round: the goal snapped (see `snapToPathable`), checked
+ * against the rules and the settled deaths, planned from the round's anchor over the
  * disk of its stop and what the rover had seen there, then judged by Jev. During a drive that is
  * the stop the rover left and its mask from before the drive, so nothing the drive discovers is
  * used. An accepted goal starts with its author's like. Throws `MISSION_PAUSED` while an operator
@@ -127,9 +166,13 @@ export async function submitGoal(
     goal,
     deaths: await listDeaths(db, missionId),
     rules: mission.config.rules,
+    history: await missionHistory(db, { store, missionId, disk }),
     jev,
   })
-  if (!assessed.ok) return { accepted: false, reason: assessed.reason, submission: null }
+  if (!assessed.ok) {
+    const { reason, message } = assessed
+    return { accepted: false, reason, submission: null, ...(message && { message }) }
+  }
 
   const rejected = assessed.assessment.judgment.verdict === 'reject'
   let submission: Submission

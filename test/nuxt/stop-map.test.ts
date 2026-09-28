@@ -177,18 +177,57 @@ describe('StopMap over ground still arriving', () => {
       dirty(ground.placed[1]!),
     ])
     const { data } = puts[0]!
-    const alpha = (i: number, j: number) => data.data[((height - 1 - j) * width + i) * 4 + 3]
+    // World (x, y) to its pixel's alpha: the disk grid starts at world vertex (-128, -128).
+    const alpha = (x: number, y: number) =>
+      data.data[((height - 1 - (y + 128)) * width + (x + 128)) * 4 + 3]
+    expect(alpha(-10, -10)).toBe(255)
     expect(alpha(10, 10)).toBe(255)
-    expect(alpha(100, 100)).toBe(255)
-    expect(alpha(100, 10)).toBe(0)
-    expect(alpha(10, 100)).toBe(0)
+    expect(alpha(10, -10)).toBe(0)
+    expect(alpha(-10, 10)).toBe(0)
+    // Ground that is in, beyond the 60 m survey: the map's background.
+    expect(alpha(-60, -60)).toBe(0)
 
     const arrived = ground.place(southEast!)!
     view.value = groundView(ground, stopManifest.heightRange)
     await nextTick()
     expect(puts.slice(3).map((put) => put.dirty)).toEqual([dirty(arrived)])
-    expect(alpha(100, 10)).toBe(255)
-    expect(alpha(10, 100)).toBe(0)
+    expect(alpha(10, -10)).toBe(255)
+    expect(alpha(-10, 10)).toBe(0)
+  })
+
+  it('paints the background beyond the survey and a ring at its edge', async () => {
+    // 61 × 61 flat ground around the origin, all seen, in a 20 m survey.
+    const size = 61
+    const flat = { heights: new Float32Array(size * size), width: size, height: size, cellSize: 1 }
+    const seen = new Uint8Array(size * size).fill(1)
+    puts.length = 0
+    const wrapper = await mountSuspended(StopMap, {
+      props: {
+        terrain: { grid: flat, origin: { i: -30, j: -30 } },
+        seen,
+        center: { x: 0, y: 0 },
+        radius: 20,
+      },
+    })
+    await nextTick()
+    const data = puts.at(-1)!.data.data
+    let beyond = 0
+    let mismatches = 0
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++) {
+        const outside = Math.hypot(i - 30, j - 30) > 20
+        const a = data[((size - 1 - j) * size + i) * 4 + 3]
+        if (a !== (outside ? 0 : 255)) mismatches++
+        if (outside) beyond++
+      }
+    }
+    expect(beyond).toBeGreaterThan(0)
+    expect(mismatches).toBe(0)
+    const ring = wrapper.find('[data-test=survey-ring]')
+    expect(ring.exists()).toBe(true)
+    expect(ring.classes()).toContain('stroke-(--ui-text-muted)')
+    // The map fits the survey: its 400 px box less 8 px padding each side spans 40 m.
+    expect(Number(ring.attributes('r'))).toBeCloseTo((400 - 16) / 2, 6)
   })
 
   it('paints the three ground states, and recolours only what a new sight changes', async () => {
@@ -213,7 +252,8 @@ describe('StopMap over ground still arriving', () => {
             seen,
             sight: sight.value,
             center: { x: 0, y: 0 },
-            radius: 30,
+            // Past the grid's corners: the whole grid lies within the survey.
+            radius: 43,
           }),
       }),
     )

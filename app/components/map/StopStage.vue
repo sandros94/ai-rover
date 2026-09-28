@@ -20,7 +20,8 @@ const DiskScene = defineAsyncComponent({
 
 /**
  * A stop disk drawn flat or in 3D, filling its box: the same rover, route, path driven, past
- * stops, deaths and fog in both. Picking and the pick ring are 2D only; the page owns the switch.
+ * stops, deaths and fog in both, and the survey's ring. Picking is 2D only; the page owns the
+ * switch.
  */
 const props = withDefaults(
   defineProps<{
@@ -52,8 +53,6 @@ const props = withDefaults(
     frame?: Float32Array
     keyframes?: KeyframeBlock
     t?: number
-    anchor?: MapPoint
-    ring?: { minM: number; maxM: number }
     submissions?: { id: string; goal: MapPoint; mine?: boolean }[]
     highlightId?: string | null
     preview?: PreviewResult
@@ -82,8 +81,6 @@ const props = withDefaults(
     frame: undefined,
     keyframes: undefined,
     t: 0,
-    anchor: undefined,
-    ring: undefined,
     submissions: () => [],
     highlightId: null,
     preview: undefined,
@@ -98,6 +95,15 @@ const emit = defineEmits<{ pick: [point: MapPoint]; hover: [point: MapPoint | nu
 
 /** The 2D fog: the stop's flags with the drive's reveals lifted; the 3D view lifts its own. */
 const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveals))
+
+/** The survey for the 3D view, one object while it stays, so the scene does not redraw its ring. */
+const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
+  const { center, radius } = props
+  if (previous?.center.x === center.x && previous.center.y === center.y) {
+    if (previous.radius === radius) return previous
+  }
+  return { center: { x: center.x, y: center.y }, radius }
+})
 
 /** What the rover has in line of sight now over what has been revealed, across the whole disk. */
 const sight = useCurrentSight(
@@ -120,8 +126,6 @@ const sight = useCurrentSight(
       :sight="sight"
       :center="center"
       :radius="radius"
-      :anchor="anchor"
-      :ring="ring"
       :rover="rover"
       :trail="trail"
       :plan="plan"
@@ -144,6 +148,7 @@ const sight = useCurrentSight(
       :terrain="(ground ?? terrain)!"
       :seen="seen"
       :sight="sight"
+      :survey="survey"
       :chunk-vertices="chunkVertices"
       :height-at="heightAt"
       :frame="frame"

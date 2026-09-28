@@ -16,6 +16,7 @@ const ANSWERS: JudgedAnswers = {
   distanceConfidence: JUDGMENT.distanceConfidence,
   timeConfidence: JUDGMENT.timeConfidence,
   risk: JUDGMENT.risk,
+  explorationValue: JUDGMENT.explorationValue,
 }
 
 describe('jev judgments', () => {

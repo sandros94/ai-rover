@@ -6,6 +6,7 @@ import {
   looseGroundLabel,
   meanSlopeLabel,
   planSegment,
+  pocketLabel,
   slopeLabel,
   straightLineLabel,
   SubmissionSummarySchema,
@@ -75,6 +76,12 @@ describe('summary labels', () => {
   })
 })
 
+/** Nothing explored and no stops before: what the exploration block reads without them. */
+const NO_EXPLORATION = {
+  exploration: { pathInFog: 0, goalInFog: 0, pocket: 0 },
+  history: { recentStops: [] },
+}
+
 describe('summarizeSubmission', () => {
   const size = 301
   const all = new Uint8Array(size * size).fill(1)
@@ -86,7 +93,14 @@ describe('summarizeSubmission', () => {
     const start = { x: -60, y: 0 }
     const goal = { x: 60, y: 0 }
     const plan = planSegment(disk, { revealed: all, start, goal, slopeLimitDeg })
-    const summary = summarizeSubmission(plan, { world: firm, disk, revealed: all, start, goal })
+    const summary = summarizeSubmission(plan, {
+      world: firm,
+      disk,
+      revealed: all,
+      start,
+      goal,
+      ...NO_EXPLORATION,
+    })
     expect(summary.destination).toEqual({
       straight_line_m: 120,
       straight_line_label: 'medium',
@@ -123,7 +137,14 @@ describe('summarizeSubmission', () => {
     const start = { x: -100, y: 0 }
     const goal = { x: 100, y: 0 }
     const plan = planSegment(disk, { revealed, start, goal, slopeLimitDeg })
-    const summary = summarizeSubmission(plan, { world, disk, revealed, start, goal })
+    const summary = summarizeSubmission(plan, {
+      world,
+      disk,
+      revealed,
+      start,
+      goal,
+      ...NO_EXPLORATION,
+    })
     expect(summary.route.reached).toBe(true)
     if (!summary.route.reached) return
     expect(summary.route.max_slope_deg).toBe(9)
@@ -146,11 +167,67 @@ describe('summarizeSubmission', () => {
     const start = { x: 0, y: 0 }
     const goal = { x: 80, y: 80 }
     const plan = planSegment(disk, { revealed: all, start, goal, slopeLimitDeg })
-    const summary = summarizeSubmission(plan, { world: firm, disk, revealed: all, start, goal })
+    const summary = summarizeSubmission(plan, {
+      world: firm,
+      disk,
+      revealed: all,
+      start,
+      goal,
+      ...NO_EXPLORATION,
+    })
     expect(summary.route).toEqual({ reached: false })
     expect(summary.failure_reason).toMatch(/destination/)
     expect(summary.destination.bearing).toBe('north-east')
     expect(v.is(SubmissionSummarySchema, summary)).toBe(true)
+  })
+
+  it('gives the exploration parts in hundredths and the latest five stops other than the start', () => {
+    const disk = syntheticDisk({ size, radius: 150 })
+    const start = { x: -60, y: 0 }
+    const goal = { x: 60, y: 0 }
+    const plan = planSegment(disk, { revealed: all, start, goal, slopeLimitDeg })
+    const summary = summarizeSubmission(plan, {
+      world: firm,
+      disk,
+      revealed: all,
+      start,
+      goal,
+      exploration: { pathInFog: 0.6666, goalInFog: 1, pocket: 0.5 },
+      history: {
+        recentStops: [
+          { x: -60.4, y: 0.3 },
+          { x: -160, y: 0 },
+          { x: -60, y: 100 },
+          { x: 40, y: 0 },
+          { x: -60, y: -30 },
+          { x: -90, y: 30 },
+          { x: -300, y: 0 },
+        ],
+      },
+    })
+    expect(summary.exploration).toEqual({
+      path_in_fog: 0.67,
+      destination_unexplored: true,
+      pocket: 0.5,
+      pocket_label: 'near the driven path',
+    })
+    expect(summary.recent_stops).toEqual([
+      { distance_m: 100, bearing: 'west' },
+      { distance_m: 100, bearing: 'north' },
+      { distance_m: 100, bearing: 'east' },
+      { distance_m: 30, bearing: 'south' },
+      { distance_m: 42, bearing: 'north-west' },
+    ])
+    expect(v.is(SubmissionSummarySchema, summary)).toBe(true)
+    expect(JSON.stringify(summary).length).toBeLessThan(1500)
+  })
+
+  it('labels the pocket at 0.5 and 1', () => {
+    expect(pocketLabel(0)).toBe('no pocket')
+    expect(pocketLabel(0.4999)).toBe('no pocket')
+    expect(pocketLabel(0.5)).toBe('near the driven path')
+    expect(pocketLabel(0.9999)).toBe('near the driven path')
+    expect(pocketLabel(1)).toBe('a leftover pocket')
   })
 
   it('refuses revealed bytes that do not match the disk grid', () => {
@@ -159,7 +236,14 @@ describe('summarizeSubmission', () => {
     const goal = { x: 60, y: 0 }
     const plan = planSegment(disk, { revealed: all, start, goal, slopeLimitDeg })
     expect(() =>
-      summarizeSubmission(plan, { world: firm, disk, revealed: new Uint8Array(4), start, goal }),
+      summarizeSubmission(plan, {
+        world: firm,
+        disk,
+        revealed: new Uint8Array(4),
+        start,
+        goal,
+        ...NO_EXPLORATION,
+      }),
     ).toThrow(/revealed/)
   })
 })

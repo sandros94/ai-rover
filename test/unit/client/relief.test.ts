@@ -180,6 +180,29 @@ describe('reliefPixels', () => {
     expect(pixel(open, g, 0, 3).slice(0, 3)).toEqual(tint(0, 3, true))
   })
 
+  it('leaves ground beyond the survey transparent: neither relief nor fog', () => {
+    const g = grid(12, (i, j) => i * 0.3 + j * 0.1)
+    const inside = new Uint8Array(144)
+    for (let j = 0; j < 12; j++) for (let i = 0; i < 12; i++) inside[j * 12 + i] = i < 8 ? 1 : 0
+    const seen = new Uint8Array(144)
+    for (let j = 0; j < 12; j++) for (let i = 4; i < 12; i++) seen[j * 12 + i] = 1
+    const fog = { seen, sight: seen, rgb: FOG_FILL.dark, seed: 5 }
+    for (const pixels of [
+      reliefPixels(g, { fog, inside }),
+      reliefPixels(g, { inside }),
+      reliefPixels(g, { fog: { ...fog, seen: new Uint8Array(144) }, inside }),
+    ]) {
+      for (let j = 0; j < 12; j++) {
+        for (let i = 8; i < 12; i++) expect(pixel(pixels, g, i, j)).toEqual([0, 0, 0, 0])
+        expect(pixel(pixels, g, 7, j)[3]).toBe(255)
+      }
+    }
+    // Seen ground at the survey's edge shows as it would with no edge there.
+    const withEdge = reliefPixels(g, { fog, inside })
+    const open = reliefPixels(g, { fog: { ...fog, seen: new Uint8Array(144).fill(1) } })
+    for (let j = 0; j < 12; j++) expect(pixel(withEdge, g, 7, j)).toEqual(pixel(open, g, 7, j))
+  })
+
   it('paints only the asked rectangle into an existing buffer', () => {
     const g = grid(8, (i) => i)
     const into = new Uint8ClampedArray(8 * 8 * 4)

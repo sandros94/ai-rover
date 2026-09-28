@@ -11,6 +11,7 @@
  *   JITI_ALIAS="{\"#shared\":\"$PWD/shared\",\"#server\":\"$PWD/server\"}" pnpm exec jiti scripts/jev-route-choice.ts
  */
 import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk'
+import { explorationParts } from '#shared/utils/mission'
 import type { SegmentPlan } from '#shared/utils/nav'
 import { buildCostMap, planSegment, summarizeSubmission } from '#shared/utils/nav'
 import { traceSegment } from '#shared/utils/nav/trace'
@@ -58,8 +59,17 @@ for (const { seed, goal } of CASES) {
   }
 
   const ids = candidates.map((_, k) => `route_${String.fromCharCode(97 + k)}`)
+  const history = { drivenPaths: [], recentStops: [] }
   const summaries = candidates.map((c) =>
-    summarizeSubmission(c.plan, { world, disk, revealed, start: START, goal }),
+    summarizeSubmission(c.plan, {
+      world,
+      disk,
+      revealed,
+      start: START,
+      goal,
+      exploration: explorationParts(c.plan, { disk, revealed, goal, history }),
+      history,
+    }),
   )
   const { route: _route, ...common } = summaries[0]!
   const routes = Object.fromEntries(ids.map((id, k) => [id, summaries[k]!.route]))

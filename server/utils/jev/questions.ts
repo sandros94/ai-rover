@@ -1,7 +1,7 @@
 import { noul, score } from '@typesafe-ai/sdk'
 
 /**
- * The four questions asked about every submission, over a `SubmissionSummary` state. Levels
+ * The five questions asked about every submission, over a `SubmissionSummary` state. Levels
  * describe situations in the summary's own labels, never numbers: Jev matches descriptions and is
  * unreliable at comparing values. Changing any wording changes the request hash, so the recorded
  * fixtures must be re-recorded with it.
@@ -41,6 +41,16 @@ export const JUDGE_QUESTIONS = {
     'Much unseen ground, loose ground or slopes near the limit; being stopped short or getting stuck is a real possibility.',
     'No route was found, or the route combines unseen ground with slopes near the limit or mostly loose ground; stopping short or failing is likely.',
   ]),
+  exploration_value: score(
+    "How much does this segment advance the mission's purpose, discovering new ground? A destination in unexplored ground, or in a leftover pocket of unseen ground beside the path already driven, advances it; ground already seen does not. Weigh the exploration parts (the share of the path over unseen ground, whether the destination is unexplored, and the pocket label), the distance, the estimated drive minutes, the slopes, and the last five stops, which show where the rover has already been.",
+    [
+      'No route was found, or the destination and the route lie on seen ground, or it heads back toward recent stops; nothing new would be seen.',
+      'Mostly seen ground with a short unseen stretch, and the destination already seen; little new ground.',
+      'A partly unseen route, or an unexplored destination close to recent stops; some new ground.',
+      'An unexplored destination reached over much unseen ground, away from recent stops, or a pocket near the driven path; much new ground.',
+      'An unexplored destination far from every recent stop over mostly unseen ground, or one closing a leftover pocket beside the driven path; the most new ground.',
+    ],
+  ),
 } as const
 
 export type JudgeQuestions = typeof JUDGE_QUESTIONS

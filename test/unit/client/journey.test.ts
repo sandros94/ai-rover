@@ -17,7 +17,7 @@ async function clientErrorOf(promise: Promise<unknown>): Promise<ClientError | u
 describe('recorded journey fixture', () => {
   it('matches the generator byte for byte', () => {
     const { files } = journeyFixture()
-    expect(files.size).toBe(43)
+    expect(files.size).toBe(55)
     for (const [key, bytes] of files)
       expect({ key, bytes: readRecord(key) }).toEqual({ key, bytes })
   })
@@ -41,7 +41,7 @@ describe('createJourneyClient over the recorded journey', () => {
   it('decodes every chunk the manifest lists', async () => {
     const client = createJourneyClient({ fetch: recordsFetch().fetch })
     const { worldHash, chunks } = fixture.stopManifest
-    expect(chunks.length).toBe(4)
+    expect(chunks.length).toBe(16)
     for (const { cx, cy } of chunks) {
       const chunk = await client.getChunk(worldHash, cx, cy)
       expect(chunk.cx).toBe(cx)

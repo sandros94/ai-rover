@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { SlopeProfile } from '#shared/utils/client/instruments'
-import type { NavMetrics } from '#shared/utils/nav'
+import type { PublishedPlanMetrics } from '#shared/utils/drive'
 
 const props = defineProps<{
-  metrics: NavMetrics
+  /** A plan's metrics, as published with its segment. */
+  metrics: PublishedPlanMetrics
   /** The planned route's slope by distance; the profile is left out without it. */
   profile?: SlopeProfile
   /** The world's steepest traversable slope, degrees. */

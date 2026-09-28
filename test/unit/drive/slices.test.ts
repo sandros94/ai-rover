@@ -144,6 +144,18 @@ describe('segment manifest schema', () => {
     ).toBe('INVALID_RECORD')
   })
 
+  it('reads a stored manifest from before plans carried the fog goal and the drive estimate', () => {
+    const stored = JSON.parse(
+      JSON.stringify({ ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }),
+    )
+    delete stored.plan.metrics.goalInFog
+    delete stored.plan.metrics.estimatedDriveS
+    const parsed = parseStoredSegmentManifest(stored)
+    expect(parsed.plan.metrics).not.toHaveProperty('goalInFog')
+    expect(parsed.plan.metrics).not.toHaveProperty('estimatedDriveS')
+    expect(parsed.plan.metrics.pathLengthM).toBe(manifest.plan.metrics.pathLengthM)
+  })
+
   it('stores the segment id and start time alongside', () => {
     const stored = { ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }
     expect(parseStoredSegmentManifest(JSON.parse(JSON.stringify(stored)))).toEqual(stored)

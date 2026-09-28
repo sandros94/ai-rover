@@ -1,4 +1,5 @@
 import type { GridCell, HeightGrid, StopDisk } from '#shared/utils/terrain'
+import { believedReachable } from '#shared/utils/terrain'
 
 /**
  * Header before the arrays, little-endian: u32 width, u32 height, f32 cellSize, i32 originI,
@@ -11,7 +12,10 @@ const FLAG_TRAVERSABLE = 1
 const FLAG_REACHABLE = 2
 const FLAG_VISIBLE = 4
 
-/** A stop disk as the viewer receives it: grid, placement and masks, one byte per vertex each. */
+/**
+ * A stop disk as the viewer receives it: grid, placement and masks, one byte per vertex each.
+ * Reachability is the rover's belief with only the stop's own view seen (see `believedReachable`).
+ */
 export interface DiskWire {
   grid: HeightGrid
   origin: GridCell
@@ -25,6 +29,7 @@ export interface DiskWire {
 export function encodeDiskWire(disk: StopDisk): ArrayBuffer {
   const { width, height, cellSize, heights } = disk.grid
   const count = width * height
+  const belief = believedReachable(disk, disk.visible)
   const body = new ArrayBuffer(HEADER_BYTES + count * 5)
   const view = new DataView(body)
   view.setUint32(0, width, true)
@@ -34,14 +39,14 @@ export function encodeDiskWire(disk: StopDisk): ArrayBuffer {
   view.setInt32(16, disk.origin.j, true)
   view.setFloat32(20, disk.center.x, true)
   view.setFloat32(24, disk.center.y, true)
-  view.setInt32(28, disk.reachableFrom.i, true)
-  view.setInt32(32, disk.reachableFrom.j, true)
+  view.setInt32(28, belief.from.i, true)
+  view.setInt32(32, belief.from.j, true)
   for (let k = 0; k < count; k++) view.setFloat32(HEADER_BYTES + k * 4, heights[k]!, true)
   const flags = new Uint8Array(body, HEADER_BYTES + count * 4, count)
   for (let k = 0; k < count; k++) {
     flags[k] =
       (disk.traversable[k] ? FLAG_TRAVERSABLE : 0) |
-      (disk.reachable[k] ? FLAG_REACHABLE : 0) |
+      (belief.reachable[k] ? FLAG_REACHABLE : 0) |
       (disk.visible[k] ? FLAG_VISIBLE : 0)
   }
   return body

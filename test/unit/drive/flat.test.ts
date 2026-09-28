@@ -38,6 +38,8 @@ describe('driveSegment on flat ground', () => {
     expect(Math.abs(outcome.durationS - 3030) / 3030).toBeLessThan(0.05)
     // Driving time alone is distance over the AutoNav rate; the rest is the three imaging stops.
     expect(outcome.durationS).toBeCloseTo(100 / 0.033 + 3 * 30, -1)
+    // The plan's estimate is the same sum, so on flat, seen ground it is the drive's time.
+    expect(record.plan.metrics.estimatedDriveS).toBeCloseTo(outcome.durationS, -1)
     expect(stats.simSteps).toBeGreaterThan(0)
     expect(stats.replans).toBe(0)
     expect(stats.computeMs).toBeGreaterThanOrEqual(0)
@@ -125,6 +127,36 @@ describe('driveSegment on flat ground', () => {
     // The block then holds the final pose up to the next keyframe.
     expect(arrived.t).toBeLessThanOrEqual(outcome.durationS)
     expect(arrived.t).toBeGreaterThan(outcome.durationS - 0.5)
+  })
+})
+
+describe('driveSegment near the edge of its survey', () => {
+  const world = syntheticWorld({})
+  // The east half unseen from the stop, so the drive has ground to reveal near the edge.
+  const disk = syntheticDisk(world, { radius: 60, hidden: (x) => x > 0 })
+  const { record } = driveSegment(world, {
+    disk,
+    revealed: revealedAfterStop(world, disk),
+    start: { x: -50, y: 0, headingRad: 0 },
+    goal: { x: 50, y: 0 },
+  })
+
+  it('reveals nothing beyond the survey, though its viewsheds reach past it', () => {
+    const { width, cellSize } = disk.grid
+    let revealed = 0
+    let beyond = 0
+    for (const { vertices } of record.reveals) {
+      for (const k of vertices) {
+        revealed++
+        const i = k % width
+        const x = (disk.origin.i + i) * cellSize
+        const y = (disk.origin.j + (k - i) / width) * cellSize
+        if (Math.hypot(x, y) > disk.radius) beyond++
+      }
+    }
+    expect(record.outcome.kind).toBe('arrived')
+    expect(revealed).toBeGreaterThan(0)
+    expect(beyond).toBe(0)
   })
 })
 

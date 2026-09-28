@@ -3,6 +3,7 @@ import type { DB } from '../database/db'
 import { DbError } from '../database/errors'
 import type { Mission, MissionConfig } from '../database/schema'
 import { mission, stop } from '../database/schema'
+import { parseMissionRules } from '#shared/utils/mission/rules'
 
 export async function createMission(
   db: DB,
@@ -16,13 +17,13 @@ export async function createMission(
   },
 ): Promise<Mission> {
   const [row] = await db.insert(mission).values(input).returning()
-  return row!
+  return readMission(row!)
 }
 
 export async function getMission(db: DB, missionId: string): Promise<Mission> {
   const [row] = await db.select().from(mission).where(eq(mission.id, missionId))
   if (!row) throw new DbError('NOT_FOUND', `Mission ${missionId} does not exist.`)
-  return row
+  return readMission(row)
 }
 
 /** The most recently created active mission; undefined when none is active. */
@@ -33,7 +34,7 @@ export async function getActiveMission(db: DB): Promise<Mission | undefined> {
     .where(eq(mission.status, 'active'))
     .orderBy(desc(mission.createdAt), desc(mission.id))
     .limit(1)
-  return row
+  return row && readMission(row)
 }
 
 export async function setCurrentStop(db: DB, missionId: string, stopId: string): Promise<Mission> {
@@ -54,7 +55,7 @@ export async function setCurrentStop(db: DB, missionId: string, stopId: string):
       .set({ currentStopId: stopId })
       .where(eq(mission.id, missionId))
       .returning()
-    return row!
+    return readMission(row!)
   })
 }
 
@@ -66,4 +67,9 @@ export async function setNextDueAt(db: DB, missionId: string, at: Date | null): 
     .where(eq(mission.id, missionId))
     .returning({ id: mission.id })
   if (!row) throw new DbError('NOT_FOUND', `Mission ${missionId} does not exist.`)
+}
+
+/** A mission row with its stored rules checked: a row in an older shape fails here, not later. */
+function readMission(row: Mission): Mission {
+  return { ...row, config: { ...row.config, rules: parseMissionRules(row.config.rules) } }
 }

@@ -82,6 +82,19 @@ describe('fogCover', () => {
     expect(later[2 * 12 + 3]).toBe(0)
   })
 
+  it('leaves ground beyond the survey uncovered, with no soft edge towards it', () => {
+    // The survey ends east of i = 6: seen ground meets the edge, not the fog.
+    const inside = mask(12, 5, (i) => i < 6)
+    const cover = fogCover({ seen }, size, { inside })
+    for (let i = 0; i < 12; i++) expect(cover[2 * 12 + i]).toBe(0)
+    // Fog within the survey still softens the seen ground beside it.
+    const partly = mask(12, 5, (i) => i < 3)
+    const fogged = fogCover({ seen: partly }, size, { inside })
+    expect(fogged[2 * 12 + 4]).toBe(1)
+    expect(fogged[2 * 12 + 2]).toBeGreaterThan(0)
+    expect(fogged[2 * 12 + 8]).toBe(0)
+  })
+
   it('computes a rectangle identically to the whole grid', () => {
     const full = fogCover({ seen }, size)
     const rect = { i0: 3, j0: 1, i1: 9, j1: 4 }

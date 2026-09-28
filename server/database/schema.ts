@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { uuidv7 } from 'unsecure/uuid'
 import type { DriveOutcome } from '#shared/utils/drive/segment'
+import type { ExplorationParts } from '#shared/utils/mission/exploration'
 import type { MissionRules } from '#shared/utils/mission/rules'
 import type { NavMetrics } from '#shared/utils/nav/plan'
 import type { SubmissionSummary } from '#shared/utils/nav/summary'
@@ -53,8 +54,16 @@ export interface MissionConfig {
   rules: MissionRules
 }
 
-/** A judgment as stored; whether it came from the cache is irrelevant once stored. */
-export type StoredJudgment = Omit<SubmissionJudgment, 'cached'>
+/**
+ * A judgment as stored; whether it came from the cache is irrelevant once stored. Judgments stored
+ * before Jev was asked about exploration lack its answer; the submission's `exploration` column
+ * holds the value that ranks either way.
+ */
+export type StoredJudgment = Omit<
+  SubmissionJudgment,
+  'cached' | 'explorationValue' | 'explorationWeight'
+> &
+  Partial<Pick<SubmissionJudgment, 'explorationValue' | 'explorationWeight'>>
 
 export const userAccount = snakeCase.table('user_account', {
   id: id(),
@@ -189,6 +198,10 @@ export const submission = snakeCase.table(
     judgment: jsonb().$type<StoredJudgment>().notNull(),
     metrics: jsonb().$type<NavMetrics>().notNull(),
     summary: jsonb().$type<SubmissionSummary>().notNull(),
+    /** How much new ground the goal opens, 0 to 1: the mean of the code's value and Jev's. */
+    exploration: doublePrecision().notNull(),
+    /** The code's parts of the exploration value, from public data at planning time. */
+    explorationParts: jsonb().$type<ExplorationParts>().notNull(),
     createdAt: createdAt(),
     updatedAt: timestamp({ withTimezone: true })
       .notNull()

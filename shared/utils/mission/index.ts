@@ -2,14 +2,20 @@ export type { MissionErrorCode } from './errors'
 export { MissionError } from './errors'
 export type { GoalRefusal, MissionRules, MapPoint, RankEntry } from './rules'
 export {
+  checkDriveTime,
   checkPathClearOfDeaths,
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
+  distanceToPolyline,
+  formatDriveTime,
+  MissionRulesSchema,
+  parseMissionRules,
+  rankingScore,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,
 } from './rules'
-export type { SubmissionRefusal } from './plan-goal'
+export type { PlanRefusal, SubmissionRefusal } from './plan-goal'
 export { planGoal } from './plan-goal'
 export type { NotMovingReason } from './not-moving'
 export {
@@ -19,3 +25,5 @@ export {
   stallEnding,
   truncateRecord,
 } from './not-moving'
+export type { ExplorationParts, ExplorationWeights, MissionHistory } from './exploration'
+export { drivenPath, explorationParts, explorationValue, POCKET_PATH_RADIUS_M } from './exploration'

@@ -167,20 +167,18 @@ export function createChunkCache(options: {
 
 /**
  * The manifest's chunks in loading order: those meeting the viewport square first, nearest its
- * centre first; then those meeting the pick ring (the annulus `minM`–`maxM` around `center`);
- * then the rest. Both later groups run nearest `center` first, measured to chunk centres, ties
- * by (cy, cx).
+ * centre first; then the rest nearest `center` first. Distances are measured to chunk centres,
+ * ties by (cy, cx).
  */
 export function loadOrder(
   manifest: Pick<StopManifest, 'chunks'> & { world: Pick<StopManifest['world'], 'chunkSize'> },
   options: {
     center: { x: number; y: number }
-    ring: { minM: number; maxM: number }
     viewport?: { x: number; y: number; halfSizeM: number }
   },
 ): ChunkCoords[] {
   const { chunkSize: size } = manifest.world
-  const { center, ring, viewport } = options
+  const { center, viewport } = options
   const finite = (...values: number[]) => values.every(Number.isFinite)
   if (!finite(size) || size <= 0) {
     throw new ClientError(
@@ -188,10 +186,10 @@ export function loadOrder(
       `loadOrder: manifest world.chunkSize is ${size}; pass positive metres.`,
     )
   }
-  if (!finite(center.x, center.y, ring.minM, ring.maxM) || ring.minM < 0 || ring.maxM < ring.minM) {
+  if (!finite(center.x, center.y)) {
     throw new ClientError(
       'INVALID_INPUT',
-      `loadOrder: center (${center.x}, ${center.y}) with ring ${ring.minM}–${ring.maxM} m; pass finite metres with 0 ≤ minM ≤ maxM.`,
+      `loadOrder: center is (${center.x}, ${center.y}); pass finite metres.`,
     )
   }
   if (viewport && (!finite(viewport.x, viewport.y, viewport.halfSizeM) || viewport.halfSizeM < 0)) {
@@ -206,21 +204,15 @@ export function loadOrder(
     const y0 = cy * size
     const x1 = x0 + size
     const y1 = y0 + size
-    const near = Math.hypot(gap(center.x, x0, x1), gap(center.y, y0, y1))
-    const far = Math.hypot(
-      Math.max(center.x - x0, x1 - center.x),
-      Math.max(center.y - y0, y1 - center.y),
-    )
     const inView =
       viewport !== undefined &&
       gap(viewport.x, x0, x1) <= viewport.halfSizeM &&
       gap(viewport.y, y0, y1) <= viewport.halfSizeM
-    const inRing = near <= ring.maxM && far >= ring.minM
     const from = inView ? viewport : center
     return {
       cx,
       cy,
-      tier: inView ? 0 : inRing ? 1 : 2,
+      tier: inView ? 0 : 1,
       distance: Math.hypot(x0 + size / 2 - from.x, y0 + size / 2 - from.y),
     }
   })

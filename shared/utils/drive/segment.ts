@@ -13,7 +13,6 @@ import type { PlanarPose, RoverPose } from '../rover/kinematics'
 import { poseOnTerrain } from '../rover/kinematics'
 import type { RoverLimits } from '../rover/limits'
 import { checkLimits } from '../rover/limits'
-import { AUTONAV_EFFECTIVE_MPS } from '../rover/speed'
 import type { StopDisk } from '../terrain/disk'
 import { TerrainError } from '../terrain/errors'
 import type { RevealedMask } from '../terrain/revealed'
@@ -23,32 +22,8 @@ import type { World } from '../terrain/world'
 import { DriveError } from './errors'
 import type { KeyframeBlock } from './keyframes'
 import { KEYFRAME_STRIDE } from './keyframes'
-
-/** Rover speed on the ground; omitted fields take the defaults below. */
-export interface SpeedModel {
-  /**
-   * Flat-ground drive speed, m/s. Default `AUTONAV_EFFECTIVE_MPS` (0.033, Perseverance's 120 m/h
-   * under AutoNav): the rover thinks while driving, so this is its speed, not an average over stops.
-   */
-  cruiseSpeedMps?: number
-  /** Fraction of `cruiseSpeedMps` lost at the slope limit, linear in tan(slope). Default 0.5. */
-  slopeSlowdown?: number
-  /** Turn-in-place rate, rad/s. Default 3°/s. */
-  turnRateRadPerS?: number
-}
-
-/**
- * The rover stops only for a reason, and each stop is an event: turns in place (timed by the
- * speed model's turn rate), an assessment before every replan, and periodic imaging.
- */
-export interface StopModel {
-  /** Ground distance between imaging stops, metres; none at the goal. Default 25. */
-  imagingEveryM?: number
-  /** Length of an imaging stop, seconds. Default 30. */
-  imagingStopS?: number
-  /** Standstill while the rover assesses newly found blocking ground before replanning, seconds. Default 20. */
-  assessStopS?: number
-}
+import type { SpeedModel, StopModel } from './models'
+import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from './models'
 
 /**
  * Wheel slip `s = min(max, loose · gain · (tan slope / tan slopeLimit)²)`: commanded travel
@@ -68,27 +43,6 @@ export interface SlipModel {
 }
 
 const DEG = Math.PI / 180
-
-/** The speed model a drive uses for omitted fields. */
-export const DEFAULT_SPEED_MODEL: Readonly<Required<SpeedModel>> = Object.freeze({
-  cruiseSpeedMps: AUTONAV_EFFECTIVE_MPS,
-  slopeSlowdown: 0.5,
-  // UNVERIFIED: no published Perseverance turn-in-place rate was found; 3°/s is a judgement call.
-  turnRateRadPerS: 3 * DEG,
-})
-
-/**
- * The stop model a drive uses for omitted fields. UNVERIFIED, all three: the references give no
- * periodic imaging stop (AutoNav images while driving) and no assessment time; a stop "when it
- * cannot quickly determine a safe path" is documented, and ENav's planning cycle takes 3–4 s,
- * scoring every candidate path more than 3 min. The values are judgement calls that keep 100 m
- * on flat ground near 0.032 m/s overall, inside the 0.026–0.033 m/s the record drives averaged.
- */
-export const DEFAULT_STOP_MODEL: Readonly<Required<StopModel>> = Object.freeze({
-  imagingEveryM: 25,
-  imagingStopS: 30,
-  assessStopS: 20,
-})
 
 /** The slip model a drive uses for omitted fields. */
 export const DEFAULT_SLIP_MODEL: Readonly<Required<SlipModel>> = Object.freeze({
@@ -247,8 +201,7 @@ export function driveSegment(
 interface Resolved {
   geometry: ResolvedRoverGeometry
   limits: RoverLimits | undefined
-  cruiseSpeed: number
-  slowdown: number
+  ground: Pick<Required<SpeedModel>, 'cruiseSpeedMps' | 'slopeSlowdown'>
   turnRate: number
   imagingEveryM: number
   imagingSteps: number
@@ -556,7 +509,7 @@ class Drive {
       }
       const tanSlope = this.tanSlopeAt(c.x, c.y)
       const ratio = tanSlope / this.tanLimit
-      const v = o.cruiseSpeed * (1 - o.slowdown * Math.min(1, ratio))
+      const v = groundSpeedMps(ratio, o.ground)
       const slip = Math.min(o.slipMax, this.world.looseAt(c.x, c.y) * o.slipGain * ratio * ratio)
       const left = motion.lengthM - c.along
       let commanded = v * remaining
@@ -727,9 +680,10 @@ class Drive {
     return out
   }
 
-  /** Marks vertices as seen, recording those not seen before. */
+  /** Marks vertices within the survey as seen, recording those not seen before. */
   private reveal(vertices: number[]): void {
-    const fresh = vertices.filter((k) => !this.seen[k])
+    const { inside } = this.options.disk
+    const fresh = vertices.filter((k) => !this.seen[k] && inside[k])
     if (fresh.length === 0) return
     for (const k of fresh) this.seen[k] = 1
     this.reveals.push({ t: this.time(), vertices: Uint32Array.from(fresh) })
@@ -898,8 +852,7 @@ function resolve(options: DriveOptions): Resolved {
   return {
     geometry,
     limits,
-    cruiseSpeed: cruiseSpeedMps,
-    slowdown: slopeSlowdown,
+    ground: { cruiseSpeedMps, slopeSlowdown },
     turnRate: turnRateRadPerS,
     imagingEveryM,
     imagingSteps: Math.round(imagingStopS * simHz),

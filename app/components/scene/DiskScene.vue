@@ -33,6 +33,8 @@ const props = withDefaults(
     sight?: Uint8Array
     /** Vertices per chunk side, as the chunk cache reports them. */
     chunkVertices: number
+    /** The stop's survey: ground beyond it is not drawn, a ring marks its edge. */
+    survey?: { center: MapPoint; radius: number }
     heightAt: (x: number, y: number) => number | undefined
     /** The 19 keyframe values at the playback time; without a drive the rover rests at `rest`. */
     frame?: Float32Array
@@ -64,6 +66,7 @@ const props = withDefaults(
   {
     seen: undefined,
     sight: undefined,
+    survey: undefined,
     frame: undefined,
     keyframes: undefined,
     t: 0,
@@ -290,6 +293,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :death-radius-m="deathRadiusM"
       :fog="fog"
       :sight="sight"
+      :survey="survey"
       :drawn-height-at="drawnHeightAt"
       :goals="goals"
       :pickables="pickables"

@@ -3,22 +3,28 @@ import { Mesh, MeshBasicMaterial } from 'three'
 import { drapePath, ribbonMesh, SCENE_COLORS } from '#shared/utils/client/scene'
 import { overlayGeometry } from '~/utils/scene-geometry'
 
-const props = defineProps<{
-  /** The planned route in world metres. */
-  route: { x: number; y: number }[]
-  heightAt?: (x: number, y: number) => number | undefined
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** The planned route in world metres. */
+    route: { x: number; y: number }[]
+    heightAt?: (x: number, y: number) => number | undefined
+    /** `#rrggbb`; by default the route colour. */
+    color?: string
+  }>(),
+  { heightAt: undefined, color: SCENE_COLORS.route },
+)
 
 /** A narrow strip rather than a GL line: line widths above one pixel are not portable. */
 const STRIP = { widthM: 0.3, liftM: 0.12 }
 const DRAPE_SPACING_M = 1
 
 const material = new MeshBasicMaterial({
-  color: SCENE_COLORS.route,
+  color: props.color,
   toneMapped: false,
   polygonOffset: true,
   polygonOffsetFactor: -3,
 })
+watchEffect(() => material.color.set(props.color))
 const mesh = new Mesh(undefined, material)
 
 watch(

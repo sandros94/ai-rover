@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { goalBearing } from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
+import { rankingScore } from '#shared/utils/mission'
 import JudgmentCard from '~/components/instruments/JudgmentCard.vue'
 import type { MissionStateJson } from '~/composables/useMissionState'
 
@@ -27,6 +28,15 @@ const emit = defineEmits<{ like: [liked: boolean]; highlight: [] }>()
 
 /** Distance and bearing, clockwise from north (world +y), of the goal from the anchor. */
 const goal = computed(() => goalBearing(props.anchor, props.submission.goal))
+
+/** What the standing is ranked by, beside the LGTMs it comes from. */
+const score = computed(() => rankingScore(props.submission).toFixed(2))
+
+/** The code's parts of the exploration value, in words, for the hover. */
+const explorationParts = computed(() => {
+  const p = props.submission.explorationParts
+  return `Path in fog ${p.pathInFog.toFixed(2)} · goal in fog ${p.goalInFog.toFixed(2)} · pocket ${p.pocket.toFixed(2)}; averaged with Jev's own score`
+})
 
 const route = computed(() => {
   const r = props.submission.summary.route
@@ -57,6 +67,16 @@ const route = computed(() => {
         title="Written by the author of the drive in progress: it wins only if nobody else's is left."
       />
       <div class="ml-auto flex items-center gap-1">
+        <UTooltip text="Ranking score: √LGTMs × (1 + exploration)">
+          <span
+            data-test="score"
+            class="px-1 text-xs text-muted tabular-nums"
+            tabindex="0"
+            :aria-label="`Ranking score ${score}, the square root of the LGTMs times one plus the exploration`"
+          >
+            score {{ score }}
+          </span>
+        </UTooltip>
         <UButton
           data-test="highlight"
           size="xs"
@@ -97,6 +117,20 @@ const route = computed(() => {
         {{ Math.round(goal.distanceM) }} m · {{ goal.degrees }}° {{ goal.compass }}
       </span>
       <span v-if="route" class="tabular-nums">{{ route }}</span>
+      <span v-if="submission.goalInFog" data-test="goal-in-fog">destination unexplored</span>
+      <UTooltip
+        :text="explorationParts"
+        :ui="{ content: 'h-auto max-w-[min(20rem,calc(100vw-2rem))]', text: 'whitespace-normal' }"
+      >
+        <span
+          data-test="exploration"
+          class="tabular-nums underline decoration-dotted underline-offset-2"
+          tabindex="0"
+          :aria-label="`Exploration ${submission.exploration.toFixed(2)}: ${explorationParts}`"
+        >
+          Exploration {{ submission.exploration.toFixed(2) }}
+        </span>
+      </UTooltip>
     </p>
     <JudgmentCard :judgment="submission.judgment" />
   </div>

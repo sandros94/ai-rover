@@ -1,27 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import type { MissionRules, RankEntry } from '#shared/utils/mission'
 import {
+  checkDriveTime,
   checkPathClearOfDeaths,
   checkSubmissionGoal,
   DEFAULT_MISSION_RULES,
+  formatDriveTime,
   MissionError,
+  parseMissionRules,
+  rankingScore,
   rankSubmissions,
   roundCloseAt,
   shouldResetToPreviousStop,
 } from '#shared/utils/mission'
 
 const rules = DEFAULT_MISSION_RULES
-const start = { x: 0, y: 0 }
 
 describe('DEFAULT_MISSION_RULES', () => {
   it('carries the documented constants and is frozen', () => {
     expect(rules).toEqual({
       stopRadiusM: 500,
-      segmentDistanceBand: { minM: 50, maxM: 250 },
+      segmentTimeBand: { minS: 900, maxS: 7200 },
       failureZone: { destinationRadiusM: 30, pathRadiusM: 15, clusterRadiusM: 50, strikes: 3 },
       graceWindowMs: 300_000,
       maxJudgedPerRound: 5,
       tieBreak: 'risk',
+      explorationWeights: { pathInFog: 0.4, goalInFog: 0.3, pocket: 0.3 },
       notMoving: {
         quorumMax: 5,
         quorumMin: 2,
@@ -33,29 +37,52 @@ describe('DEFAULT_MISSION_RULES', () => {
     expect(Object.isFrozen(rules)).toBe(true)
     expect(Object.isFrozen(rules.failureZone)).toBe(true)
     expect(Object.isFrozen(rules.notMoving)).toBe(true)
-    // A goal in band from an anchor in band lies on the disk of the stop left.
-    expect(rules.stopRadiusM).toBeGreaterThanOrEqual(2 * rules.segmentDistanceBand.maxM)
+    expect(Object.isFrozen(rules.explorationWeights)).toBe(true)
+  })
+})
+
+describe('parseMissionRules', () => {
+  const plain = () => structuredClone(DEFAULT_MISSION_RULES) as MissionRules
+
+  it('accepts the stored rules in the current shape', () => {
+    expect(parseMissionRules(plain())).toEqual(DEFAULT_MISSION_RULES)
+  })
+
+  it('refuses rules still carrying the distance band, or missing the time band', () => {
+    const { segmentTimeBand: _band, ...rest } = plain()
+    const withBand = { ...plain(), segmentDistanceBand: { minM: 50, maxM: 250 } }
+    for (const stored of [
+      rest,
+      withBand,
+      { ...rest, segmentDistanceBand: { minM: 50, maxM: 250 } },
+    ]) {
+      const error = (() => {
+        try {
+          parseMissionRules(stored)
+        } catch (caught) {
+          return caught
+        }
+      })()
+      expect(error).toBeInstanceOf(MissionError)
+      expect((error as MissionError).code).toBe('INVALID_INPUT')
+    }
+  })
+
+  it('refuses a band whose minimum exceeds its maximum, or an unknown tie-break', () => {
+    expect(() => parseMissionRules({ ...plain(), segmentTimeBand: { minS: 10, maxS: 5 } })).toThrow(
+      MissionError,
+    )
+    expect(() => parseMissionRules({ ...plain(), tieBreak: 'likes' })).toThrow(MissionError)
   })
 })
 
 describe('checkSubmissionGoal', () => {
   const check = (x: number, deaths: { x: number; y: number }[] = []) =>
-    checkSubmissionGoal({ x, y: 0 }, { start, deaths, rules })
+    checkSubmissionGoal({ x, y: 0 }, { deaths, rules })
 
-  it('accepts the band edges inclusively', () => {
-    expect(check(50)).toEqual({ ok: true })
-    expect(check(250)).toEqual({ ok: true })
-  })
-
-  it('refuses just inside the minimum and just past the maximum', () => {
-    expect(check(49.999)).toEqual({ ok: false, reason: 'too-near' })
-    expect(check(250.001)).toEqual({ ok: false, reason: 'too-far' })
-  })
-
-  it('measures the band in the plane, not per axis', () => {
-    expect(checkSubmissionGoal({ x: 30, y: 40 }, { start, deaths: [], rules })).toEqual({
-      ok: true,
-    })
+  it('accepts a goal clear of every death, however near or far', () => {
+    expect(check(0)).toEqual({ ok: true })
+    expect(check(480)).toEqual({ ok: true })
   })
 
   it('refuses a goal at or within the destination radius of a death', () => {
@@ -63,16 +90,47 @@ describe('checkSubmissionGoal', () => {
     expect(check(100, [{ x: 110, y: 0 }])).toEqual({ ok: false, reason: 'near-death-zone' })
     expect(check(100, [{ x: 130.001, y: 0 }])).toEqual({ ok: true })
   })
+})
 
-  it('reports the distance band before the death zone', () => {
-    expect(check(20, [{ x: 20, y: 0 }])).toEqual({ ok: false, reason: 'too-near' })
+describe('checkDriveTime', () => {
+  it('accepts the band edges inclusively', () => {
+    expect(checkDriveTime(900, { rules })).toEqual({ ok: true })
+    expect(checkDriveTime(7200, { rules })).toEqual({ ok: true })
+  })
+
+  it('refuses a drive under 15 min as too short, one over 2 h as too long, giving the estimate', () => {
+    expect(checkDriveTime(899, { rules })).toEqual({
+      ok: false,
+      reason: 'too-short',
+      message: 'The planned drive takes about 15 min; a segment drives at least 15 min.',
+    })
+    expect(checkDriveTime(8520, { rules })).toEqual({
+      ok: false,
+      reason: 'too-long',
+      message: 'The planned drive takes about 2 h 22 min; a segment drives at most 2 h.',
+    })
+    expect(checkDriveTime(0, { rules })).toMatchObject({ ok: false, reason: 'too-short' })
   })
 
   it('follows configured rules', () => {
-    const tight: MissionRules = { ...rules, segmentDistanceBand: { minM: 10, maxM: 20 } }
-    expect(checkSubmissionGoal({ x: 15, y: 0 }, { start, deaths: [], rules: tight })).toEqual({
-      ok: true,
-    })
+    const tight: MissionRules = { ...rules, segmentTimeBand: { minS: 60, maxS: 120 } }
+    expect(checkDriveTime(90, { rules: tight })).toEqual({ ok: true })
+    expect(checkDriveTime(121, { rules: tight })).toMatchObject({ reason: 'too-long' })
+  })
+
+  it('refuses an estimate that is not a duration', () => {
+    for (const bad of [-1, Number.NaN, Infinity]) {
+      expect(() => checkDriveTime(bad, { rules })).toThrow(MissionError)
+    }
+  })
+})
+
+describe('formatDriveTime', () => {
+  it('rounds to whole minutes, in hours and minutes past the hour', () => {
+    expect(formatDriveTime(0)).toBe('0 min')
+    expect(formatDriveTime(2519)).toBe('42 min')
+    expect(formatDriveTime(7200)).toBe('2 h')
+    expect(formatDriveTime(3900)).toBe('1 h 05 min')
   })
 })
 
@@ -217,11 +275,13 @@ describe('rankSubmissions', () => {
     createdAt: Date,
     weights: { distance: number; time: number; risk: number },
     userId = `user-${id}`,
+    exploration = 0,
   ): RankEntry {
     return {
       id,
       userId,
       likes,
+      exploration,
       createdAt,
       judgment: {
         distanceWeight: weights.distance,
@@ -232,7 +292,61 @@ describe('rankSubmissions', () => {
   }
   const ids = (entries: RankEntry[]) => entries.map((e) => e.id)
 
-  it('ranks by likes first, whatever the tie-break', () => {
+  it('scores √likes × (1 + exploration)', () => {
+    expect(rankingScore({ likes: 16, exploration: 0 })).toBe(4)
+    expect(rankingScore({ likes: 16, exploration: 0.5 })).toBe(6)
+    expect(rankingScore({ likes: 9, exploration: 1 })).toBe(6)
+    expect(rankingScore({ likes: 0, exploration: 1 })).toBe(0)
+  })
+
+  it('ranks 25 likes at exploration 1 above 100 likes at exploration 0', () => {
+    const entries = [
+      entry('crowd', 100, at(0), { distance: 1, time: 1, risk: 0 }, 'bob', 0),
+      entry('explorer', 25, at(9), { distance: 0, time: 0, risk: 3 }, 'cy', 1),
+    ]
+    // Both score 10; the higher exploration takes the tie before risk, confidence or time.
+    expect(rankingScore(entries[0]!)).toBe(rankingScore(entries[1]!))
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual(['explorer', 'crowd'])
+  })
+
+  it('ranks 150 likes at exploration 0.7 (score 20.8) above 400 likes at exploration 0 (score 20)', () => {
+    const entries = [
+      entry('influencer', 400, at(0), { distance: 1, time: 1, risk: 0 }, 'bob', 0),
+      entry('explorer', 150, at(9), { distance: 0, time: 0, risk: 3 }, 'cy', 0.7),
+    ]
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual(['explorer', 'influencer'])
+  })
+
+  it('falls from equal scores to exploration, then risk, confidence and time', () => {
+    const entries = [
+      // √4 × 1.5 = √9 × 1 = 3: equal scores throughout.
+      entry('nine-bare', 9, at(0), { distance: 1, time: 1, risk: 0 }, 'a', 0),
+      entry('four-explored', 4, at(9), { distance: 0, time: 0, risk: 3 }, 'b', 0.5),
+      entry('nine-risky', 9, at(0), { distance: 1, time: 1, risk: 2 }, 'c', 0),
+      entry('nine-unsure', 9, at(0), { distance: 0, time: 0, risk: 0 }, 'd', 0),
+      entry('nine-late', 9, at(5), { distance: 1, time: 1, risk: 0 }, 'e', 0),
+    ]
+    expect(ids(rankSubmissions(entries, { rules }))).toEqual([
+      'four-explored',
+      'nine-bare',
+      'nine-late',
+      'nine-unsure',
+      'nine-risky',
+    ])
+  })
+
+  it('ranks the driving author last on an equal score, however much it explores', () => {
+    const entries = [
+      entry('author', 25, at(0), { distance: 1, time: 1, risk: 0 }, 'ada', 1),
+      entry('other', 100, at(9), { distance: 0, time: 0, risk: 3 }, 'bob', 0),
+    ]
+    expect(ids(rankSubmissions(entries, { rules, drivingAuthorId: 'ada' }))).toEqual([
+      'other',
+      'author',
+    ])
+  })
+
+  it('ranks by the score first, whatever the tie-break', () => {
     const entries = [
       entry('a', 1, at(0), { distance: 1, time: 1, risk: 0 }),
       entry('b', 3, at(5), { distance: 0, time: 0, risk: 4 }),

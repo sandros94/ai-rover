@@ -1,4 +1,5 @@
 import type { StopDisk } from '#shared/utils/terrain'
+import { surveyMask } from '#shared/utils/terrain'
 import { NavError } from '#shared/utils/nav'
 
 /** The NavError thrown by `fn`, or undefined when it throws nothing or something else. */
@@ -31,15 +32,16 @@ export function syntheticDisk(options: {
       traversable[j * size + i] = blocked(i - half, j - half) ? 0 : 1
     }
   }
+  const grid = { heights, width: size, height: size, cellSize: 1 }
+  const origin = { i: -half, j: -half }
   return {
     center: { x: 0, y: 0 },
     radius,
     chunks: [],
-    grid: { heights, width: size, height: size, cellSize: 1 },
-    origin: { i: -half, j: -half },
+    grid,
+    origin,
     traversable,
-    reachableFrom: { i: half, j: half },
-    reachable: traversable.slice(),
+    inside: surveyMask({ grid, origin }, { center: { x: 0, y: 0 }, radius }),
     visible: new Uint8Array(size * size).fill(1),
   }
 }

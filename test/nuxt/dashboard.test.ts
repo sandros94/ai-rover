@@ -40,6 +40,9 @@ const SUBMISSION: Submission = {
   likes: 3,
   submitter: ADA,
   deferred: false,
+  goalInFog: false,
+  exploration: 0.42,
+  explorationParts: { pathInFog: 0.3, goalInFog: 0, pocket: 0 },
   judgment: {
     feasible: 0.72,
     verdict: 'review',
@@ -282,6 +285,33 @@ describe('VoteCard', () => {
     expect(deferred.find('[data-test=deferred]').text()).toMatch(/others take precedence/i)
   })
 
+  it('says the destination is unexplored when the goal lies in the fog', async () => {
+    const plain = await mount(VoteCard, props)
+    expect(plain.find('[data-test=goal-in-fog]').exists()).toBe(false)
+    const fogged = await mount(VoteCard, {
+      ...props,
+      submission: { ...SUBMISSION, goalInFog: true },
+    })
+    expect(fogged.find('[data-test=goal-in-fog]').text()).toBe('destination unexplored')
+  })
+
+  it('shows the exploration value, its parts in words beside it, and keeps the risk', async () => {
+    const wrapper = await mount(VoteCard, {
+      ...props,
+      submission: {
+        ...SUBMISSION,
+        exploration: 0.625,
+        explorationParts: { pathInFog: 0.5, goalInFog: 1, pocket: 0.25 },
+      },
+    })
+    const value = wrapper.find('[data-test=exploration]')
+    expect(value.text()).toBe('Exploration 0.63')
+    expect(value.attributes('aria-label')).toBe(
+      "Exploration 0.63: Path in fog 0.50 · goal in fog 1.00 · pocket 0.25; averaged with Jev's own score",
+    )
+    expect(wrapper.findAll('[data-test=risk-level]')).toHaveLength(4)
+  })
+
   it('falls back to the expected levels without probabilities', async () => {
     const { probabilities: _, ...judgment } = SUBMISSION.judgment
     const wrapper = await mount(VoteCard, { ...props, submission: { ...SUBMISSION, judgment } })
@@ -365,6 +395,28 @@ describe('MissionDashboard', () => {
     const wrapper = await mountDashboard({ state: withSubmission, error: null, serverOffsetMs: 0 })
     expect(wrapper.findAllComponents(VoteCard)).toHaveLength(1)
     expect(wrapper.find('[data-test=like]').attributes('href')).toBe('/login')
+  })
+
+  it('stands the cards by ranking score, each showing its score beside the LGTMs', async () => {
+    const crowd = { ...SUBMISSION, id: 'crowd', likes: 100, exploration: 0 }
+    const explorer = {
+      ...SUBMISSION,
+      id: 'explorer',
+      likes: 25,
+      exploration: 1,
+      submitter: { ...ADA, id: 'someone-else' },
+    }
+    const withBoth = state({ round: { ...state().round!, submissions: [crowd, explorer] } })
+    const wrapper = await mountDashboard({ state: withBoth, error: null, serverOffsetMs: 0 })
+    const cards = wrapper.findAllComponents(VoteCard)
+    // Both score 10; the higher exploration stands first.
+    expect(cards.map((card) => card.props('submission').id)).toEqual(['explorer', 'crowd'])
+    expect(cards.map((card) => card.find('[data-test=score]').text())).toEqual([
+      'score 10.00',
+      'score 10.00',
+    ])
+    expect(cards[0]!.find('[data-test=like]').text()).toContain('25 LGTM')
+    expect(wrapper.find('[data-test=ranking]').text()).toMatch(/√LGTMs × \(1 \+ exploration\)/)
   })
 
   it('lets a signed-in user like and marks their own card', async () => {

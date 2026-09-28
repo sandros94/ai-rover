@@ -4,7 +4,7 @@ import type { StopDisk } from '../terrain/disk'
 import { chunksByRow, completeStopDisk, snapToPathable } from '../terrain/disk'
 import type { StopManifest } from '../terrain/manifest'
 import type { MapPoint, MissionRules, SubmissionRefusal } from '../mission'
-import { estimatedDriveMinutes } from '../drive/estimate'
+
 import { planGoal } from '../mission/plan-goal'
 import type { NavMetrics } from '../nav/plan'
 import { traceSegment } from '../nav/trace'
@@ -21,8 +21,10 @@ export type PreviewResult =
   | {
       ok: false
       reason: PreviewRefusal
-      /** The snapped goal; absent when nothing seen and pathable was near the point. */
+      /** The snapped goal; absent when the point itself was refused. */
       goal?: MapPoint
+      /** For `too-short` and `too-long`: the refusal in words, the estimate included. */
+      message?: string
     }
   | {
       ok: true
@@ -35,8 +37,6 @@ export type PreviewResult =
        */
       segmentSlopes: (number | null)[]
       metrics: NavMetrics
-      /** `estimatedDriveMinutes` of the plan; 0 when not reached. */
-      estimatedMinutes: number
     }
 
 /** The stop disk a browser rebuilds from the manifest and its assembled chunks. */
@@ -57,9 +57,9 @@ export function diskFromTerrain(
 }
 
 /**
- * The route a submission at `point` would get: snapped to the nearest seen pathable vertex, checked
- * and planned from `anchor` exactly as the server does, with a slope per polyline segment for
- * drawing. Pure and synchronous; meant to run off the main thread.
+ * The route a submission at `point` would get: snapped, checked and planned from `anchor` exactly
+ * as the server does, with a slope per polyline segment for drawing. Pure and synchronous; meant
+ * to run off the main thread.
  */
 export function previewPlan(
   disk: StopDisk,
@@ -78,7 +78,7 @@ export function previewPlan(
   if (!snapped.ok) return { ok: false, reason: snapped.reason }
   const goal = snapped.point
   const planned = planGoal(disk, { revealed, start: anchor, goal, deaths, rules, slopeLimitDeg })
-  if (!planned.ok) return { ok: false, reason: planned.reason, goal }
+  if (!planned.ok) return { ...planned, goal }
   const { plan } = planned
   const { reached } = plan.metrics
   return {
@@ -87,7 +87,6 @@ export function previewPlan(
     polyline: reached ? plan.polyline : [],
     segmentSlopes: reached ? segmentSlopes(disk, revealed, plan.route.waypoints) : [],
     metrics: plan.metrics,
-    estimatedMinutes: estimatedDriveMinutes(plan),
   }
 }
 

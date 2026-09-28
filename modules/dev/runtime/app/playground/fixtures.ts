@@ -3,7 +3,7 @@ import { MARS_SOL_SECONDS, slopeProfile } from '#shared/utils/client/instruments
 import type { DestinationSource } from '#shared/utils/client'
 import { DEFAULT_LIVE_MARGIN_SECONDS } from '#shared/utils/client'
 import type { DriveEvent, SegmentRecord } from '#shared/utils/drive'
-import { DEFAULT_SLICE_SECONDS, estimatedDriveMinutes } from '#shared/utils/drive'
+import { DEFAULT_SLICE_SECONDS } from '#shared/utils/drive'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { NavMetrics } from '#shared/utils/nav'
 import type { DiskWire } from '../../shared/disk-wire'
@@ -154,7 +154,7 @@ export function fixtureSegment(record: SegmentRecord): NonNullable<DestinationSo
     plan: metrics.reached
       ? {
           pathLengthM: Math.round(metrics.pathLengthM),
-          estimatedMinutes: estimatedDriveMinutes(record.plan),
+          estimatedMinutes: Math.round(metrics.estimatedDriveS / 60),
         }
       : null,
   }

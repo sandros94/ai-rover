@@ -3,7 +3,8 @@ import { getDatabase } from '@netlify/database'
 import { applyMigrations, NetlifyDB } from '@netlify/database-dev'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import type { DB } from '#server/database/db'
-import type { MissionConfig, StoredJudgment } from '#server/database/schema'
+import type { MissionConfig } from '#server/database/schema'
+import type { SubmissionJudgment } from '#server/utils/jev/client'
 import { relations } from '#server/database/schema'
 import { DbError } from '#server/database/errors'
 import type { NavMetrics, SubmissionSummary } from '#shared/utils/nav'
@@ -63,13 +64,16 @@ export async function dbErrorOf(promise: Promise<unknown>): Promise<DbError | un
 
 export const CONFIG: MissionConfig = { world: {}, rules: DEFAULT_MISSION_RULES }
 
-export const JUDGMENT: StoredJudgment = {
+/** A full judgment as a fresh submission stores it. */
+export const JUDGMENT: Omit<SubmissionJudgment, 'cached'> = {
   feasible: 0.9,
   distanceConfidence: { score: 3, confidence: 0.8, probabilities: [0, 0.1, 0.2, 0.7] },
   timeConfidence: { score: 2, confidence: 0.6, probabilities: [0.1, 0.2, 0.6, 0.1] },
   risk: { score: 1, confidence: 0.7, probabilities: [0.2, 0.7, 0.1, 0] },
+  explorationValue: { score: 2, confidence: 0.6, probabilities: [0.1, 0.1, 0.6, 0.1, 0.1] },
   distanceWeight: 1,
   timeWeight: 2 / 3,
+  explorationWeight: 0.5,
   verdict: 'accept',
 }
 
@@ -81,6 +85,8 @@ export const METRICS: NavMetrics = {
   maxSlopeDeg: 6,
   meanSlopeDeg: 3,
   unrevealedFraction: 0,
+  goalInFog: false,
+  estimatedDriveS: 2600,
   turnCount: 1,
   expansions: 120,
   computeMs: 0,
@@ -92,7 +98,16 @@ export const SUMMARY: SubmissionSummary = {
   destination: { straight_line_m: 80, straight_line_label: 'short', bearing: 'north' },
   route: { reached: false },
   failure_reason: 'blocked',
+  exploration: {
+    path_in_fog: 0,
+    destination_unexplored: false,
+    pocket: 0,
+    pocket_label: 'no pocket',
+  },
+  recent_stops: [],
 }
+
+export const EXPLORATION = { pathInFog: 0, goalInFog: 0, pocket: 0 }
 
 /** A mission with its first stop set current, an open round from it and one user. */
 export async function seedMission(db: DB) {
@@ -134,6 +149,8 @@ export function submissionInput(
     judgment: JUDGMENT,
     metrics: METRICS,
     summary: SUMMARY,
+    exploration: 0.25,
+    explorationParts: EXPLORATION,
   }
 }
 

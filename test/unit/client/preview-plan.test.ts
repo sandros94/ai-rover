@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { checkPathClearOfDeaths, DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import {
+  checkPathClearOfDeaths,
+  DEFAULT_MISSION_RULES,
+  formatDriveTime,
+  planGoal,
+} from '#shared/utils/mission'
 import type { MissionRules } from '#shared/utils/mission'
-import { estimatedDriveMinutes } from '#shared/utils/drive'
+
 import { planSegment } from '#shared/utils/nav'
 import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
 import type { StopDisk } from '#shared/utils/terrain'
@@ -50,10 +55,8 @@ describe('diskFromTerrain', () => {
     expect(disk.radius).toBe(fixture.disk.radius)
     expect(disk.chunks).toEqual(fixture.disk.chunks)
     expect(disk.origin).toEqual(fixture.disk.origin)
-    expect(disk.reachableFrom).toEqual(fixture.disk.reachableFrom)
     expect(disk.grid).toEqual(fixture.disk.grid)
     expect(disk.traversable).toEqual(fixture.disk.traversable)
-    expect(disk.reachable).toEqual(fixture.disk.reachable)
     expect(disk.visible).toEqual(fixture.disk.visible)
     expect(ground.revealed).toEqual(serverRevealed)
   })
@@ -77,9 +80,9 @@ describe('previewPlan on the recorded journey', () => {
     expect(JSON.stringify(result.polyline)).toBe(JSON.stringify(server.polyline))
     expect({ ...result.metrics, computeMs: 0 }).toEqual({ ...server.metrics, computeMs: 0 })
     expect(result.metrics.reached).toBe(true)
-    expect(result.estimatedMinutes).toBe(estimatedDriveMinutes(server))
-    expect(result.estimatedMinutes).toBeGreaterThan(
-      Math.round(server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS / 60),
+    // Slopes slow the rover and imaging stops it: longer than the path at the AutoNav rate.
+    expect(result.metrics.estimatedDriveS).toBeGreaterThan(
+      server.metrics.pathLengthM / AUTONAV_EFFECTIVE_MPS,
     )
   })
 
@@ -92,59 +95,99 @@ describe('previewPlan on the recorded journey', () => {
     expect(Math.max(...seen)).toBeCloseTo(result.metrics.maxSlopeDeg, 9)
   })
 
-  it('refuses a goal too near or too far from the anchor, measured after snapping', () => {
-    expect(previewPlan(ground.disk, { ...base, point: { x: 10, y: 5 } })).toMatchObject({
-      ok: false,
-      reason: 'too-near',
-    })
-    const tight: MissionRules = { ...rules, segmentDistanceBand: { minM: 10, maxM: 40 } }
-    const far = previewPlan(ground.disk, { ...base, rules: tight, point })
-    expect(far).toMatchObject({
-      ok: false,
-      reason: 'too-far',
-      goal: serverSnap(point),
-    })
+  it('refuses a drive planned too short or too long, saying how long it would take', () => {
+    // 11 m from the anchor: a few minutes of driving.
+    const short = previewPlan(ground.disk, { ...base, point: { x: 10, y: 5 } })
+    expect(short).toMatchObject({ ok: false, reason: 'too-short', goal: { x: 10, y: 5 } })
+    expect(!short.ok && short.message).toMatch(
+      /^The planned drive takes about \d+ min; a segment drives at least 15 min\.$/,
+    )
+    const planned = previewPlan(ground.disk, { ...base, point })
+    if (!planned.ok) throw new Error('expected a plan')
+    const tight: MissionRules = {
+      ...rules,
+      segmentTimeBand: { minS: 60, maxS: planned.metrics.estimatedDriveS - 1 },
+    }
+    const long = previewPlan(ground.disk, { ...base, rules: tight, point })
+    expect(long).toMatchObject({ ok: false, reason: 'too-long', goal: serverSnap(point) })
+    expect(!long.ok && long.message).toContain(formatDriveTime(planned.metrics.estimatedDriveS))
   })
 
-  it('refuses a point with no pathable ground within reach', () => {
-    expect(previewPlan(ground.disk, { ...base, point: { x: 200, y: 200 } })).toEqual({
-      ok: false,
-      reason: 'unpathable',
-    })
+  it('refuses a point beyond the survey as outside, as the server does', () => {
+    const beyond = { x: 36, y: 48.1 }
+    expect(Math.hypot(beyond.x, beyond.y)).toBeGreaterThan(fixture.disk.radius)
+    const outside = { ok: false, reason: 'outside' }
+    expect(previewPlan(ground.disk, { ...base, point: beyond })).toEqual(outside)
+    expect(snapToPathable(fixture.disk, beyond, { revealed: serverRevealed })).toEqual(outside)
+    // A goal submitted from another stop, planned over this one, is refused rather than thrown.
+    expect(planGoal(fixture.disk, { ...base, start: anchor, goal: beyond })).toEqual(outside)
   })
 
-  it('refuses a point on unseen ground as unrevealed, as the server does', () => {
+  /** A vertex inside the ring whose snap neighbourhood is all unseen, pathable or not. */
+  function foggedVertex(): { x: number; y: number } {
     const { disk } = ground
     const { width } = disk.grid
     const vertex = (x: number, y: number) => (y - disk.origin.j) * width + (x - disk.origin.i)
-    // A point inside the ring whose whole snap neighbourhood is unseen yet pathable ground.
-    let fogged: { x: number; y: number } | undefined
-    for (let r = 60; r <= 240 && !fogged; r += 5) {
-      for (let a = 0; a < 360 && !fogged; a += 5) {
+    for (let r = 20; r <= 58; r += 2) {
+      for (let a = 0; a < 360; a += 5) {
         const x = Math.round(r * Math.cos((a * Math.PI) / 180))
         const y = Math.round(r * Math.sin((a * Math.PI) / 180))
         let seen = false
-        let pathable = false
-        for (let dy = -5; dy <= 5; dy++) {
-          for (let dx = -5; dx <= 5; dx++) {
-            if (Math.hypot(dx, dy) > 5) continue
-            const k = vertex(x + dx, y + dy)
-            if (ground.revealed[k]) seen = true
-            if (disk.traversable[k] && disk.reachable[k]) pathable = true
-          }
-        }
-        if (!seen && pathable) fogged = { x, y }
+        for (let dy = -3; dy <= 3; dy++)
+          for (let dx = -3; dx <= 3; dx++) if (ground.revealed[vertex(x + dx, y + dy)]) seen = true
+        if (!seen && Math.hypot(x, y) <= 57) return { x, y }
       }
     }
-    expect(fogged).toBeDefined()
-    expect(previewPlan(disk, { ...base, point: fogged! })).toEqual({
-      ok: false,
-      reason: 'unrevealed',
-    })
-    expect(snapToPathable(fixture.disk, fogged!, { revealed: serverRevealed })).toEqual({
-      ok: false,
-      reason: 'unrevealed',
-    })
+    throw new Error('no fogged vertex in the recorded disk')
+  }
+  const fogged = foggedVertex()
+  const near = { ...rules, segmentTimeBand: { minS: 0, maxS: 7200 } }
+
+  it('takes a point on unseen ground at the vertex picked and plans to it, as the server does', () => {
+    const point = { x: fogged.x + 0.3, y: fogged.y - 0.2 }
+    const result = previewPlan(ground.disk, { ...base, rules: near, point })
+    expect(result).toMatchObject({ ok: true, goal: fogged })
+    if (!result.ok) return
+    expect(serverSnap(point)).toEqual(fogged)
+    expect(result.metrics.reached).toBe(true)
+    expect(result.metrics.goalInFog).toBe(true)
+    expect(result.metrics.unrevealedFraction).toBeGreaterThan(0)
+    const seenGoal = previewPlan(ground.disk, { ...base, point: { x: 40.3, y: 34.6 } })
+    expect(seenGoal.ok && seenGoal.metrics.goalInFog).toBe(false)
+  })
+
+  it('decides alike whatever the fog around the goal hides', () => {
+    // Unseen ground two or more vertices from any seen vertex made a wall of impassable spikes.
+    const { disk } = ground
+    const { width, height } = disk.grid
+    const heights = disk.grid.heights.slice()
+    const traversable = disk.traversable.slice()
+    let hidden = 0
+    for (let j = 2; j < height - 2; j++) {
+      for (let i = 2; i < width - 2; i++) {
+        let seenNear = false
+        for (let dj = -2; dj <= 2; dj++)
+          for (let di = -2; di <= 2; di++)
+            if (ground.revealed[(j + dj) * width + i + di]) seenNear = true
+        if (seenNear) continue
+        const k = j * width + i
+        heights[k] = (i + j) % 2 === 0 ? 40 : -40
+        traversable[k] = 0
+        hidden++
+      }
+    }
+    expect(hidden).toBeGreaterThan(0)
+    const spiked = { ...disk, grid: { ...disk.grid, heights }, traversable }
+    const point = { x: fogged.x + 0.3, y: fogged.y - 0.2 }
+    const strip = (r: ReturnType<typeof previewPlan>) =>
+      r.ok ? { ...r, metrics: { ...r.metrics, computeMs: 0 } } : r
+    for (const context of [
+      { ...base, rules: near, point },
+      { ...base, rules: near, point, deaths: [{ x: fogged.x + 10, y: fogged.y }] },
+      { ...base, point },
+    ]) {
+      expect(strip(previewPlan(spiked, context))).toEqual(strip(previewPlan(disk, context)))
+    }
   })
 
   it('refuses a goal near a death, and a route passing near one', () => {

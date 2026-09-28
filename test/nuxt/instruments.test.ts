@@ -87,6 +87,8 @@ const METRICS: NavMetrics = {
   maxSlopeDeg: 11.2,
   meanSlopeDeg: 4.1,
   unrevealedFraction: 0.35,
+  goalInFog: false,
+  estimatedDriveS: 5400,
   turnCount: 3,
   expansions: 5120,
   computeMs: 42,

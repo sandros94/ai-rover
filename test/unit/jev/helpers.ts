@@ -78,6 +78,7 @@ export function answersFetch(feasible: number) {
         distance_confidence: scoreOf(5),
         time_confidence: scoreOf(5),
         risk: scoreOf(4),
+        exploration_value: scoreOf(5),
       },
       usage: { input_tokens: 700, output_tokens: 20 },
     })

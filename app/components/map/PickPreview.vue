@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { PreviewResult } from '#shared/utils/client'
 import type { SubmissionRefusal } from '#shared/utils/mission'
+import { formatDriveTime } from '#shared/utils/mission'
 
 const props = withDefaults(
   defineProps<{
@@ -29,9 +30,9 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 
 const REASONS: Record<SubmissionRefusal, string> = {
   'unpathable': 'No reachable ground there: pick a spot the rover can get to.',
-  'unrevealed': 'The rover has not seen that ground yet: pick a spot on the revealed map.',
-  'too-near': 'Too near: a segment is at least 50 m.',
-  'too-far': 'Too far: a segment is at most 250 m.',
+  'outside': 'Beyond the survey: pick a spot inside the ring.',
+  'too-short': 'Too short a drive.',
+  'too-long': 'Too long a drive.',
   'near-death-zone': 'Too close to where the rover was lost before.',
   'path-near-death-zone': 'The route passes too close to where the rover was lost before.',
   'judged-infeasible': 'Jev judged this route infeasible.',
@@ -39,6 +40,9 @@ const REASONS: Record<SubmissionRefusal, string> = {
   'round-changed':
     'The round moved while your goal was judged: check the new route and confirm again.',
 }
+
+/** Refusals whose server message gives the planned drive time. */
+const TIMED = new Set<string>(['too-short', 'too-long'])
 
 /** Error codes the submit route answers besides a refusal. */
 const CODES: Record<string, string> = {
@@ -62,7 +66,8 @@ const rows = computed(() => {
     ['Detour', `×${m.detourRatio.toFixed(2)}`],
     ['Max seen slope', `${m.maxSlopeDeg.toFixed(1)}°`],
     ['Unseen', `${Math.round(m.unrevealedFraction * 100)} %`],
-    ['Estimated drive', `${result.estimatedMinutes} min`],
+    ...(m.goalInFog ? [['Destination', 'unexplored']] : []),
+    ['Estimated drive', formatDriveTime(m.estimatedDriveS)],
   ]
 })
 
@@ -85,6 +90,7 @@ const unreached = computed(() => props.result?.ok === true && !props.result.metr
         color="warning"
         variant="subtle"
         :title="reasonText(result.reason)"
+        :description="result.message"
       />
       <UAlert
         v-else-if="unreached"
@@ -106,7 +112,9 @@ const unreached = computed(() => props.result?.ok === true && !props.result.metr
       color="error"
       variant="subtle"
       :title="knownText(refusal.reason) ?? 'The submission failed.'"
-      :description="knownText(refusal.reason) ? undefined : refusal.message"
+      :description="
+        knownText(refusal.reason) && !TIMED.has(refusal.reason) ? undefined : refusal.message
+      "
     />
     <div v-if="picked" class="mt-3 flex gap-2">
       <UButton

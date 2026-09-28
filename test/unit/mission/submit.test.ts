@@ -7,7 +7,15 @@ import { listRoundSubmissions, withdrawSubmission } from '#server/repositories/s
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
 import { submitGoal } from '#server/utils/mission/submit'
-import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
+import { DEFAULT_MISSION_RULES, explorationValue } from '#shared/utils/mission'
+import {
+  believedReachable,
+  computeStopDisk,
+  createRevealedMask,
+  defineWorld,
+  revealDisk,
+  revealedOverDisk,
+} from '#shared/utils/terrain'
 import {
   at,
   createTestDb,
@@ -44,16 +52,33 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
 }
 
 describe('submitGoal', () => {
-  it('refuses goals outside the distance band without asking Jev', async () => {
+  it('refuses drives planned under 4 min or over 30 min without asking Jev, saying how long', async () => {
     const { ada, submit, jev, round } = await landed()
     expect(await submit(ada.id, { x: 0, y: 5 })).toEqual({
       accepted: false,
-      reason: 'too-near',
+      reason: 'too-short',
       submission: null,
+      message: expect.stringMatching(
+        /^The planned drive takes about \d+ min; a segment drives at least 4 min\.$/,
+      ),
     })
     expect(await submit(ada.id, { x: 0, y: 75 })).toEqual({
       accepted: false,
-      reason: 'too-far',
+      reason: 'too-long',
+      submission: null,
+      message: expect.stringMatching(
+        /^The planned drive takes about \d+ min; a segment drives at most 30 min\.$/,
+      ),
+    })
+    expect(jev.summaries).toHaveLength(0)
+    expect(await listRoundSubmissions(db, round.id)).toEqual([])
+  })
+
+  it('refuses a goal beyond the 125 m survey as outside, without asking Jev', async () => {
+    const { ada, submit, jev, round } = await landed()
+    expect(await submit(ada.id, { x: 0, y: 126 })).toEqual({
+      accepted: false,
+      reason: 'outside',
       submission: null,
     })
     expect(jev.summaries).toHaveLength(0)
@@ -85,28 +110,29 @@ describe('submitGoal', () => {
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
-      seed: 'mars',
+      seed: 'steep',
       at: { x: 0, y: 0 },
       world,
       rules: SMALL_RULES,
       now: T0,
     })
-    const disk = computeStopDisk(defineWorld({ seed: 'mars', ...world }), {
-      center: { x: 0, y: 0 },
-      radius: SMALL_RULES.stopRadiusM,
-    })
+    const steep = defineWorld({ seed: 'steep', ...world })
+    const disk = computeStopDisk(steep, { center: { x: 0, y: 0 }, radius: SMALL_RULES.stopRadiusM })
     const { width } = disk.grid
+    const revealed = revealedOverDisk(revealDisk(createRevealedMask(steep), disk), disk)
+    const { reachable } = believedReachable(disk, revealed)
     const pathable = (x: number, y: number) => {
       const k = (y - disk.origin.j) * width + (x - disk.origin.i)
-      return disk.traversable[k] === 1 && disk.reachable[k] === 1
+      return revealed[k] === 1 && disk.traversable[k] === 1 && reachable[k] === 1
     }
-    // A blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
+    // A seen blocked vertex with a pathable neighbour, and one with nothing pathable within 5 m.
     let edge: { x: number; y: number } | undefined
     let island: { x: number; y: number } | undefined
-    for (let y = -55; y <= 55 && !(edge && island); y++) {
-      for (let x = -55; x <= 55 && !(edge && island); x++) {
+    for (let y = -45; y <= 45 && !(edge && island); y++) {
+      for (let x = -45; x <= 45 && !(edge && island); x++) {
         const distance = Math.hypot(x, y)
-        if (distance < 20 || distance > 55 || pathable(x, y)) continue
+        if (distance < 20 || distance > 45 || pathable(x, y)) continue
+        if (!revealed[(y - disk.origin.j) * width + (x - disk.origin.i)]) continue
         let near = false
         for (let dy = -5; dy <= 5; dy++) {
           for (let dx = -5; dx <= 5; dx++) {
@@ -144,8 +170,7 @@ describe('submitGoal', () => {
     expect(Math.hypot(goal.x - edge!.x, goal.y - edge!.y)).toBe(1)
   })
 
-  it('refuses a goal on ground the rover has not seen, without asking Jev', async () => {
-    // Fogged, yet pathable and in band: only what the rover has seen may be a goal.
+  it('takes a goal on ground the rover has not seen at the vertex picked, planned through the fog', async () => {
     const { store } = memoryStore()
     const created = await createMissionAtStop(db, {
       store,
@@ -161,12 +186,27 @@ describe('submitGoal', () => {
       jev: jev.client,
       missionId: created.mission.id,
       userId: ada!.id,
-      goal: { x: -36, y: -40 },
+      goal: { x: -30.3, y: 0.2 },
       now: at(T0, MINUTE),
     })
-    expect(result).toEqual({ accepted: false, reason: 'unrevealed', submission: null })
-    expect(jev.summaries).toHaveLength(0)
-    expect(await listRoundSubmissions(db, created.round.id)).toEqual([])
+    expect(result.accepted).toBe(true)
+    const { submission } = result
+    expect({ x: submission!.goalX, y: submission!.goalY }).toEqual({ x: -30, y: 0 })
+    expect(submission!.metrics).toMatchObject({ reached: true, goalInFog: true })
+    expect(submission!.metrics.unrevealedFraction).toBeGreaterThan(0)
+    expect(jev.summaries).toHaveLength(1)
+    // The code's parts from the plan and the landing stop's mask; nothing driven yet.
+    const parts = submission!.explorationParts
+    expect(parts).toEqual({
+      pathInFog: submission!.metrics.unrevealedFraction,
+      goalInFog: 1,
+      pocket: parts.pocket,
+    })
+    expect(jev.summaries[0]!.exploration).toMatchObject({ destination_unexplored: true })
+    expect(jev.summaries[0]!.recent_stops).toEqual([])
+    // The mean of the code's value and Jev's, which answers 0.5 here.
+    const code = explorationValue(parts, { weights: DEFAULT_MISSION_RULES.explorationWeights })
+    expect(submission!.exploration).toBeCloseTo((code + 0.5) / 2, 12)
   })
 
   it('stores a rejected verdict as a rejected submission and reports it', async () => {
@@ -211,7 +251,7 @@ describe('submitGoal', () => {
       await withdrawSubmission(db, submission!.id, { userId: ada.id })
     }
     // A refusal by rule stores nothing and pays no Jev, so it is not an attempt.
-    expect(await submit(ada.id, { x: 0, y: 5 })).toMatchObject({ reason: 'too-near' })
+    expect(await submit(ada.id, { x: 0, y: 5 })).toMatchObject({ reason: 'too-short' })
     verdict = 'reject'
     expect(await submit(ada.id, { x: 0, y: 23 })).toMatchObject({ reason: 'judged-infeasible' })
     verdict = 'accept'

@@ -49,6 +49,7 @@ import {
   stopManifestKey,
   TerrainError,
 } from '#shared/utils/terrain'
+import { missionHistory } from './history'
 import { failIfNotMoving } from './not-moving'
 import { recordNextDue, roundStanding } from './round'
 import { assessGoal } from './submit'
@@ -355,12 +356,19 @@ async function prepareSettlement(
   if (beside && outcome.kind === 'stopped-short') {
     const ground = { world, disk, revealed: revealedOverDisk(mask, disk), start: { x, y } }
     const deaths = await listDeaths(db, mission.id)
+    const history = await missionHistory(db, {
+      store,
+      missionId: mission.id,
+      disk,
+      driven: { segment: driving, end: { x, y } },
+    })
     const waiting = (await listRoundSubmissions(db, beside.id)).filter((s) => s.status === 'open')
     for (const submission of waiting) {
       const assessed = await assessGoal(ground, {
         goal: { x: submission.goalX, y: submission.goalY },
         deaths,
         rules: mission.config.rules,
+        history,
         jev,
       })
       assessments.set(submission.id, assessed)
@@ -439,7 +447,8 @@ async function settle(
 /**
  * The round's open submissions, locked, take their prepared assessments: one that now breaks a
  * rule or is judged infeasible is rejected as invalidated by the stop, the others keep their
- * place with the new plan's metrics, summary and judgment; the goal itself is kept as submitted.
+ * place with the new plan's metrics, summary, judgment and exploration; the goal itself is kept
+ * as submitted.
  * One withdrawn since the snapshot is no longer open and is left alone. One submitted since was
  * planned from the anchor the round is leaving and has no assessment: it is rejected too, and
  * its author may submit again from the stop reached.

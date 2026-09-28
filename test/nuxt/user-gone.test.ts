@@ -92,6 +92,9 @@ const state = (): MissionStateJson =>
           likes: 1,
           submitter: { ...ADA, id: 'someone-else' },
           deferred: false,
+          goalInFog: false,
+          exploration: 0,
+          explorationParts: { pathInFog: 0, goalInFog: 0, pocket: 0 },
           judgment: {
             feasible: 0.9,
             verdict: 'accept',

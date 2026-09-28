@@ -1,5 +1,7 @@
+import * as v from 'valibot'
 import { DEFAULT_STOP_RADIUS } from '../terrain/disk'
 import { MissionError } from './errors'
+import type { ExplorationWeights } from './exploration'
 
 /**
  * Tunable rules of a mission, stored with it. Every "within" radius is inclusive: a distance
@@ -7,13 +9,12 @@ import { MissionError } from './errors'
  */
 export interface MissionRules {
   /**
-   * Radius of every stop disk, metres: the ground a stop publishes and goals are planned over.
-   * A goal made during a drive is in band from the anchor yet planned over the disk of the stop
-   * left, so the radius is at least twice `segmentDistanceBand.maxM`.
+   * Radius of every stop's survey, metres: the ground a stop publishes, and where a round's goals
+   * are picked and planned.
    */
   stopRadiusM: number
-  /** Allowed straight-line distance from the segment start to a submitted goal, metres. */
-  segmentDistanceBand: { minM: number; maxM: number }
+  /** Allowed planned drive time of a segment (the plan's `estimatedDriveS`), seconds. */
+  segmentTimeBand: { minS: number; maxS: number }
   failureZone: {
     /** A goal may not end within this distance of a death position. */
     destinationRadiusM: number
@@ -32,11 +33,13 @@ export interface MissionRules {
    */
   maxJudgedPerRound: number
   /**
-   * How submissions with equal likes are ordered. `'risk'`: lower Jev risk score, then higher
-   * confidence sum, then earlier. `'confidence'`: higher confidence sum, then earlier.
-   * Closed set.
+   * How submissions with equal ranking scores (see {@link rankingScore}) are ordered after the
+   * higher exploration value. `'risk'`: lower Jev risk score, then higher confidence sum, then
+   * earlier. `'confidence'`: higher confidence sum, then earlier. Closed set.
    */
   tieBreak: 'risk' | 'confidence'
+  /** The weight of each part of a goal's exploration value (see `explorationValue`). */
+  explorationWeights: ExplorationWeights
   /**
    * When a playing drive is failed as not moving. Flags of distinct users within `windowMs` reach
    * the quorum, `min(quorumMax, max(quorumMin, ceil(active / 2)))` over the users active in the
@@ -54,7 +57,7 @@ export interface MissionRules {
 
 export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   stopRadiusM: DEFAULT_STOP_RADIUS,
-  segmentDistanceBand: Object.freeze({ minM: 50, maxM: 250 }),
+  segmentTimeBand: Object.freeze({ minS: 15 * 60, maxS: 2 * 3600 }),
   failureZone: Object.freeze({
     destinationRadiusM: 30,
     pathRadiusM: 15,
@@ -64,6 +67,7 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   graceWindowMs: 5 * 60_000,
   maxJudgedPerRound: 5,
   tieBreak: 'risk',
+  explorationWeights: Object.freeze({ pathInFog: 0.4, goalInFog: 0.3, pocket: 0.3 }),
   notMoving: Object.freeze({
     quorumMax: 5,
     quorumMin: 2,
@@ -73,24 +77,72 @@ export const DEFAULT_MISSION_RULES: Readonly<MissionRules> = Object.freeze({
   }),
 })
 
+const seconds = v.pipe(v.number(), v.finite(), v.minValue(0))
+const metres = v.pipe(v.number(), v.finite(), v.minValue(0))
+const milliseconds = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+const count = v.pipe(v.number(), v.safeInteger(), v.minValue(0))
+const weight = v.pipe(v.number(), v.finite(), v.minValue(0))
+
+/** Mission rules as stored with a mission; nothing else is accepted, extra fields included. */
+export const MissionRulesSchema = v.strictObject({
+  stopRadiusM: v.pipe(v.number(), v.finite(), v.gtValue(0)),
+  segmentTimeBand: v.pipe(
+    v.strictObject({ minS: seconds, maxS: seconds }),
+    v.check((band) => band.minS <= band.maxS, 'segmentTimeBand.minS exceeds maxS'),
+  ),
+  failureZone: v.strictObject({
+    destinationRadiusM: metres,
+    pathRadiusM: metres,
+    clusterRadiusM: metres,
+    strikes: count,
+  }),
+  graceWindowMs: milliseconds,
+  maxJudgedPerRound: count,
+  tieBreak: v.picklist(['risk', 'confidence']),
+  explorationWeights: v.pipe(
+    v.strictObject({ pathInFog: weight, goalInFog: weight, pocket: weight }),
+    v.check(
+      (w) => w.pathInFog + w.goalInFog + w.pocket > 0,
+      'explorationWeights must give at least one part a positive weight',
+    ),
+  ),
+  notMoving: v.strictObject({
+    quorumMax: count,
+    quorumMin: count,
+    windowMs: milliseconds,
+    progressM: metres,
+    backstopMs: milliseconds,
+  }),
+}) satisfies v.GenericSchema<unknown, MissionRules>
+
+/** Stored mission rules, checked against {@link MissionRulesSchema}; throws `INVALID_INPUT`. */
+export function parseMissionRules(value: unknown): MissionRules {
+  const parsed = v.safeParse(MissionRulesSchema, value)
+  if (!parsed.success) {
+    const [issue] = parsed.issues
+    throw new MissionError(
+      'INVALID_INPUT',
+      `Mission rules are invalid: ${v.getDotPath(issue) ?? '(root)'} ${issue.message}. Migrate the stored rules to the current shape.`,
+      { cause: new v.ValiError(parsed.issues) },
+    )
+  }
+  return parsed.output
+}
+
 export interface MapPoint {
   x: number
   y: number
 }
 
-/** Why a goal is refused. Closed set. */
-export type GoalRefusal = 'too-near' | 'too-far' | 'near-death-zone'
+/** Why a goal is refused by rule. Closed set. */
+export type GoalRefusal = 'too-short' | 'too-long' | 'near-death-zone'
 
-/** The distance band is checked before the death zone. */
+/** A goal ending within the destination radius of a death is refused. */
 export function checkSubmissionGoal(
   goal: MapPoint,
-  options: { start: MapPoint; deaths: readonly MapPoint[]; rules: MissionRules },
-): { ok: true } | { ok: false; reason: GoalRefusal } {
-  const { start, deaths, rules } = options
-  const distance = Math.hypot(goal.x - start.x, goal.y - start.y)
-  const { minM, maxM } = rules.segmentDistanceBand
-  if (distance < minM) return { ok: false, reason: 'too-near' }
-  if (distance > maxM) return { ok: false, reason: 'too-far' }
+  options: { deaths: readonly MapPoint[]; rules: MissionRules },
+): { ok: true } | { ok: false; reason: 'near-death-zone' } {
+  const { deaths, rules } = options
   const radius = rules.failureZone.destinationRadiusM
   for (const death of deaths) {
     if (Math.hypot(goal.x - death.x, goal.y - death.y) <= radius) {
@@ -98,6 +150,48 @@ export function checkSubmissionGoal(
     }
   }
   return { ok: true }
+}
+
+/**
+ * A planned drive time checked against `rules.segmentTimeBand`; a refusal says why in words,
+ * the estimate included. The bounds themselves are allowed.
+ */
+export function checkDriveTime(
+  estimatedS: number,
+  options: { rules: MissionRules },
+): { ok: true } | { ok: false; reason: 'too-short' | 'too-long'; message: string } {
+  if (!Number.isFinite(estimatedS) || estimatedS < 0) {
+    throw new MissionError(
+      'INVALID_INPUT',
+      `checkDriveTime: estimatedS is ${estimatedS}; pass the plan's estimated drive time, seconds ≥ 0.`,
+    )
+  }
+  const { minS, maxS } = options.rules.segmentTimeBand
+  const planned = `The planned drive takes about ${formatDriveTime(estimatedS)}`
+  if (estimatedS < minS) {
+    return {
+      ok: false,
+      reason: 'too-short',
+      message: `${planned}; a segment drives at least ${formatDriveTime(minS)}.`,
+    }
+  }
+  if (estimatedS > maxS) {
+    return {
+      ok: false,
+      reason: 'too-long',
+      message: `${planned}; a segment drives at most ${formatDriveTime(maxS)}.`,
+    }
+  }
+  return { ok: true }
+}
+
+/** A drive time in whole minutes, as "42 min", "2 h" or "1 h 05 min". */
+export function formatDriveTime(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (hours === 0) return `${rest} min`
+  return rest === 0 ? `${hours} h` : `${hours} h ${String(rest).padStart(2, '0')} min`
 }
 
 /**
@@ -116,14 +210,24 @@ export function checkPathClearOfDeaths(
   }
   let nearestM = Infinity
   for (const death of options.deaths) {
-    if (polyline.length === 1) {
-      nearestM = Math.min(nearestM, Math.hypot(death.x - polyline[0]!.x, death.y - polyline[0]!.y))
-    }
-    for (let k = 1; k < polyline.length; k++) {
-      nearestM = Math.min(nearestM, distanceToSegment(death, polyline[k - 1]!, polyline[k]!))
-    }
+    nearestM = Math.min(nearestM, distanceToPolyline(death, polyline))
   }
   return { ok: nearestM > options.rules.failureZone.pathRadiusM, nearestM }
+}
+
+/**
+ * The smallest distance from `point` to any segment of a non-empty polyline, a single point
+ * counting as a zero-length segment.
+ */
+export function distanceToPolyline(point: MapPoint, polyline: readonly MapPoint[]): number {
+  if (polyline.length === 1) {
+    return Math.hypot(point.x - polyline[0]!.x, point.y - polyline[0]!.y)
+  }
+  let nearest = Infinity
+  for (let k = 1; k < polyline.length; k++) {
+    nearest = Math.min(nearest, distanceToSegment(point, polyline[k - 1]!, polyline[k]!))
+  }
+  return nearest
 }
 
 function distanceToSegment(p: MapPoint, a: MapPoint, b: MapPoint): number {
@@ -168,15 +272,29 @@ export interface RankEntry {
   /** The submitter. */
   userId: string
   likes: number
+  /** The goal's exploration value, 0 to 1. */
+  exploration: number
   createdAt: Date
   judgment: { distanceWeight: number; timeWeight: number; risk: { score: number } }
 }
 
 /**
- * Most liked first, ties by `rules.tieBreak`; the id breaks what remains, so the order never
- * depends on the input order. Submissions by `drivingAuthorId`, who wrote the drive the round
- * runs beside, rank after everyone else's whatever their likes: others take precedence, and the
- * author's pick wins only when nobody else's is left.
+ * What a submission ranks by: √likes × (1 + exploration). The square root damps a crowd's pull,
+ * and a goal opening new ground counts for up to twice its likes' worth.
+ */
+export function rankingScore(entry: Pick<RankEntry, 'likes' | 'exploration'>): number {
+  return Math.sqrt(Math.max(0, entry.likes)) * (1 + entry.exploration)
+}
+
+/** Scores this close are equal: scores equal in exact arithmetic can differ in the last bits. */
+const SCORE_TOLERANCE = 1e-9
+
+/**
+ * Highest {@link rankingScore} first; equal scores by higher exploration, then by
+ * `rules.tieBreak`; the id breaks what remains, so the order never depends on the input order.
+ * Submissions by `drivingAuthorId`, who wrote the drive the round runs beside, rank after
+ * everyone else's whatever their score: others take precedence, and the author's pick wins only
+ * when nobody else's is left.
  */
 export function rankSubmissions<T extends RankEntry>(
   entries: readonly T[],
@@ -186,10 +304,15 @@ export function rankSubmissions<T extends RankEntry>(
   const byRisk = options.rules.tieBreak === 'risk'
   const deferred = (e: RankEntry) =>
     options.drivingAuthorId != null && e.userId === options.drivingAuthorId ? 1 : 0
+  const byScore = (a: RankEntry, b: RankEntry) => {
+    const difference = rankingScore(b) - rankingScore(a)
+    return Math.abs(difference) > SCORE_TOLERANCE ? difference : 0
+  }
   return entries.toSorted(
     (a, b) =>
       deferred(a) - deferred(b) ||
-      b.likes - a.likes ||
+      byScore(a, b) ||
+      b.exploration - a.exploration ||
       (byRisk ? a.judgment.risk.score - b.judgment.risk.score : 0) ||
       confidence(b) - confidence(a) ||
       a.createdAt.getTime() - b.createdAt.getTime() ||

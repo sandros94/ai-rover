@@ -7,24 +7,40 @@
         "speed": "152 m per hour at most, about 120 m per hour with autonomous navigation",
         "limits": "operational slope limit 16 degrees; drives over rocks up to 40 cm; turns in place"
       },
-      "mission_rules": "A segment goes from the current stop to a destination 50 to 250 m away. The rover plans only over ground it has already seen; unseen ground is uncertain and the drive stops safely if it turns out impassable.",
+      "mission_rules": "A segment goes from the current stop to a destination within 500 m whose planned drive takes 15 minutes to 2 hours. The destination may lie on unseen ground. The rover plans over what it has seen and treats unseen ground as uncertain; the drive stops safely if it turns out impassable.",
       "destination": {
-        "straight_line_m": 140,
+        "straight_line_m": 150,
         "straight_line_label": "medium",
-        "bearing": "south-east"
+        "bearing": "east"
       },
       "route": {
         "reached": true,
-        "path_length_m": 176,
-        "detour_label": "moderate detour",
-        "max_slope_deg": 11,
-        "max_slope_label": "moderate",
-        "mean_slope_label": "moderate",
-        "unseen_label": "mostly seen",
-        "turns_in_place": 7,
-        "loose_ground_label": "some loose ground",
-        "estimated_drive_minutes": 93
-      }
+        "path_length_m": 151,
+        "detour_label": "nearly straight",
+        "max_slope_deg": 5,
+        "max_slope_label": "gentle",
+        "mean_slope_label": "gentle",
+        "unseen_label": "partly unseen",
+        "turns_in_place": 0,
+        "loose_ground_label": "mostly loose",
+        "estimated_drive_minutes": 105
+      },
+      "exploration": {
+        "path_in_fog": 0.54,
+        "destination_unexplored": true,
+        "pocket": 0.13,
+        "pocket_label": "no pocket"
+      },
+      "recent_stops": [
+        {
+          "distance_m": 132,
+          "bearing": "west"
+        },
+        {
+          "distance_m": 267,
+          "bearing": "west"
+        }
+      ]
     },
     "questions": {
       "feasible": {
@@ -66,6 +82,17 @@
           "Much unseen ground, loose ground or slopes near the limit; being stopped short or getting stuck is a real possibility.",
           "No route was found, or the route combines unseen ground with slopes near the limit or mostly loose ground; stopping short or failing is likely."
         ]
+      },
+      "exploration_value": {
+        "type": "score",
+        "instructions": "How much does this segment advance the mission's purpose, discovering new ground? A destination in unexplored ground, or in a leftover pocket of unseen ground beside the path already driven, advances it; ground already seen does not. Weigh the exploration parts (the share of the path over unseen ground, whether the destination is unexplored, and the pocket label), the distance, the estimated drive minutes, the slopes, and the last five stops, which show where the rover has already been.",
+        "criteria": [
+          "No route was found, or the destination and the route lie on seen ground, or it heads back toward recent stops; nothing new would be seen.",
+          "Mostly seen ground with a short unseen stretch, and the destination already seen; little new ground.",
+          "A partly unseen route, or an unexplored destination close to recent stops; some new ground.",
+          "An unexplored destination reached over much unseen ground, away from recent stops, or a pocket near the driven path; much new ground.",
+          "An unexplored destination far from every recent stop over mostly unseen ground, or one closing a leftover pocket beside the driven path; the most new ground."
+        ]
       }
     }
   },
@@ -74,12 +101,12 @@
     "answers": {
       "feasible": {
         "type": "noul",
-        "noul": 0.81
+        "noul": 0.42
       },
       "distance_confidence": {
         "type": "score",
-        "score": 2.99,
-        "confidence": 0.99,
+        "score": 2.24,
+        "confidence": 0.78,
         "legend": {
           "0": "No route was found, or the route crosses mostly unseen ground with a long detour, so replans will likely change the driven distance a lot.",
           "1": "The route crosses mostly unseen ground, or partly unseen ground with a long detour; the driven distance will likely differ noticeably from the plan.",
@@ -89,16 +116,16 @@
         },
         "probabilities": {
           "0": 0,
-          "1": 0,
-          "2": 0.01,
-          "3": 0.99,
-          "4": 0
+          "1": 0.01,
+          "2": 0.75,
+          "3": 0.23,
+          "4": 0.01
         }
       },
       "time_confidence": {
         "type": "score",
-        "score": 2.33,
-        "confidence": 0.72,
+        "score": 2,
+        "confidence": 0.93,
         "legend": {
           "0": "No route was found, or the route crosses mostly unseen ground with a long detour and slopes near the limit, so the drive time is largely unknown.",
           "1": "The route crosses mostly unseen ground or loose ground on steep slopes; replans and slowdowns will likely stretch the drive a lot.",
@@ -108,16 +135,16 @@
         },
         "probabilities": {
           "0": 0,
-          "1": 0,
-          "2": 0.67,
-          "3": 0.33,
+          "1": 0.04,
+          "2": 0.92,
+          "3": 0.04,
           "4": 0
         }
       },
       "risk": {
         "type": "score",
-        "score": 1.03,
-        "confidence": 0.97,
+        "score": 2.16,
+        "confidence": 0.58,
         "legend": {
           "0": "Seen, firm and gentle ground all the way; nothing is likely to stop the rover.",
           "1": "Some unseen stretches or moderate slopes; a safe stop short of the destination is possible but unlikely.",
@@ -126,15 +153,34 @@
         },
         "probabilities": {
           "0": 0,
-          "1": 0.97,
-          "2": 0.03,
-          "3": 0
+          "1": 0.13,
+          "2": 0.58,
+          "3": 0.29
+        }
+      },
+      "exploration_value": {
+        "type": "score",
+        "score": 2.72,
+        "confidence": 0.71,
+        "legend": {
+          "0": "No route was found, or the destination and the route lie on seen ground, or it heads back toward recent stops; nothing new would be seen.",
+          "1": "Mostly seen ground with a short unseen stretch, and the destination already seen; little new ground.",
+          "2": "A partly unseen route, or an unexplored destination close to recent stops; some new ground.",
+          "3": "An unexplored destination reached over much unseen ground, away from recent stops, or a pocket near the driven path; much new ground.",
+          "4": "An unexplored destination far from every recent stop over mostly unseen ground, or one closing a leftover pocket beside the driven path; the most new ground."
+        },
+        "probabilities": {
+          "0": 0.01,
+          "1": 0,
+          "2": 0.29,
+          "3": 0.66,
+          "4": 0.04
         }
       }
     },
     "usage": {
-      "input_tokens": 1178,
-      "output_tokens": 67
+      "input_tokens": 1556,
+      "output_tokens": 83
     }
   }
 }

@@ -1,8 +1,9 @@
 import { slopeAt } from '../terrain/analysis'
 import type { StopDisk } from '../terrain/disk'
 import type { GridCell } from '../terrain/grid'
+import { DEFAULT_SPEED_MODEL, DEFAULT_STOP_MODEL, groundSpeedMps } from '../drive/models'
 import type { CostMapOptions } from './costmap'
-import { buildCostMap } from './costmap'
+import { buildCostMap, DEFAULT_COST_MAP } from './costmap'
 import { NavError } from './errors'
 import type { Motion, MotionOptions } from './motions'
 import { motionsFromPolyline } from './motions'
@@ -33,6 +34,16 @@ export interface NavMetrics {
   meanSlopeDeg: number
   /** Share of path length over vertices not yet revealed, 0 to 1. */
   unrevealedFraction: number
+  /** The goal vertex has not been revealed: the destination is unexplored ground. */
+  goalInFog: boolean
+  /**
+   * Planned drive time, seconds, under the default speed and stop models: each cell of the path
+   * at the speed its seen slope allows, unseen cells at the speed of ground that costs the
+   * unrevealed penalty, an imaging stop every `imagingEveryM` short of the goal, and the turns in
+   * place. Assessments are left out, as they wait on ground the drive finds blocked; so are slip
+   * and a turn to face the route from the rover's heading.
+   */
+  estimatedDriveS: number
   /** Turns in place among the motions. */
   turnCount: number
   expansions: number
@@ -70,6 +81,7 @@ export function planSegment(
   const { width, cellSize } = grid
   const from = vertexInDisk(disk, start, 'start')
   const to = vertexInDisk(disk, goal, 'goal')
+  // Unseen ground costs the flat penalty, so a goal in the fog is planned to like any other.
   const costMap = buildCostMap(disk, options)
   const route = findRoute(costMap, {
     width,
@@ -90,7 +102,13 @@ export function planSegment(
       })
     : []
   const straightLineM = Math.hypot(to.i - from.i, to.j - from.j) * cellSize
-  const along = route.reached ? alongPath(disk, revealed, route.waypoints) : undefined
+  const along = route.reached
+    ? alongPath(disk, revealed, route.waypoints, {
+        slopeLimitDeg: options.slopeLimitDeg,
+        slopeWeight: options.slopeWeight ?? DEFAULT_COST_MAP.slopeWeight,
+        unrevealedPenalty: options.unrevealedPenalty ?? DEFAULT_COST_MAP.unrevealedPenalty,
+      })
+    : undefined
   const pathLengthM = along?.lengthM ?? 0
   const metrics: NavMetrics = {
     reached: route.reached,
@@ -101,6 +119,8 @@ export function planSegment(
     maxSlopeDeg: along?.maxSlopeDeg ?? 0,
     meanSlopeDeg: along?.meanSlopeDeg ?? 0,
     unrevealedFraction: along?.unrevealedFraction ?? 0,
+    goalInFog: !revealed[to.j * width + to.i],
+    estimatedDriveS: along ? along.driveS + stopsAlong(pathLengthM, motions) : 0,
     turnCount: motions.filter((motion) => motion.type === 'turn').length,
     expansions: route.expansions,
     computeMs: 0,
@@ -110,16 +130,29 @@ export function planSegment(
 }
 
 /**
- * Length, unrevealed share and length-weighted slope over the vertex cells a route crosses; the
- * slopes over its revealed cells only, 0 when there are none.
+ * Length, unrevealed share, length-weighted slope and driving time over the vertex cells a route
+ * crosses; the slopes over its revealed cells only, 0 when there are none. An unrevealed cell is
+ * driven at the slope whose cost equals the penalty, so the estimate and the route weigh unseen
+ * ground alike.
  */
 function alongPath(
   disk: StopDisk,
   revealed: Uint8Array,
   waypoints: GridCell[],
-): { lengthM: number; maxSlopeDeg: number; meanSlopeDeg: number; unrevealedFraction: number } {
+  costs: { slopeLimitDeg: number } & Required<CostMapOptions>,
+): {
+  lengthM: number
+  maxSlopeDeg: number
+  meanSlopeDeg: number
+  unrevealedFraction: number
+  driveS: number
+} {
   const { grid } = disk
   const { width, cellSize } = grid
+  const tanLimit = Math.tan((costs.slopeLimitDeg * Math.PI) / 180)
+  // Seen ground costs 1 + slopeWeight · ratio²: the ratio at which that equals the penalty.
+  const unseenRatio = Math.min(1, Math.sqrt((costs.unrevealedPenalty - 1) / costs.slopeWeight) || 0)
+  let driveS = 0
   let lengthM = 0
   for (let k = 1; k < waypoints.length; k++) {
     const a = waypoints[k - 1]!
@@ -131,24 +164,42 @@ function alongPath(
   let seen = 0
   let maxSlopeDeg = 0
   let slopeSum = 0
+  // A route of one vertex covers no ground, though the trace still reports the cell under it.
+  const moving = lengthM > 0 ? 1 : 0
   tracePath(width, cellSize, waypoints, (k, weight) => {
     span += weight
     if (!revealed[k]) {
       unrevealed += weight
+      driveS += (moving * weight) / groundSpeedMps(unseenRatio)
       return
     }
     const i = k % width
-    const slopeDeg = (Math.atan(slopeAt(grid, { i, j: (k - i) / width })) * 180) / Math.PI
+    const tan = slopeAt(grid, { i, j: (k - i) / width })
+    const slopeDeg = (Math.atan(tan) * 180) / Math.PI
     maxSlopeDeg = Math.max(maxSlopeDeg, slopeDeg)
     slopeSum += slopeDeg * weight
     seen += weight
+    driveS += (moving * weight) / groundSpeedMps(tan / tanLimit)
   })
   return {
     lengthM,
     maxSlopeDeg,
     meanSlopeDeg: seen > 0 ? slopeSum / seen : 0,
     unrevealedFraction: unrevealed / span,
+    driveS,
   }
+}
+
+/**
+ * Standstill a drive of `lengthM` along `motions` spends under the default models: an imaging
+ * stop at every `imagingEveryM` short of the goal, and the turns in place.
+ */
+function stopsAlong(lengthM: number, motions: readonly Motion[]): number {
+  const { imagingEveryM, imagingStopS } = DEFAULT_STOP_MODEL
+  const imaging = lengthM > 0 ? Math.ceil(lengthM / imagingEveryM) - 1 : 0
+  let turnedRad = 0
+  for (const motion of motions) if (motion.type === 'turn') turnedRad += Math.abs(motion.angleRad)
+  return imaging * imagingStopS + turnedRad / DEFAULT_SPEED_MODEL.turnRateRadPerS
 }
 
 function vertexInDisk(disk: StopDisk, point: { x: number; y: number }, name: string): GridCell {

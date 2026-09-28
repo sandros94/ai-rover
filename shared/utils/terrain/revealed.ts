@@ -1,6 +1,6 @@
 import { assertChunkCoord } from './chunk'
 import type { StopDisk } from './disk'
-import { worldToVertex } from './disk'
+import { surveyMask, worldToVertex } from './disk'
 import { TerrainError } from './errors'
 import type { World } from './world'
 
@@ -110,12 +110,12 @@ export function revealVertices(
 }
 
 /**
- * Per disk-grid vertex: 1 where the mask holds it as seen. Covers the whole grid, including
- * vertices outside the disk radius and in chunks the disk does not list.
+ * Per disk-grid vertex: 1 where the mask holds it as seen and it lies within the disk's survey;
+ * ground seen from elsewhere beyond the survey is not part of this disk.
  */
 export function revealedOverDisk(
   mask: RevealedMask,
-  disk: Pick<StopDisk, 'grid' | 'origin'>,
+  disk: Pick<StopDisk, 'grid' | 'origin' | 'center' | 'radius'>,
 ): Uint8Array {
   assertDiskAligned(mask, disk, 'revealedOverDisk')
   const { vertexCount } = mask
@@ -135,6 +135,8 @@ export function revealedOverDisk(
       }
     }
   }
+  const inside = surveyMask(disk, disk)
+  for (let k = 0; k < out.length; k++) out[k]! &= inside[k]!
   return out
 }
 

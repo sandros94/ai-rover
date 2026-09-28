@@ -4,15 +4,17 @@ import type { PreviewResult } from '#shared/utils/client'
 import { previewPlan } from '#shared/utils/client'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { StopDisk } from '#shared/utils/terrain'
-import { DEFAULT_STOP_RADIUS } from '#shared/utils/terrain'
+import { DEFAULT_STOP_RADIUS, surveyMask } from '#shared/utils/terrain'
 import PickPreview from '~/components/map/PickPreview.vue'
 import { PLAYGROUND_PROPS } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
 
-const disk = computed<StopDisk | undefined>(() =>
-  props.disk ? { ...props.disk, radius: DEFAULT_STOP_RADIUS, chunks: [] } : undefined,
-)
+const disk = computed<StopDisk | undefined>(() => {
+  if (!props.disk) return undefined
+  const survey = { center: props.disk.center, radius: DEFAULT_STOP_RADIUS }
+  return { ...props.disk, ...survey, inside: surveyMask(props.disk, survey), chunks: [] }
+})
 
 const start = computed(() => props.record.start)
 /** Points around the record's start that exercise each state of the card. */
@@ -20,8 +22,8 @@ const cases = computed(() => {
   const { x, y } = start.value
   return {
     'record goal': props.record.goal,
-    'too near': { x: x + 20, y: y + 10 },
-    'too far': { x: x + 300, y },
+    'too short': { x: x + 20, y: y + 10 },
+    'too long': { x: x + 300, y },
     'north 150 m': { x, y: y + 150 },
   }
 })

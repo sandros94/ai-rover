@@ -22,6 +22,7 @@ import {
   seedMission,
   SUMMARY,
   submissionInput,
+  EXPLORATION,
 } from './helpers'
 
 let db: DB
@@ -89,14 +90,28 @@ describe('submissions', () => {
       judgment: { ...JUDGMENT, feasible: 0.5 },
       metrics,
       summary: SUMMARY,
+      exploration: 0.8,
+      explorationParts: { pathInFog: 1, goalInFog: 1, pocket: 0 },
     })
-    expect(revised).toMatchObject({ status: 'open', metrics, judgment: { feasible: 0.5 } })
+    expect(revised).toMatchObject({
+      status: 'open',
+      metrics,
+      judgment: { feasible: 0.5 },
+      exploration: 0.8,
+      explorationParts: { pathInFog: 1, goalInFog: 1, pocket: 0 },
+    })
     const rejected = await rejectSubmission(db, submission.id, { reason: 'invalidated-by-stop' })
     expect(rejected).toMatchObject({ status: 'rejected', rejectionReason: 'invalidated-by-stop' })
     expect(
       (
         await dbErrorOf(
-          reviseSubmission(db, submission.id, { judgment: JUDGMENT, metrics, summary: SUMMARY }),
+          reviseSubmission(db, submission.id, {
+            judgment: JUDGMENT,
+            metrics,
+            summary: SUMMARY,
+            exploration: 0,
+            explorationParts: EXPLORATION,
+          }),
         )
       )?.code,
     ).toBe('INVALID_STATE')

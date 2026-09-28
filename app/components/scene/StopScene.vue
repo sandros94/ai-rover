@@ -17,6 +17,7 @@ import {
   LOD_FAR_M,
   routeApproach,
   routeDestination,
+  SCENE_COLORS,
   skyLighting,
   sunPosition,
 } from '#shared/utils/client/scene'
@@ -61,6 +62,8 @@ const props = withDefaults(
     fog?: ChunkFog & { rects?: GridRect[] }
     /** What of the disk the rover has in sight now, laid out as the fog; see `TerrainChunks`. */
     sight?: Uint8Array
+    /** The stop's survey: ground beyond it is not drawn, and a thin ring marks its edge. */
+    survey?: { center: { x: number; y: number }; radius: number }
     /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
     roverVariant?: RoverVariant
     /** The open round's goals, on the ground, flagged. */
@@ -93,6 +96,7 @@ const props = withDefaults(
     deathRadiusM: undefined,
     fog: undefined,
     sight: undefined,
+    survey: undefined,
     roverVariant: undefined,
     goals: () => [],
     pickables: () => [],
@@ -116,6 +120,18 @@ const emit = defineEmits<{
 
 /** The rover and a focused ghost: never more full rover models than that in the scene. */
 const ledger = fullModelLedger()
+
+/** Points of the survey's edge, a closed polyline fine enough to read as a circle. */
+const SURVEY_RING_POINTS = 360
+const surveyRing = computed(() => {
+  const survey = props.survey
+  if (!survey) return []
+  const { center, radius } = survey
+  return Array.from({ length: SURVEY_RING_POINTS + 1 }, (_, k) => {
+    const a = (2 * Math.PI * k) / SURVEY_RING_POINTS
+    return { x: center.x + radius * Math.cos(a), y: center.y + radius * Math.sin(a) }
+  })
+})
 
 const rover = computed(() => framePlacement(props.frame).position)
 const focus = computed(() => ({ x: rover.value.x, y: rover.value.y }))
@@ -185,8 +201,15 @@ onBeforeUnmount(() => plane.dispose())
       :height-at="heightAt"
       :fog="fog"
       :sight="sight"
+      :survey="survey"
     />
     <primitive v-else :object="plane" />
+    <RouteLine
+      v-if="chunks.length > 0 && surveyRing.length > 0"
+      :route="surveyRing"
+      :height-at="drawnHeightAt ?? heightAt"
+      :color="SCENE_COLORS.survey"
+    />
     <RouteLine v-if="route.length > 1" :route="route" :height-at="drawnHeightAt ?? heightAt" />
     <TrailLayer :stops="stops" :keyframes="keyframes" :t="t" :height-at="heightAt" />
     <DeathGhosts

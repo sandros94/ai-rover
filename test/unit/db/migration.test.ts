@@ -6,7 +6,7 @@ import { sql as raw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import { describe, expect, it } from 'vitest'
 import { relations } from '#server/database/schema'
-import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import { DEFAULT_MISSION_RULES, MissionError, parseMissionRules } from '#shared/utils/mission'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 import { JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
 
@@ -164,6 +164,78 @@ describe('the ai_judgment migration', () => {
       expect(keys.rows).toEqual([{ conname: 'ai_judgment_pkey' }])
       const old = await db.execute(raw`select to_regclass('jev_judgment') is null as gone`)
       expect(old.rows).toEqual([{ gone: true }])
+    } finally {
+      await connection.pool.end()
+      await server.stop()
+    }
+  })
+})
+
+describe('the segment_time_band migration', () => {
+  it('moves stored rules to the current shape and gives stored submissions their exploration', async () => {
+    const server = new NetlifyDB({ logger: () => {} })
+    const connection = getDatabase({ connectionString: await server.start() })
+    const db = drizzle({ client: connection, relations })
+    try {
+      const names = readdirSync(MIGRATIONS_DIR).toSorted()
+      const at = names.findIndex((name) => name.endsWith('_segment_time_band'))
+      expect(at).toBeGreaterThan(0)
+      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      const {
+        segmentTimeBand: _band,
+        explorationWeights: _weights,
+        stopRadiusM: _radius,
+        ...kept
+      } = DEFAULT_MISSION_RULES
+      const older = { ...kept, segmentDistanceBand: { minM: 50, maxM: 250 } }
+      const tuned = {
+        ...kept,
+        stopRadiusM: DEFAULT_MISSION_RULES.stopRadiusM,
+        segmentTimeBand: { minS: 60, maxS: 600 },
+        explorationWeights: { pathInFog: 1, goalInFog: 0, pocket: 0 },
+      }
+      const config = (rules: unknown) => JSON.stringify({ world: {}, rules })
+      const json = (value: unknown) => JSON.stringify(value)
+      await db.execute(raw`
+        insert into mission (id, seed, world_hash, config) values
+          ('01900000-0000-7000-8000-000000000001', 'mars', '0123456789abcdef', ${config(older)}),
+          ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${config(tuned)})`)
+      await db.execute(raw`
+        insert into user_account (id, display_name) values ('01900000-0000-7000-8000-000000000003', 'Ada');
+        insert into stop (id, mission_id, index, x, y, heading_rad, manifest_key, revealed_key)
+          values ('01900000-0000-7000-8000-000000000004', '01900000-0000-7000-8000-000000000001', 0, 0, 0, 0, 'm', 'r');
+        insert into round (id, mission_id, from_stop_id, anchor_x, anchor_y)
+          values ('01900000-0000-7000-8000-000000000005', '01900000-0000-7000-8000-000000000001', '01900000-0000-7000-8000-000000000004', 0, 0);
+      `)
+      const { goalInFog: _fog, ...olderMetrics } = METRICS
+      for (const [id, metrics] of [
+        [
+          '01900000-0000-7000-8000-000000000006',
+          { ...METRICS, unrevealedFraction: 0.5, goalInFog: true },
+        ],
+        ['01900000-0000-7000-8000-000000000007', olderMetrics],
+      ] as const) {
+        await db.execute(raw`
+          insert into submission (id, round_id, user_id, goal_x, goal_y, status, rejection_reason, judgment, metrics, summary)
+          values (${id}, '01900000-0000-7000-8000-000000000005', '01900000-0000-7000-8000-000000000003', 0, 80,
+            'rejected', 'judged-infeasible', ${json(JUDGMENT)}, ${json(metrics)}, ${json(SUMMARY)})`)
+      }
+      expect(() => parseMissionRules(older)).toThrow(MissionError)
+
+      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      const missions = await db.execute(raw`select config from mission order by id`)
+      const [migrated, tunedAfter] = (missions.rows as { config: { rules: unknown } }[]).map(
+        (row) => parseMissionRules(row.config.rules),
+      )
+      expect(migrated).toEqual(DEFAULT_MISSION_RULES)
+      expect(tunedAfter).toEqual(tuned)
+      const submissions = await db.execute(
+        raw`select exploration, exploration_parts from submission order by id`,
+      )
+      expect(submissions.rows).toEqual([
+        { exploration: 0.5, exploration_parts: { pathInFog: 0.5, goalInFog: 1, pocket: 0 } },
+        { exploration: 0, exploration_parts: { pathInFog: 0, goalInFog: 0, pocket: 0 } },
+      ])
     } finally {
       await connection.pool.end()
       await server.stop()

@@ -26,15 +26,15 @@ export function at(base: Date, ms: number): Date {
 export const MINUTE = 60_000
 
 /**
- * The default rules with every distance at a quarter, the stop disk included: a stop generates
- * and publishes 16 chunks instead of 224, and drives run tens of metres. The distances keep their
- * proportions (the disk still spans twice the band), so a mission behaves as at full size; goals
- * in tests on these rules use the same quarter scale.
+ * The default rules with every distance at a quarter, the survey included: a stop generates and
+ * publishes 32 chunks instead of 256, and drives run tens of metres. The time band shrinks with
+ * the drives, to 4–30 min, so a quarter-scale goal plans in or out of it as its full-size
+ * counterpart does in 15 min–2 h; goals in tests on these rules use the same quarter scale.
  */
 export const SMALL_RULES: MissionRules = {
   ...DEFAULT_MISSION_RULES,
   stopRadiusM: 125,
-  segmentDistanceBand: { minM: 12.5, maxM: 62.5 },
+  segmentTimeBand: { minS: 240, maxS: 1800 },
   failureZone: {
     ...DEFAULT_MISSION_RULES.failureZone,
     destinationRadiusM: 7.5,

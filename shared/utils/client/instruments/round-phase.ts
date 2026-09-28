@@ -7,6 +7,8 @@ type Instant = Date | string | number
 export interface RoundSubmission {
   id: string
   likes: number
+  /** The goal's exploration value, 0 to 1. */
+  exploration: number
   createdAt: Instant
   submitter: { id: string }
   /** Written by the author of the drive the round runs beside: ranked after everyone else's. */
@@ -16,7 +18,8 @@ export interface RoundSubmission {
 
 /**
  * The public round's submissions in standing order, the one that would win now first, as the
- * server ranks them: LGTMs, the mission tie-break, and the driving author's pick after the others.
+ * server ranks them: the ranking score from LGTMs and exploration, the mission tie-break, and the
+ * driving author's pick after the others.
  */
 export function rankRound<T extends RoundSubmission>(
   submissions: readonly T[],
@@ -28,6 +31,7 @@ export function rankRound<T extends RoundSubmission>(
       id: s.id,
       userId: s.submitter.id,
       likes: s.likes,
+      exploration: s.exploration,
       createdAt: new Date(s.createdAt),
       judgment: { ...s.judgment, risk: { score: s.judgment.risk } },
       source: s,
