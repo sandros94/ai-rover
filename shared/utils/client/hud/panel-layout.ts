@@ -41,14 +41,18 @@ export interface PanelLayout {
   order: PanelId[]
 }
 
+/** Kept clear under the 2D map's first place: the site credit, 24 px tall over the panel margin. */
+const CREDIT_STRIP_PX = 32
+
 /** Opened on a first visit. */
 const OPEN_BY_DEFAULT: readonly PanelId[] = ['map2d', 'vote', 'segment', 'attitude', 'speed']
 
 /**
  * The arrangement of a first visit in an area of `bounds`: attitude and speed side by side at
- * the top left, the 2D map at the bottom left, the vote (or a replay's segment) down the right
- * with a focused object's details over its foot; the rest in a cascade in the middle, closed until
- * asked for. The details panel shows while an object is focused, whatever its `open` flag says.
+ * the top left, the 2D map at the bottom left above the site credit, the vote (or a replay's
+ * segment) down the right with a focused object's details over its foot; the rest in a cascade in
+ * the middle, closed until asked for. The details panel shows while an object is focused,
+ * whatever its `open` flag says.
  */
 export function defaultPanelLayout(bounds: PanelSize): PanelLayout {
   const m = PANEL_MARGIN_PX
@@ -67,7 +71,7 @@ export function defaultPanelLayout(bounds: PanelSize): PanelLayout {
   const fixed: Partial<Record<PanelId, PanelRect>> = {
     attitude: at(m, m, 340, 270),
     speed: at(m + 340 + m, m, 300, 270),
-    map2d: at(m, h - m - map, map, map),
+    map2d: at(m, h - m - CREDIT_STRIP_PX - map, map, map),
     vote: at(w - m - 380, m, 380, Math.min(640, h - 2 * m)),
     // A replay's own panel, where the live page has the vote.
     segment: at(w - m - 380, m, 380, Math.min(640, h - 2 * m)),

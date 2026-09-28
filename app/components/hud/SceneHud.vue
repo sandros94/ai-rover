@@ -106,6 +106,8 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => observer?.disconnect())
+const sceneLayer = useTemplateRef<HTMLElement>('sceneLayer')
+useCreditsLift(sceneLayer, area)
 
 function toggleInstruments(): void {
   if (wide.value) hud.value.visible = !hud.value.visible
@@ -269,7 +271,7 @@ defineShortcuts(
       </div>
     </SiteHeader>
     <main ref="area" class="relative min-h-0 flex-1">
-      <div data-test="scene-layer" class="absolute inset-0">
+      <div ref="sceneLayer" data-test="scene-layer" class="absolute inset-0">
         <slot name="scene" />
       </div>
       <HudLayer>

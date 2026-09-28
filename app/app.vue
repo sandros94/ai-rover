@@ -22,5 +22,6 @@ useSeoMeta({
 <template>
   <UApp>
     <NuxtPage />
+    <SiteCredits />
   </UApp>
 </template>

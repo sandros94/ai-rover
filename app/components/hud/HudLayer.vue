@@ -2,7 +2,8 @@
 /**
  * The layer of HUD widgets over the scene. It lets pointers through to the scene everywhere but
  * on its widgets: the default slot holds absolutely placed panels (which take pointers
- * themselves), `top` and `bottom` stack widgets centred along those edges, above the panels.
+ * themselves), `top` and `bottom` stack widgets centred along those edges, above the panels. The
+ * bottom row's widgets are among those the site credit rises over.
  */
 </script>
 
@@ -15,6 +16,7 @@
       <slot name="top" />
     </div>
     <div
+      data-hud-bottom
       class="absolute inset-x-0 bottom-0 z-50 flex flex-col items-center gap-2 p-2 *:pointer-events-auto"
     >
       <slot name="bottom" />
