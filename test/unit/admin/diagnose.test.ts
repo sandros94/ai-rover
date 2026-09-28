@@ -159,8 +159,7 @@ describe('diagnoseLocks', () => {
     })
     try {
       await locked
-      await new Promise((resolve) => setTimeout(resolve, 5_500))
-      const held = await diagnoseLocks(() => db)
+      const held = await diagnoseLocks(() => db, { now: new Date(Date.now() + 6_000) })
       expect(held.ok).toBe(true)
       expect(Object.values(held.states).reduce((a, b) => a + b, 0)).toBeGreaterThan(0)
       expect(held.oldestTransactionS).toBeGreaterThan(5)

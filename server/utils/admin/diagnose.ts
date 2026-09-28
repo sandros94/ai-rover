@@ -28,8 +28,11 @@ import { noStore, PLATFORM, readAdminBody } from './access'
 const PROBE_TIMEOUT_MS = 20_000
 /** The mission probe runs a whole tick, which a public read leaves to the background function. */
 const MISSION_PROBE_TIMEOUT_MS = 50_000
-/** A transaction open longer than this while waiting, idle or holding an advisory lock is stuck. */
-const STUCK_AFTER_S = 5
+/**
+ * A transaction open longer than this while waiting, idle or holding an advisory lock is stuck:
+ * a healthy tick holds its mission lock well under it.
+ */
+const STUCK_AFTER_MS = 5_000
 /** Blob prefixes the app writes under. */
 const BLOB_PREFIXES = ['missions/', 'terrain/']
 /** The blob count stops at this. */
@@ -199,7 +202,10 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
  * idle in transaction until the database drops it, and every tick after it waits; this is where
  * that shows. Query text is never read: it can quote data.
  */
-export async function diagnoseLocks(connect: () => DB): Promise<LocksDiagnosis> {
+export async function diagnoseLocks(
+  connect: () => DB,
+  { now = new Date(), stuckAfterMs = STUCK_AFTER_MS }: { now?: Date; stuckAfterMs?: number } = {},
+): Promise<LocksDiagnosis> {
   const states: Record<string, number> = {}
   let oldestTransactionS: number | null = null
   const stuck: StuckSession[] = []
@@ -207,7 +213,7 @@ export async function diagnoseLocks(connect: () => DB): Promise<LocksDiagnosis> 
     const sessions = await rowsOf<Omit<StuckSession, 'ageS'> & { ageS: number | null }>(
       connect(),
       sql`select a.pid, a.state, a.wait_event_type as "waitEventType",
-            extract(epoch from clock_timestamp() - a.xact_start)::float8 as "ageS",
+            extract(epoch from ${now.toISOString()}::timestamptz - a.xact_start)::float8 as "ageS",
             exists (
               select 1 from pg_locks l
               where l.pid = a.pid and l.locktype = 'advisory' and l.granted
@@ -222,7 +228,7 @@ export async function diagnoseLocks(connect: () => DB): Promise<LocksDiagnosis> 
       oldestTransactionS = Math.max(oldestTransactionS ?? 0, ageS)
       const waiting = session.waitEventType === 'Lock'
       const idle = session.state.startsWith('idle in transaction')
-      if (ageS > STUCK_AFTER_S && (waiting || idle || session.holdsAdvisoryLock)) {
+      if (ageS * 1000 > stuckAfterMs && (waiting || idle || session.holdsAdvisoryLock)) {
         stuck.push({ ...session, ageS })
       }
     }

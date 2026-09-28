@@ -226,7 +226,8 @@ describe('publishSegment', () => {
 
 describe('a prepared drive', () => {
   const start = { x: 0, y: 0, headingRad: 0 }
-  const goal = { x: 40, y: 30 }
+  // 1 m: short, yet its record spans more than one slice, which a cut needs.
+  const goal = { x: 0.8, y: 0.6 }
   const prepare = () =>
     encodeSegment(driveSegment(world, { disk, revealed: mask, start, goal }).record)
 
@@ -242,6 +243,7 @@ describe('a prepared drive', () => {
 
   it('is named apart in another scope or with other content', async () => {
     const segment = prepare()
+    expect(segment.slices.length).toBeGreaterThan(1)
     const id = await contentSegmentId(segment, 'round-1')
     expect(await contentSegmentId(segment, 'round-2')).not.toBe(id)
     const cut = { ...segment, slices: segment.slices.slice(0, -1) }

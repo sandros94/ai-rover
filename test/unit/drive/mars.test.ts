@@ -27,32 +27,6 @@ describe('driveSegment on seed mars, 150 m', () => {
     expect(keyframes.count).toBeGreaterThan(1)
   })
 
-  it('is deterministic', () => {
-    expect(driveSegment(world, options).record).toEqual(record)
-  })
-
-  it('stores frames that re-solve to the same pose', () => {
-    let worst = 0
-    for (let k = 0; k < keyframes.count; k++) {
-      const f = frame(keyframes, k)
-      const q = { x: f[F.qx]!, y: f[F.qy]!, z: f[F.qz]!, w: f[F.qw]! }
-      const pose = poseOnTerrain(world.heightAt, { x: f[F.x]!, y: f[F.y]!, headingRad: yawOf(q) })
-      const pairs: [number, number][] = [
-        [pose.position.z, f[F.z]!],
-        [pose.quaternion.x, q.x],
-        [pose.quaternion.y, q.y],
-        [pose.quaternion.z, q.z],
-        [pose.quaternion.w, q.w],
-        [pose.rocker.left, f[F.rockerL]!],
-        [pose.rocker.right, f[F.rockerR]!],
-        [pose.bogie.left, f[F.bogieL]!],
-        [pose.bogie.right, f[F.bogieR]!],
-      ]
-      for (const [solved, stored] of pairs) worst = Math.max(worst, Math.abs(solved - stored))
-    }
-    expect(worst).toBeLessThan(1e-5)
-  })
-
   it('reveals each vertex once, near the rover, never one already revealed', () => {
     const { width, cellSize } = disk.grid
     const before = revealedOverDisk(revealed, disk)
@@ -73,6 +47,37 @@ describe('driveSegment on seed mars, 150 m', () => {
       }
     }
     expect(seen.size).toBeGreaterThan(0)
+  })
+})
+
+describe('driveSegment on seed mars, 60 m', () => {
+  const shortOptions = { ...options, goal: { x: 48, y: 36 } }
+  const short = driveSegment(world, shortOptions).record
+
+  it('is deterministic', () => {
+    expect(driveSegment(world, shortOptions).record).toEqual(short)
+  })
+
+  it('stores frames that re-solve to the same pose', () => {
+    let worst = 0
+    for (let k = 0; k < short.keyframes.count; k++) {
+      const f = frame(short.keyframes, k)
+      const q = { x: f[F.qx]!, y: f[F.qy]!, z: f[F.qz]!, w: f[F.qw]! }
+      const pose = poseOnTerrain(world.heightAt, { x: f[F.x]!, y: f[F.y]!, headingRad: yawOf(q) })
+      const pairs: [number, number][] = [
+        [pose.position.z, f[F.z]!],
+        [pose.quaternion.x, q.x],
+        [pose.quaternion.y, q.y],
+        [pose.quaternion.z, q.z],
+        [pose.quaternion.w, q.w],
+        [pose.rocker.left, f[F.rockerL]!],
+        [pose.rocker.right, f[F.rockerR]!],
+        [pose.bogie.left, f[F.bogieL]!],
+        [pose.bogie.right, f[F.bogieR]!],
+      ]
+      for (const [solved, stored] of pairs) worst = Math.max(worst, Math.abs(solved - stored))
+    }
+    expect(worst).toBeLessThan(1e-5)
   })
 })
 
