@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import { getMission } from '#server/repositories/missions'
+import { getOpenRound, getRound } from '#server/repositories/rounds'
 import { JUDGE_UNAVAILABLE, JudgeError } from '#server/utils/jev/errors'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { LifecycleError } from '#server/utils/mission/errors'
@@ -77,7 +78,7 @@ describe('syncMission', () => {
     expect(tickMission).not.toHaveBeenCalled()
   })
 
-  it('ticks a read once the next due instant has passed', async () => {
+  it('answers a due read at once and ticks it in the background, without waiting for the lock', async () => {
     const m = await landed()
     const [ada] = await users(db, 'Ada')
     await submitGoal(db, {
@@ -88,9 +89,54 @@ describe('syncMission', () => {
       goal: { x: 0, y: 80 },
       now: at(T0, MINUTE),
     })
-    const tick = await m.sync('read', at(T0, 6 * MINUTE))
-    expect(tickMission).toHaveBeenCalledTimes(1)
-    expect(tick?.started).not.toBeNull()
+    const { tickMission: actual } = await vi.importActual<
+      typeof import('#server/utils/mission/tick')
+    >('#server/utils/mission/tick')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    vi.mocked(tickMission).mockImplementationOnce(async (...args) => {
+      await gate
+      return actual(...args)
+    })
+    const kept: Promise<unknown>[] = []
+    vi.stubGlobal('Netlify', { context: { waitUntil: (p: Promise<unknown>) => kept.push(p) } })
+    vi.stubEnv('NETLIFY', 'true')
+    try {
+      // The tick cannot finish until released, yet the read has answered.
+      expect(await m.sync('read', at(T0, 6 * MINUTE))).toBeNull()
+      expect(tickMission).toHaveBeenCalledWith(db, expect.objectContaining({ lock: 'try' }))
+      expect(kept).toHaveLength(1)
+      expect(await getOpenRound(db, m.mission.id)).toMatchObject({ id: m.round.id })
+      release()
+      await kept[0]
+      expect((await getRound(db, m.round.id)).status).toBe('closed')
+      expect(purge).toHaveBeenCalledWith({ tags: [`mission-${m.mission.id}`] })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('logs a background tick that fails, and the read still answers', async () => {
+    const m = await landed()
+    vi.mocked(tickMission).mockRejectedValueOnce(new Error('the tick broke'))
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const kept: Promise<unknown>[] = []
+    vi.stubGlobal('Netlify', { context: { waitUntil: (p: Promise<unknown>) => kept.push(p) } })
+    try {
+      const due = { id: m.mission.id, nextDueAt: at(T0, MINUTE) }
+      const read = await syncMission(db, {
+        mission: due,
+        access: 'read',
+        store: m.store,
+        jev: m.jev.client,
+        now: at(T0, 2 * MINUTE),
+      })
+      expect(read).toBeNull()
+      await kept[0]
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining(m.mission.id), expect.any(Error))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('always ticks a write', async () => {

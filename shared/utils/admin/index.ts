@@ -1,17 +1,51 @@
-/** What `POST /api/admin/diagnose` answers: one section per dependency, each failing alone. */
+/**
+ * What `POST /api/admin/diagnose` answers: one section per dependency, each failing alone. `ms`
+ * is how long a section's probe ran, whether it succeeded, failed or timed out.
+ */
 export interface DatabaseDiagnosis {
   ok: boolean
   /** The failing error's class and Postgres code; never its message, which may carry the DSN. */
   error?: string
+  ms: number
   /** Names recorded in `netlify.migrations`; empty until the table exists. */
   migrations: string[]
   /** Row counts of the app's tables that exist, by table name. */
   tables: Record<string, number>
 }
 
+/** A session of the database that has held a transaction open for longer than it should. */
+export interface StuckSession {
+  pid: number
+  /** `pg_stat_activity.state`, such as `idle in transaction`. */
+  state: string
+  /** `Lock` while it waits on a lock; null while it runs or idles. */
+  waitEventType: string | null
+  /** Age of its open transaction, seconds. */
+  ageS: number
+  /** Whether it holds an advisory lock, as a tick holds its mission's. */
+  holdsAdvisoryLock: boolean
+}
+
+/** The sessions of the app's database, from `pg_stat_activity`; never their query text. */
+export interface LocksDiagnosis {
+  ok: boolean
+  error?: string
+  ms: number
+  /** Sessions by state. */
+  states: Record<string, number>
+  /** Age of the oldest open transaction, seconds; null when none is open. */
+  oldestTransactionS: number | null
+  /**
+   * Sessions whose transaction has been open over 5 s while they wait on a lock, idle in it, or
+   * hold an advisory lock; oldest first.
+   */
+  stuck: StuckSession[]
+}
+
 export interface BlobsDiagnosis {
   ok: boolean
   error?: string
+  ms: number
   /** Keys under `missions/` and `terrain/`, at most 1000. */
   keys: number
 }
@@ -31,14 +65,21 @@ export interface RuntimeDiagnosis {
  */
 export interface MissionDiagnosis {
   ok: boolean
+  ms: number
   /** Whether an active mission row exists. */
   active: boolean
+  /**
+   * Why the read's tick left something due undone: `busy` while another tick held the mission
+   * lock, `changed` when the mission moved while the tick prepared.
+   */
+  skipped?: 'busy' | 'changed'
   /** Error class, Postgres code and message of the failing step, plus the first stack line. */
   error?: { name: string; code?: string; message: string; at?: string }
 }
 
 export interface Diagnosis {
   database: DatabaseDiagnosis
+  locks: LocksDiagnosis
   blobs: BlobsDiagnosis
   mission: MissionDiagnosis
   runtime: RuntimeDiagnosis

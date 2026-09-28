@@ -8,18 +8,26 @@ import type {
   BlobsDiagnosis,
   DatabaseDiagnosis,
   Diagnosis,
+  LocksDiagnosis,
   MissionDiagnosis,
   RuntimeDiagnosis,
+  StuckSession,
 } from '#shared/utils/admin'
 import { getActiveMission } from '../../repositories/missions'
 import { useJevClient } from '../jev'
-import { syncMission } from '../mission/http'
+import { isMissionDue } from '../mission/http'
 import { publicMissionState } from '../mission/state'
+import { tickMission } from '../mission/tick'
 import type { AdminContext, AdminSettings } from './access'
 import { noStore, PLATFORM, readAdminBody } from './access'
 
-/** Each probe gives up after this long, so a hung dependency still leaves an answer. */
-const PROBE_TIMEOUT_MS = 5000
+/**
+ * Each probe gives up after this long, so a hung dependency still leaves an answer. The probes
+ * run side by side, so the answer comes within it, under the function's own time limit.
+ */
+const PROBE_TIMEOUT_MS = 12_000
+/** A transaction open longer than this while waiting, idle or holding an advisory lock is stuck. */
+const STUCK_AFTER_S = 5
 /** Blob prefixes the app writes under. */
 const BLOB_PREFIXES = ['missions/', 'terrain/']
 /** The blob count stops at this. */
@@ -29,11 +37,16 @@ class ProbeTimeout extends Error {
   override name = 'ProbeTimeout'
 }
 
-/** Runs `probe` against the timeout; whatever it collected before failing stays collected. */
+/**
+ * Runs `probe` against the timeout, timing it; whatever it collected before failing stays
+ * collected.
+ */
 async function run(
   probe: () => Promise<void>,
-): Promise<{ ok: boolean; error?: string; detail?: MissionDiagnosis['error'] }> {
+): Promise<{ ok: boolean; ms: number; error?: string; detail?: MissionDiagnosis['error'] }> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  const started = performance.now()
+  const ms = () => Math.round(performance.now() - started)
   try {
     await Promise.race([
       probe(),
@@ -41,12 +54,17 @@ async function run(
         timer = setTimeout(() => reject(new ProbeTimeout()), PROBE_TIMEOUT_MS)
       }),
     ])
-    return { ok: true }
+    return { ok: true, ms: ms() }
   } catch (error) {
-    return { ok: false, error: describe(error), detail: detailOf(error) }
+    return { ok: false, ms: ms(), error: describe(error), detail: detailOf(error) }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** The rows of `query`, as both platform drivers answer them. */
+async function rowsOf<T>(db: DB, query: ReturnType<typeof sql>): Promise<T[]> {
+  return ((await db.execute(query)) as { rows: T[] }).rows
 }
 
 /** Everything an operator needs to name the failing step; only ever sent behind the admin token. */
@@ -106,25 +124,33 @@ export async function diagnoseMission(
   open: () => JourneyStore,
 ): Promise<MissionDiagnosis> {
   let active = false
+  let skipped: MissionDiagnosis['skipped']
   const result = await run(async () => {
     const db = connect()
     const mission = await getActiveMission(db)
     if (!mission) return
     active = true
     const now = new Date()
-    await syncMission(db, {
-      mission,
-      access: 'read',
-      store: open(),
-      jev: useJevClient(),
-      now,
-    })
+    // Awaited, unlike a public read's, so a failing tick is reported here with its step.
+    if (isMissionDue(mission, now)) {
+      const tick = await tickMission(db, {
+        missionId: mission.id,
+        store: open(),
+        jev: useJevClient(),
+        now,
+        lock: 'try',
+      })
+      skipped = tick.skipped
+    }
     await publicMissionState(db, { missionId: mission.id, now })
   })
-  if (result.ok) return { ok: true, active }
+  const { ok, ms } = result
+  if (ok) return { ok, ms, active, ...(skipped && { skipped }) }
   return {
-    ok: false,
+    ok,
+    ms,
     active,
+    ...(skipped && { skipped }),
     error: result.detail ?? { name: result.error ?? 'Error', message: '' },
   }
 }
@@ -135,8 +161,7 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
   const tables: Record<string, number> = {}
   const outcome = await run(async () => {
     const db = connect()
-    const rows = async <T>(query: ReturnType<typeof sql>) =>
-      ((await db.execute(query)) as { rows: T[] }).rows
+    const rows = <T>(query: ReturnType<typeof sql>) => rowsOf<T>(db, query)
     const [tracking] = await rows<{ present: boolean }>(
       sql`select to_regclass('netlify.migrations') is not null as present`,
     )
@@ -161,7 +186,47 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
       tables[name] = row?.n ?? 0
     }
   })
-  return { ok: outcome.ok, ...(outcome.error && { error: outcome.error }), migrations, tables }
+  const { ok, ms, error } = outcome
+  return { ok, ...(error && { error }), ms, migrations, tables }
+}
+
+/**
+ * The sessions of the app's database: how many are in each state, the oldest open transaction,
+ * and the {@link StuckSession}s. A tick killed while holding its mission lock leaves its session
+ * idle in transaction until the database drops it, and every tick after it waits; this is where
+ * that shows. Query text is never read: it can quote data.
+ */
+export async function diagnoseLocks(connect: () => DB): Promise<LocksDiagnosis> {
+  const states: Record<string, number> = {}
+  let oldestTransactionS: number | null = null
+  const stuck: StuckSession[] = []
+  const outcome = await run(async () => {
+    const sessions = await rowsOf<Omit<StuckSession, 'ageS'> & { ageS: number | null }>(
+      connect(),
+      sql`select a.pid, a.state, a.wait_event_type as "waitEventType",
+            extract(epoch from clock_timestamp() - a.xact_start)::float8 as "ageS",
+            exists (
+              select 1 from pg_locks l
+              where l.pid = a.pid and l.locktype = 'advisory' and l.granted
+            ) as "holdsAdvisoryLock"
+          from pg_stat_activity a
+          where a.datname = current_database() and a.state is not null`,
+    )
+    for (const session of sessions) {
+      states[session.state] = (states[session.state] ?? 0) + 1
+      const { ageS } = session
+      if (ageS === null) continue
+      oldestTransactionS = Math.max(oldestTransactionS ?? 0, ageS)
+      const waiting = session.waitEventType === 'Lock'
+      const idle = session.state.startsWith('idle in transaction')
+      if (ageS > STUCK_AFTER_S && (waiting || idle || session.holdsAdvisoryLock)) {
+        stuck.push({ ...session, ageS })
+      }
+    }
+    stuck.sort((a, b) => b.ageS - a.ageS)
+  })
+  const { ok, ms, error } = outcome
+  return { ok, ...(error && { error }), ms, states, oldestTransactionS, stuck }
 }
 
 export async function diagnoseBlobs(open: () => JourneyStore): Promise<BlobsDiagnosis> {
@@ -170,11 +235,8 @@ export async function diagnoseBlobs(open: () => JourneyStore): Promise<BlobsDiag
     const store = open()
     for (const prefix of BLOB_PREFIXES) keys += (await store.listKeys(prefix)).length
   })
-  return {
-    ok: outcome.ok,
-    ...(outcome.error && { error: outcome.error }),
-    keys: outcome.ok ? Math.min(keys, MAX_BLOB_KEYS) : 0,
-  }
+  const { ok, ms, error } = outcome
+  return { ok, ...(error && { error }), ms, keys: ok ? Math.min(keys, MAX_BLOB_KEYS) : 0 }
 }
 
 export function diagnoseRuntime(settings: AdminSettings): RuntimeDiagnosis {
@@ -199,13 +261,15 @@ export function defineAdminDiagnoseHandlerWith(context: AdminContext) {
   return defineHandler(async (event) => {
     noStore(event)
     await readAdminBody(event, context)
-    const [database, blobs] = await Promise.all([
+    const [database, locks, blobs, mission] = await Promise.all([
       diagnoseDatabase(context.db),
+      diagnoseLocks(context.db),
       diagnoseBlobs(context.store),
+      diagnoseMission(context.db, context.store),
     ])
-    const mission = await diagnoseMission(context.db, context.store)
     return {
       database,
+      locks,
       blobs,
       mission,
       runtime: diagnoseRuntime(context.settings()),

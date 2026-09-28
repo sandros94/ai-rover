@@ -1,19 +1,28 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { SQL } from 'drizzle-orm'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
+import { DbError } from '#server/database/errors'
 import { like } from '#server/repositories/likes'
 import { getMission } from '#server/repositories/missions'
 import { getOpenRound, getRound } from '#server/repositories/rounds'
-import { getSegment } from '#server/repositories/segments'
+import { getDrivingSegment, getSegment } from '#server/repositories/segments'
+import { listStops } from '#server/repositories/stops'
 import { flagSegment } from '#server/repositories/flags'
 import { countLikes } from '#server/repositories/likes'
 import { getSubmission, withdrawSubmission } from '#server/repositories/submissions'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
+import { createJevClient, JEV_SERVER_LIMITS } from '#server/utils/jev/client'
+import { JudgeError } from '#server/utils/jev/errors'
+import { httpErrorOf } from '#server/utils/mission/http'
 import { tickMission } from '#server/utils/mission/tick'
 import { stopPrimeKeys } from '#server/utils/journey/prime'
+import type { JourneyStore } from '#server/utils/journey/store'
 import { decodeSlice, DriveError, segmentSliceKey } from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
+import { memoryJevCache } from '../jev/helpers'
 import { forced, stopShortAt } from './forced'
 import {
   at,
@@ -35,7 +44,27 @@ vi.setConfig({ testTimeout: 60_000 })
 /** SQL of every query run, in order; tests slice it around the call they look at. */
 const queries: string[] = []
 /** Top-level transactions, Jev requests and CDN priming requests, in the order they happened. */
-const events: ('begin' | 'end' | 'jev' | 'prime')[] = []
+const events: ('begin' | 'end' | 'jev' | 'prime' | 'put')[] = []
+/** Runs before every blob write of a mission's store, with the key written. */
+let onPut: ((key: string) => unknown) | undefined
+afterEach(() => {
+  onPut = undefined
+})
+
+/** `store`, calling {@link onPut} before each write. */
+function hooked(store: JourneyStore): JourneyStore {
+  return {
+    ...store,
+    putImmutable: async (key, bytes, options) => {
+      await onPut?.(key)
+      return store.putImmutable(key, bytes, options)
+    },
+    putJson: async (key, value) => {
+      await onPut?.(key)
+      return store.putJson(key, value)
+    },
+  }
+}
 
 let raw: DB
 let db: DB
@@ -65,7 +94,7 @@ afterAll(() => close())
 type Judge = NonNullable<Parameters<typeof fakeJev>[0]>
 
 async function landed(judge: Judge = () => ({})) {
-  const { store } = memoryStore()
+  const store = hooked(memoryStore().store)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',
@@ -129,7 +158,8 @@ describe('priming the CDN', () => {
       expect(primed).toEqual(
         stopPrimeKeys(m.missionId, 1).map((key) => `https://rover.example/journey/${key}`),
       )
-      expect(events.indexOf('prime')).toBeGreaterThan(events.lastIndexOf('end'))
+      // After the settlement's transaction; the close it made due runs in a second one.
+      expect(events.indexOf('prime')).toBeGreaterThan(events.indexOf('end'))
     } finally {
       vi.unstubAllEnvs()
       vi.unstubAllGlobals()
@@ -150,9 +180,59 @@ describe('settling a drive that stopped short', () => {
     for (const event of events) {
       if (event === 'begin') depth++
       else if (event === 'end') depth--
-      else open.push(depth)
+      else if (event === 'jev') open.push(depth)
     }
     expect(open).toEqual([0, 0])
+  })
+
+  it('fails as UPSTREAM, before any transaction, when a re-judgment never answers', async () => {
+    const m = await stoppingShort()
+    // A request that never answers, as fetch does until it is aborted.
+    let requests = 0
+    const silent = (_input: string, init?: RequestInit) => (
+      requests++,
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+      })
+    )
+    const jev = createJevClient({
+      apiKey: 'k',
+      fetch: silent,
+      cache: memoryJevCache().cache,
+      ...JEV_SERVER_LIMITS,
+    })
+    events.length = 0
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const failure = tickMission(db, {
+        store: m.store,
+        jev,
+        missionId: m.missionId,
+        now: m.driving.endsAt,
+      }).catch((error: unknown) => error)
+      let settled = false
+      void failure.then(() => (settled = true))
+      // The clock moves only once Jev is asked and between real I/O turns, so every query still
+      // answers; bounded by every attempt and the backoff between them.
+      const limit = (JEV_SERVER_LIMITS.maxRetries + 1) * JEV_SERVER_LIMITS.timeoutMs + 10_000
+      let waited = 0
+      while (!settled && waited <= limit) {
+        await new Promise((resolve) => setImmediate(resolve))
+        if (requests === 0) continue
+        await vi.advanceTimersByTimeAsync(500)
+        waited += 500
+      }
+      const error = await failure
+      expect(error).toBeInstanceOf(JudgeError)
+      expect((error as JudgeError).code).toBe('UPSTREAM')
+      // One attempt and one retry, each given up at the timeout.
+      expect(requests).toBe(JEV_SERVER_LIMITS.maxRetries + 1)
+      expect(waited).toBeGreaterThanOrEqual(requests * JEV_SERVER_LIMITS.timeoutMs)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(events).not.toContain('begin')
+    expect((await getSegment(db, m.driving.id)).status).toBe('driving')
   })
 
   it('keeps settling when a waiting submission is withdrawn while it is judged again', async () => {
@@ -251,7 +331,7 @@ describe('closing a round', () => {
     queries.length = 0
     expect((await m.tick(at(T0, 6 * MINUTE))).closed).not.toBeNull()
     const lock = queries.findIndex((q) => /from "round".* for update/s.test(q))
-    const standings = queries.findIndex((q) => /"submission_like"/.test(q))
+    const standings = queries.findIndex((q, k) => k > lock && /"submission_like"/.test(q))
     expect(lock).toBeGreaterThanOrEqual(0)
     expect(standings).toBeGreaterThan(lock)
   })
@@ -398,5 +478,191 @@ describe('a drive that stops moving', () => {
     expect(await m.store.has(segmentSliceKey(driving.id, 70))).toBe(true)
     expect(await m.store.has(segmentSliceKey(driving.id, 71))).toBe(false)
     expect((await m.tick(driving.endsAt)).settled?.status).toBe('failed')
+  })
+})
+
+describe('the mission lock', () => {
+  /** How many transactions were open at each blob write, in order. */
+  function depthAtPuts(): number[] {
+    let depth = 0
+    const at: number[] = []
+    for (const event of events) {
+      if (event === 'begin') depth++
+      else if (event === 'end') depth--
+      else if (event === 'put') at.push(depth)
+    }
+    return at
+  }
+
+  it('publishes the stop reached and the next drive before taking it', async () => {
+    const m = await stoppingShort()
+    events.length = 0
+    onPut = () => events.push('put')
+    const tick = await m.tick(m.driving.endsAt)
+    expect(tick.settled?.status).toBe('stopped-short')
+    expect(tick.started).not.toBeNull()
+    // The stop's blobs before the settlement's transaction, the drive's before the close's.
+    const [settling, closing] = [events.indexOf('begin'), events.lastIndexOf('begin')]
+    expect(closing).toBeGreaterThan(settling)
+    expect(events.slice(0, settling)).toContain('put')
+    expect(events.slice(events.indexOf('end'), closing)).toContain('put')
+    expect(depthAtPuts().every((depth) => depth === 0)).toBe(true)
+  })
+
+  it('drops a prepared close whose ranking changed meanwhile, writing nothing, and redoes it', async () => {
+    const m = await landed()
+    const first = await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const second = await m.submit(m.bob.id, { x: -80, y: 80 }, at(T0, 2 * MINUTE))
+    // While Ada's drive is published, a like puts Bob's goal ahead.
+    let liked = false
+    onPut = async (key) => {
+      if (liked || !key.startsWith('segments/')) return
+      liked = true
+      await like(db, second.submission!.id, { userId: m.cy.id })
+    }
+    const now = at(T0, 6 * MINUTE)
+    const tick = await m.tick(now)
+    expect(liked).toBe(true)
+    expect(tick).toEqual({
+      settled: null,
+      closed: null,
+      started: null,
+      opened: null,
+      skipped: 'changed',
+    })
+    expect(await getRound(db, m.round.id)).toMatchObject({ status: 'open' })
+    expect(await getDrivingSegment(db, m.missionId)).toBeUndefined()
+    for (const { submission } of [first, second]) {
+      expect((await getSubmission(db, submission!.id)).status).toBe('open')
+    }
+    // Still due, so the next tick prepares again and closes on the ranking as it stands.
+    expect((await getMission(db, m.missionId)).nextDueAt!.getTime()).toBeLessThanOrEqual(
+      now.getTime(),
+    )
+    const again = await m.tick(now)
+    expect(again.closed).toEqual({
+      roundId: m.round.id,
+      winnerSubmissionId: second.submission!.id,
+    })
+  })
+
+  it('applies nothing when another tick settled the drive while this one prepared it', async () => {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const driving = await getSegment(db, (await m.tick(at(T0, 6 * MINUTE))).started!.segmentId)
+    let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
+    onPut = async (key) => {
+      if (meanwhile || !key.startsWith(`missions/${m.missionId}/`)) return
+      onPut = undefined
+      meanwhile = await m.tick(driving.endsAt)
+    }
+    const tick = await m.tick(driving.endsAt)
+    expect(meanwhile?.settled).toEqual({ segmentId: driving.id, status: 'arrived' })
+    expect(tick).toMatchObject({ settled: null, closed: null, started: null, opened: null })
+    expect((await listStops(db, m.missionId)).map((stop) => stop.index)).toEqual([0, 1])
+  })
+
+  /**
+   * `db`, whose transactions answer `lock` for the mission lock statement instead of running it:
+   * the in-memory database is a single session, so a lock held elsewhere cannot be staged.
+   */
+  function contended(lock: (statement: string) => unknown): DB {
+    const dialect = new PgDialect()
+    const wrap = (tx: DB) =>
+      new Proxy(tx, {
+        get(target, prop) {
+          if (prop !== 'execute') {
+            const value = Reflect.get(target, prop, target) as unknown
+            return typeof value === 'function' ? value.bind(target) : value
+          }
+          return async (query: SQL) => {
+            const statement = dialect.sqlToQuery(query).sql
+            if (/pg_(try_)?advisory_xact_lock/.test(statement)) return lock(statement)
+            return target.execute(query)
+          }
+        },
+      })
+    return new Proxy(raw, {
+      get(target, prop) {
+        if (prop === 'transaction') {
+          return (apply: (tx: DB) => Promise<unknown>) =>
+            target.transaction((tx) => apply(wrap(tx as unknown as DB)))
+        }
+        const value = Reflect.get(target, prop, target) as unknown
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }
+
+  /** A lock wait past `lock_timeout`, as the driver reports it. */
+  function lockTimeout(): Error {
+    const cause = Object.assign(new Error('canceling statement due to lock timeout'), {
+      code: '55P03',
+    })
+    return new Error('Failed query: select pg_advisory_xact_lock(...)', { cause })
+  }
+
+  it('bounds every lock wait of a tick at 8 s', async () => {
+    const m = await landed()
+    queries.length = 0
+    await m.tick(at(T0, MINUTE))
+    const timeout = queries.findIndex((q) => q === "set local lock_timeout = '8s'")
+    const lock = queries.findIndex((q) => /pg_advisory_xact_lock/.test(q))
+    expect(timeout).toBeGreaterThanOrEqual(0)
+    expect(lock).toBeGreaterThan(timeout)
+  })
+
+  it('skips a tick that does not wait while the lock is held, applying nothing', async () => {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const busy = contended(() => ({ rows: [{ locked: false }] }))
+    const now = at(T0, 6 * MINUTE)
+    const tick = await tickMission(busy, {
+      store: m.store,
+      jev: m.jev.client,
+      missionId: m.missionId,
+      now,
+      lock: 'try',
+    })
+    expect(tick).toEqual({
+      settled: null,
+      closed: null,
+      started: null,
+      opened: null,
+      skipped: 'busy',
+    })
+    expect(await getRound(db, m.round.id)).toMatchObject({ status: 'open' })
+    expect((await m.tick(now)).closed).not.toBeNull()
+  })
+
+  it('skips a tick that does not wait when a lock wait times out', async () => {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 80 }, at(T0, MINUTE))
+    const slow = contended(() => Promise.reject(lockTimeout()))
+    const tick = await tickMission(slow, {
+      store: m.store,
+      jev: m.jev.client,
+      missionId: m.missionId,
+      now: at(T0, 6 * MINUTE),
+      lock: 'try',
+    })
+    expect(tick.skipped).toBe('busy')
+  })
+
+  it('fails a waiting tick past the lock timeout as BUSY, answered 503 with retry-after', async () => {
+    const m = await landed()
+    const slow = contended(() => Promise.reject(lockTimeout()))
+    const failure = await tickMission(slow, {
+      store: m.store,
+      jev: m.jev.client,
+      missionId: m.missionId,
+      now: at(T0, MINUTE),
+    }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(DbError)
+    expect((failure as DbError).code).toBe('BUSY')
+    const answer = httpErrorOf(failure)
+    expect(answer.status).toBe(503)
+    expect(answer.body).toEqual({ code: 'BUSY' })
+    expect(answer.headers?.get('retry-after')).toBe('5')
   })
 })

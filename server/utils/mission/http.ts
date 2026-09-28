@@ -29,6 +29,7 @@ const STATUS: Record<string, Record<string, number>> = {
     INVALID_STATE: 409,
     ROUND_CHANGED: 409,
     USER_GONE: 401,
+    BUSY: 503,
   },
   LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, MISSION_PAUSED: 423 },
   MissionError: { INVALID_INPUT: 400 },
@@ -37,6 +38,9 @@ const STATUS: Record<string, Record<string, number>> = {
   JudgeError: { NOT_CONFIGURED: 503, UPSTREAM: 502 },
 }
 
+/** Seconds a client is told to wait before retrying an answer of {@link DbError} `BUSY`. */
+const BUSY_RETRY_AFTER_S = 5
+
 /** What a signed-in visitor whose account was deleted is told. */
 export const USER_GONE_MESSAGE = 'Your account no longer exists; sign in again.'
 
@@ -44,7 +48,7 @@ export const USER_GONE_MESSAGE = 'Your account no longer exists; sign in again.'
  * The HTTP answer for anything a mission route throws: typed errors carry their `code` and
  * message; anything else is logged and answered as a bare 500 so no internals leak. An upstream
  * Jev failure answers its fixed message and logs its cause. A write refused because its user's
- * account is gone answers as {@link DbError} `USER_GONE`.
+ * account is gone answers as {@link DbError} `USER_GONE`. `BUSY` carries `retry-after`.
  */
 export function httpErrorOf(thrown: unknown): HTTPError {
   if (HTTPError.isError(thrown)) return thrown
@@ -63,10 +67,12 @@ export function httpErrorOf(thrown: unknown): HTTPError {
     if (error instanceof JudgeError && error.code === 'UPSTREAM') {
       console.error('[jev] judgment service failed:', error.cause)
     }
+    const busy = error instanceof DbError && error.code === 'BUSY'
     return new HTTPError({
       status,
       message: error.message,
       body: { code: error.code },
+      ...(busy && { headers: { 'retry-after': String(BUSY_RETRY_AFTER_S) } }),
       cause: error,
     })
   }
@@ -83,9 +89,10 @@ const LAZY_JEV: JevClient = {
 }
 
 /**
- * What a mission route does to the mission. `read`: brings it up to date only when something is
- * due, so a poll takes no lock while nothing happens. `write`: always brings it up to date first,
- * under the lock, and purges the cached public state afterwards.
+ * What a mission route does to the mission. `read`: answers the state committed so far at once
+ * and, only when something is due, brings the mission up to date in the background, so no read
+ * waits for a tick. `write`: always brings it up to date first, waiting for the lock, and purges
+ * the cached public state afterwards.
  */
 export type MissionAccess = 'read' | 'write'
 
@@ -125,10 +132,28 @@ export async function purgeMissionCache(missionId: string): Promise<void> {
   }
 }
 
+/** Whether a tick has something to do at `now`, from the recorded next due instant alone. */
+export function isMissionDue(mission: Pick<Mission, 'nextDueAt'>, now: Date): boolean {
+  return mission.nextDueAt !== null && mission.nextDueAt.getTime() <= now.getTime()
+}
+
 /**
- * Brings the mission up to `now` as a route of `access` needs; null when a read found nothing
- * due and did not tick. A read reads the recorded next due instant without any lock.
+ * Brings the mission up to `now` as a route of `access` needs. A write ticks, waiting for the
+ * mission lock, and answers what the tick did. A read answers null at once: when the mission is
+ * due it starts a tick that does not wait for the lock, not awaited, which the platform keeps
+ * alive until it settles; its failure is logged and a change it makes purges the cached state.
+ * Concurrent reads so never stack on the lock: the first takes it, the others skip.
  */
+export async function syncMission<A extends MissionAccess>(
+  db: DB,
+  options: {
+    mission: Pick<Mission, 'id' | 'nextDueAt'>
+    access: A
+    store: JourneyStore
+    jev: JevClient
+    now: Date
+  },
+): Promise<A extends 'write' ? TickResult : null>
 export async function syncMission(
   db: DB,
   options: {
@@ -140,13 +165,29 @@ export async function syncMission(
   },
 ): Promise<TickResult | null> {
   const { mission, access, store, jev, now } = options
-  const due = mission.nextDueAt !== null && mission.nextDueAt.getTime() <= now.getTime()
-  if (access === 'read' && !due) return null
-  return tickMission(db, { missionId: mission.id, store, jev, now })
+  if (access === 'write') return tickMission(db, { missionId: mission.id, store, jev, now })
+  if (!isMissionDue(mission, now)) return null
+  const ticking = tickMission(db, { missionId: mission.id, store, jev, now, lock: 'try' })
+    .then(async (tick) => {
+      if (tick.skipped)
+        console.warn(`[mission] tick of mission ${mission.id} ${SKIPPED[tick.skipped]}`)
+      if (changed(tick)) await purgeMissionCache(mission.id)
+    })
+    .catch((error: unknown) => {
+      console.error(`[mission] background tick of mission ${mission.id} failed:`, error)
+    })
+  globalThis.Netlify?.context?.waitUntil(ticking)
+  return null
 }
 
-function changed(tick: TickResult | null): boolean {
-  return tick !== null && Object.values(tick).some((step) => step !== null)
+const SKIPPED: Record<NonNullable<TickResult['skipped']>, string> = {
+  busy: 'skipped: another tick holds the mission lock',
+  changed: 'skipped: the mission moved while it was prepared; the next tick redoes it',
+}
+
+function changed(tick: TickResult): boolean {
+  const { settled, closed, started, opened } = tick
+  return [settled, closed, started, opened].some((step) => step !== null)
 }
 
 /** What mission routes reach beyond the request; tests pass their own. */
@@ -178,10 +219,9 @@ export async function requireSessionUser(
 }
 
 /**
- * A mission route: errors mapped by {@link httpErrorOf}, and the mission brought up to date
- * before the handler runs per `access`, so every read and write sees the state the lazy trigger
- * implies at `now`. A write, or a read whose tick changed something, purges the cached public
- * state once done. Only a successful answer of a `public` route is cacheable. With `user`, the
+ * A mission route: errors mapped by {@link httpErrorOf}, and the mission brought up to date per
+ * `access` (see {@link syncMission}): before a write's handler runs, in the background of a read,
+ * which answers the state committed so far. A write purges the cached public state once done. Only a successful answer of a `public` route is cacheable. With `user`, the
  * signed-in account is resolved before anything else and handed over; an answer of `USER_GONE`,
  * from there or from a write, also clears the session so the browser signs in afresh.
  */
@@ -200,7 +240,8 @@ export type MissionRouteHandler<T, A extends MissionAccess, U extends boolean> =
     /** Created only when a judgment is needed, so routes work without a key until then. */
     jev: JevClient
     now: Date
-    tick: A extends 'write' ? TickResult : TickResult | null
+    /** What the write's tick did; a read never waits for one. */
+    tick: A extends 'write' ? TickResult : null
     /** The signed-in account, for a route defined with `user`. */
     user: U extends true ? UserAccount : null
   },
@@ -232,13 +273,13 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
         jev: LAZY_JEV,
         now,
       })
-      if (options.access === 'write' || changed(tick)) purge = mission.id
+      if (options.access === 'write') purge = mission.id
       const result = await handler(event, {
         missionId: mission.id,
         store,
         jev: LAZY_JEV,
         now,
-        tick: tick as A extends 'write' ? TickResult : TickResult | null,
+        tick: tick as A extends 'write' ? TickResult : null,
         user: user as U extends true ? UserAccount : null,
       })
       const headers = missionCacheHeaders(mission.id, options.cache, options)

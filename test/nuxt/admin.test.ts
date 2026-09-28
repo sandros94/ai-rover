@@ -85,9 +85,30 @@ describe('admin page', () => {
   it('runs diagnostics with the token and marks each section', async () => {
     diagnosis = () =>
       json(200, {
-        database: { ok: false, error: 'DatabaseError (28P01)', migrations: [], tables: {} },
-        blobs: { ok: true, keys: 12 },
-        mission: { ok: true, active: false },
+        database: {
+          ok: false,
+          error: 'DatabaseError (28P01)',
+          ms: 12_004,
+          migrations: [],
+          tables: {},
+        },
+        locks: {
+          ok: true,
+          ms: 41,
+          states: { 'active': 2, 'idle in transaction': 1 },
+          oldestTransactionS: 93.25,
+          stuck: [
+            {
+              pid: 4242,
+              state: 'idle in transaction',
+              waitEventType: null,
+              ageS: 93.25,
+              holdsAdvisoryLock: true,
+            },
+          ],
+        },
+        blobs: { ok: true, ms: 230, keys: 12 },
+        mission: { ok: true, ms: 380, active: true, skipped: 'busy' },
         runtime: {
           node: 'v24.0.0',
           region: 'eu-central-1',
@@ -106,6 +127,15 @@ describe('admin page', () => {
     const database = wrapper.find('[data-test=diagnosis-database]')
     expect(database.attributes('data-ok')).toBe('false')
     expect(database.text()).toContain('DatabaseError (28P01)')
+    expect(database.text()).toContain('12004 ms')
+    const locks = wrapper.find('[data-test=diagnosis-locks]')
+    expect(locks.attributes('data-ok')).toBe('false')
+    expect(locks.text()).toContain('idle in transaction 1')
+    expect(locks.text()).toContain('Oldest transaction: 93.3 s')
+    expect(locks.text()).toContain('pid 4242, idle in transaction, 93.3 s, holds an advisory lock')
+    const mission = wrapper.find('[data-test=diagnosis-mission]')
+    expect(mission.text()).toContain('another tick holds the mission lock')
+    expect(mission.text()).toContain('380 ms')
     const blobs = wrapper.find('[data-test=diagnosis-blobs]')
     expect(blobs.attributes('data-ok')).toBe('true')
     expect(blobs.text()).toContain('12')

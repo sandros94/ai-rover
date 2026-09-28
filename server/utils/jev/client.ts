@@ -57,6 +57,12 @@ export interface JevCache {
   set(hash: string, value: JudgedAnswers): Promise<void>
 }
 
+/**
+ * The server's limits on a Jev request: a settlement waits for its re-judgments, so a request
+ * that never answers must fail as `UPSTREAM` well within a function's lifetime.
+ */
+export const JEV_SERVER_LIMITS = { timeoutMs: 20_000, maxRetries: 1 } as const
+
 export interface JevClientOptions {
   /** Where the API lives; the public endpoint unless a test points elsewhere. */
   baseURL?: string

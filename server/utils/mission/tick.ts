@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { uuidv7 } from 'unsecure/uuid'
 import type { DB } from '../../database/db'
+import { DbError, postgresErrorOf } from '../../database/errors'
 import type { Mission, Round, Segment, SegmentStatus, Stop } from '../../database/schema'
 import { getMission, setCurrentStop } from '../../repositories/missions'
 import {
@@ -39,7 +40,6 @@ import {
   truncateRecord,
 } from '#shared/utils/mission'
 import { NavError } from '#shared/utils/nav'
-import type { RevealedMask, StopDisk } from '#shared/utils/terrain'
 import {
   computeStopDisk,
   revealDisk,
@@ -69,52 +69,137 @@ export interface TickResult {
    * candidate of a closing round could be driven.
    */
   opened: { roundId: string } | null
+  /**
+   * Why a step that was due was left to the next tick: `busy` when a tick that does not wait
+   * found the mission lock held, `changed` when the mission moved between the preparation and
+   * the lock. The state served is the one committed so far.
+   */
+  skipped?: 'busy' | 'changed'
 }
+
+/**
+ * How a tick takes the mission lock. `wait`: queues behind the tick holding it, for at most
+ * {@link LOCK_TIMEOUT}, then fails as {@link DbError} `BUSY`. `try`: never waits; when the lock
+ * or a row it needs is held, nothing is applied and the tick answers `skipped: 'busy'`.
+ */
+export type MissionLock = 'wait' | 'try'
+
+/** Postgres `lock_timeout` inside a tick's transaction. */
+const LOCK_TIMEOUT = '8s'
+/** Postgres `statement_timeout` inside a tick's transaction: a stuck query fails with its code. */
+const STATEMENT_TIMEOUT = '15s'
+/** SQLSTATE `lock_not_available`: a lock wait passed `lock_timeout`. */
+const LOCK_NOT_AVAILABLE = '55P03'
 
 interface TickContext {
   store: JourneyStore
   mission: Mission
   now: Date
-  /** Index of the stop the tick published, set once it is; primed after the commit. */
+  /** Index of the stop the tick settled, set once it is; primed after the commit. */
   published?: number
 }
 
 type Assessment = Awaited<ReturnType<typeof assessGoal>>
 
 /**
- * Everything a settlement computes before it takes the lock: the stop reached, its disk, the mask
- * with the drive's reveals and the new viewshed, and after a stop short each open submission of
- * the round beside it planned and judged again from there, keyed by submission id.
+ * What a settlement did before it took the lock: the stop reached, published under the index it
+ * takes (its disk, and the mask with the drive's reveals and the new viewshed), and after a stop
+ * short each open submission of the round beside it planned and judged again from there, keyed by
+ * submission id.
  */
 interface PreparedSettlement {
   segmentId: string
-  disk: StopDisk
-  mask: RevealedMask
+  stopIndex: number
   assessments: Map<string, Assessment>
 }
 
 /**
- * Brings a mission up to `now`, idempotently: under a per-mission lock it (0) fails the playing
- * drive as not moving once the flags and its released playback say so (see `failIfNotMoving`),
- * which only moves its private end closer, (1) settles the drive whose end has passed, which creates and publishes the stop it reached or voids the round beside
- * a failure, (2) closes the open round once its close time has passed on the best ranked
- * submission whose drive can be computed, drives it over the true terrain, publishes the drive
- * and opens the next round from the same stop, anchored on the winner's goal, and (3) records
- * when the next tick has something to do. Safe to call from every request; a second call at the
- * same `now` changes nothing. `jev` re-judges the submissions waiting beside a drive that stopped
- * short, before the lock is taken so no Jev request holds it. A stop published by the tick is
- * primed in the CDN once the transaction commits, without waiting for it (see `primeStop`).
+ * Everything closing a due round computes before it takes the lock: the round and the stop it
+ * leaves from, the candidates whose drive cannot be computed from there (ranked ahead of the
+ * winner), and the winner's drive, published under a fresh segment id; no winner when none drives.
+ */
+interface PreparedClose {
+  roundId: string
+  fromStopId: string
+  refused: Set<string>
+  winner: { submissionId: string; drive: PublishedDrive } | null
+}
+
+/** A winner's drive as published: the segment row names these. */
+interface PublishedDrive {
+  segmentId: string
+  endsAt: Date
+  manifestKey: string
+  outcome: SegmentRecord['outcome']
+}
+
+/**
+ * Brings a mission up to `now`, idempotently: it (0) fails the playing drive as not moving once
+ * the flags and its released playback say so (see `failIfNotMoving`), which only moves its
+ * private end closer, (1) settles the drive whose end has passed, which creates the stop it
+ * reached or voids the round beside a failure, (2) closes the open round once its close time has
+ * passed on the best ranked submission whose drive can be computed, starts that drive and opens
+ * the next round from the same stop, anchored on the winner's goal, and (3) records when the
+ * next tick has something to do. A settlement and the close it makes due run as two passes, the
+ * close planned from the stop the settlement committed. Safe to call from every request; a
+ * second call at the same `now` changes nothing. A stop settled by the tick is primed in the CDN
+ * once its transaction commits, without waiting for it (see `primeStop`).
+ *
+ * Only rows are written under the per-mission lock. Everything slow happens before it: Jev
+ * re-judgments, planning and simulating the winner, and every blob of the stop reached and of the
+ * winner's drive. Blobs are immutable and keyed by mission, stop and segment, so writing them
+ * first is safe: a row never names a blob that is not there, and a blob no row names is never
+ * served. Under the lock the tick checks that the mission is still where the preparation found
+ * it; otherwise it applies nothing (`skipped: 'changed'`) and the next tick prepares again.
  */
 export async function tickMission(
   db: DB,
-  options: { store: JourneyStore; jev: JevClient; missionId: string; now: Date },
+  options: {
+    store: JourneyStore
+    jev: JevClient
+    missionId: string
+    now: Date
+    lock?: MissionLock
+  },
 ): Promise<TickResult> {
-  const { store, jev, missionId, now } = options
-  const prepared = await prepareSettlement(db, { store, jev, missionId, now })
+  const result: TickResult = { settled: null, closed: null, started: null, opened: null }
+  for (let pass = 0; pass < 2; pass++) {
+    const step = await tickPass(db, options)
+    result.settled ??= step.settled
+    result.closed ??= step.closed
+    result.started ??= step.started
+    result.opened = step.opened ?? result.opened
+    if (step.skipped) result.skipped = step.skipped
+    // Only a settlement can make a close due within the same tick.
+    if (!step.settled || step.skipped) break
+  }
+  return result
+}
+
+/** One preparation, then one transaction under the mission lock applying it. */
+async function tickPass(
+  db: DB,
+  options: {
+    store: JourneyStore
+    jev: JevClient
+    missionId: string
+    now: Date
+    lock?: MissionLock
+  },
+): Promise<TickResult> {
+  const { store, jev, missionId, now, lock = 'wait' } = options
+  const idle: TickResult = { settled: null, closed: null, started: null, opened: null }
+  const snapshot = await getMission(db, missionId)
+  if (snapshot.status !== 'active') return idle
+  const moving = await getDrivingSegment(db, missionId)
+  const settlement = moving
+    ? await prepareSettlement(db, { store, jev, mission: snapshot, driving: moving, now })
+    : null
+  const closing = moving ? null : await prepareClose(db, { store, mission: snapshot, now })
+
   let published: number | undefined
-  const ticked = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${missionId}))`)
-    const result: TickResult = { settled: null, closed: null, started: null, opened: null }
+  const ticked = await underMissionLock(db, { missionId, lock }, async (tx) => {
+    const result: TickResult = { ...idle }
     const mission = await getMission(tx, missionId)
     if (mission.status !== 'active') return result
     const context: TickContext = { store, mission, now }
@@ -134,37 +219,73 @@ export async function tickMission(
     }
     // A null outcome means a producer outside the request still runs; it settles once written.
     if (driving?.outcome && driving.endsAt.getTime() <= now.getTime()) {
-      Object.assign(result, await settle(tx, context, driving, prepared))
+      Object.assign(result, await settle(tx, context, driving, settlement))
     }
-
     // The open round's segment starts where the drive beside it ends, so it waits for settlement.
-    const open = await getOpenRound(tx, missionId)
-    if (open && (!driving || result.settled)) {
-      Object.assign(result, await closeIfDue(tx, context, open))
-    }
+    const open = driving ? undefined : await getOpenRound(tx, missionId)
+    if (open) Object.assign(result, await closeIfDue(tx, context, open, closing))
     await recordNextDue(tx, mission, now)
     published = context.published
     return result
   })
+  if (ticked === 'busy') return { ...idle, skipped: 'busy' }
   if (published !== undefined) void primeStop(missionId, published)
   return ticked
 }
 
 /**
- * The settlement of the drive due at `now`, computed without a transaction or a lock: null when
- * no drive is due or it failed (a failure only records the death). The snapshot may be overtaken
+ * Runs `apply` in a transaction holding the mission's advisory lock, with every lock wait inside
+ * bounded by {@link LOCK_TIMEOUT} and every statement by {@link STATEMENT_TIMEOUT}. `busy` when
+ * `lock` is `try` and a lock was held.
+ */
+async function underMissionLock<T>(
+  db: DB,
+  options: { missionId: string; lock: MissionLock },
+  apply: (tx: DB) => Promise<T>,
+): Promise<T | 'busy'> {
+  const { missionId, lock } = options
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql.raw(`set local lock_timeout = '${LOCK_TIMEOUT}'`))
+      await tx.execute(sql.raw(`set local statement_timeout = '${STATEMENT_TIMEOUT}'`))
+      // A function killed mid-transaction leaves its session holding the lock; the database ends it.
+      await tx.execute(
+        sql.raw(`set local idle_in_transaction_session_timeout = '${STATEMENT_TIMEOUT}'`),
+      )
+      if (lock === 'wait') {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${missionId}))`)
+      } else {
+        const { rows } = (await tx.execute(
+          sql`select pg_try_advisory_xact_lock(hashtext(${missionId})) as locked`,
+        )) as { rows: { locked: boolean }[] }
+        if (!rows[0]?.locked) return 'busy' as const
+      }
+      return apply(tx)
+    })
+  } catch (error) {
+    if (postgresErrorOf(error)?.code !== LOCK_NOT_AVAILABLE) throw error
+    if (lock === 'try') return 'busy'
+    throw new DbError(
+      'BUSY',
+      `Mission ${missionId} is being brought up to date by another request; retry shortly.`,
+      { cause: error },
+    )
+  }
+}
+
+/**
+ * The settlement of `driving` due at `now`, computed and published without a transaction or a
+ * lock: null when the drive is not due or it failed (a failure only records the death). The stop
+ * reached is published under the index it takes once created. The snapshot may be overtaken
  * before the lock is taken; {@link settle} reconciles it.
  */
 async function prepareSettlement(
   db: DB,
-  options: { store: JourneyStore; jev: JevClient; missionId: string; now: Date },
+  options: { store: JourneyStore; jev: JevClient; mission: Mission; driving: Segment; now: Date },
 ): Promise<PreparedSettlement | null> {
-  const { store, jev, missionId, now } = options
-  const mission = await getMission(db, missionId)
-  if (mission.status !== 'active') return null
-  const driving = await getDrivingSegment(db, missionId)
-  const outcome = driving?.outcome
-  if (!driving || !outcome || driving.endsAt.getTime() > now.getTime()) return null
+  const { store, jev, mission, driving, now } = options
+  const outcome = driving.outcome
+  if (!outcome || driving.endsAt.getTime() > now.getTime()) return null
   if (outcome.kind === 'failed') return null
 
   const world = missionWorld(mission)
@@ -179,10 +300,10 @@ async function prepareSettlement(
   const mask = revealDisk(seen, disk)
   const assessments = new Map<string, Assessment>()
 
-  const beside = await getOpenRound(db, missionId)
+  const beside = await getOpenRound(db, mission.id)
   if (beside && outcome.kind === 'stopped-short') {
     const ground = { world, disk, revealed: revealedOverDisk(mask, disk), start: { x, y } }
-    const deaths = await listDeaths(db, missionId)
+    const deaths = await listDeaths(db, mission.id)
     const waiting = (await listRoundSubmissions(db, beside.id)).filter((s) => s.status === 'open')
     for (const submission of waiting) {
       const assessed = await assessGoal(ground, {
@@ -194,25 +315,27 @@ async function prepareSettlement(
       assessments.set(submission.id, assessed)
     }
   }
-  return { segmentId: driving.id, disk, mask, assessments }
+  const stopIndex = await nextStopIndex(db, mission.id)
+  await publishStop(store, { world, disk, mask, missionId: mission.id, stopIndex })
+  return { segmentId: driving.id, stopIndex, assessments }
 }
 
 /**
- * Makes a released drive's ending public. Arrived or stopped short: the stop reached is created
- * and published now, with the mask as of the drive's start, what the drive revealed and the
+ * Makes a released drive's ending public. Arrived or stopped short: the stop reached, already
+ * published, is created with the mask as of the drive's start, what the drive revealed and the
  * viewshed from the new stop, and the round beside the drive moves to it; after a stop short its
  * anchor moves there too and its open submissions take the assessments prepared from there.
  * Failed: the death is recorded, the round beside the drive is voided and a fresh one opens at the
- * stop the rover retries from. Without a preparation for this drive nothing is settled; the next
- * tick prepares again.
+ * stop the rover retries from. Without a preparation for this drive and this stop index nothing
+ * is settled; the next tick prepares again.
  */
 async function settle(
   tx: DB,
   context: TickContext,
   driving: Segment,
   prepared: PreparedSettlement | null,
-): Promise<Pick<TickResult, 'settled' | 'opened'>> {
-  const { store, mission, now } = context
+): Promise<Pick<TickResult, 'settled' | 'opened' | 'skipped'>> {
+  const { mission, now } = context
   const outcome = driving.outcome!
   const from = await getStop(tx, driving.fromStopId)
   const { x, y, headingRad } = outcome.endPose
@@ -232,9 +355,10 @@ async function settle(
     return { settled: { segmentId: driving.id, status: 'failed' }, opened: { roundId: fresh.id } }
   }
 
-  if (prepared?.segmentId !== driving.id) return { settled: null, opened: null }
-  const world = missionWorld(mission)
   const index = await nextStopIndex(tx, mission.id)
+  if (prepared?.segmentId !== driving.id || prepared.stopIndex !== index) {
+    return { settled: null, opened: null, skipped: 'changed' }
+  }
   const reached = await createStop(tx, {
     missionId: mission.id,
     index,
@@ -253,10 +377,6 @@ async function settle(
     if (short) await applyAssessments(tx, beside, prepared.assessments)
     await reanchorRound(tx, beside.id, { fromStopId: reached.id, anchor })
   }
-  // Blobs last: a failure above publishes nothing, and the rows commit only after the blobs they
-  // name exist.
-  const { disk, mask } = prepared
-  await publishStop(store, { world, disk, mask, missionId: mission.id, stopIndex: index })
   context.published = index
   await settleSegment(tx, driving.id, { status: outcome.kind, toStopId: reached.id, now })
   await setCurrentStop(tx, mission.id, reached.id)
@@ -286,29 +406,29 @@ async function applyAssessments(
 }
 
 /**
- * Closes the open round once due (null while it is not), with the round locked before its standings are read, so a like
- * or a submission either lands before the close and counts or waits and finds the round closed.
- * Candidates are tried best ranked first: one whose drive cannot be computed from the stop (a
- * typed planning or driving error) is rejected as invalidated by the stop and the next is tried.
- * The first that drives wins and starts; with none left the round is voided and a fresh one opens
- * from the same stop.
+ * The close of the mission's open round due at `now`, computed and published without a
+ * transaction or a lock: null when no round is open or it is not due. Candidates are tried best
+ * ranked first: one whose drive cannot be computed from the stop (a typed planning or driving
+ * error) is set aside and the next is tried; the first that drives is the winner, its drive
+ * published. {@link closeIfDue} reconciles it with the round as it stands under the lock.
  */
-async function closeIfDue(
-  tx: DB,
-  context: TickContext,
-  open: Round,
-): Promise<Pick<TickResult, 'closed' | 'started' | 'opened'> | null> {
-  const { store, mission, now } = context
+async function prepareClose(
+  db: DB,
+  options: { store: JourneyStore; mission: Mission; now: Date },
+): Promise<PreparedClose | null> {
+  const { store, mission, now } = options
   const { rules } = mission.config
-  const round = await lockOpenRound(tx, open.id)
-  const { submissions, closesAt, drivingAuthorId } = await roundStanding(tx, round, { rules, now })
+  const open = await getOpenRound(db, mission.id)
+  if (!open) return null
+  const { submissions, closesAt, drivingAuthorId } = await roundStanding(db, open, { rules, now })
   if (!closesAt || closesAt.getTime() > now.getTime()) return null
 
   const world = missionWorld(mission)
   // The round closes only once the drive beside it has settled, so the rover is at its stop.
-  const from = await getStop(tx, round.fromStopId)
+  const from = await getStop(db, open.fromStopId)
   const disk = stopDisk(world, from)
   const revealed = await loadRevealedMask(store, from)
+  const refused = new Set<string>()
   for (const candidate of rankSubmissions(submissions, { rules, drivingAuthorId })) {
     let record: SegmentRecord
     try {
@@ -320,21 +440,62 @@ async function closeIfDue(
       }))
     } catch (error) {
       if (!isDriveRefusal(error)) throw error
-      await rejectSubmission(tx, candidate.id, { reason: 'invalidated-by-stop' })
+      refused.add(candidate.id)
       continue
     }
-    await closeRound(tx, round.id, { winnerSubmissionId: candidate.id, closesAt })
+    const drive = await publishDrive(store, { record, mission, now })
     return {
-      closed: { roundId: round.id, winnerSubmissionId: candidate.id },
-      ...(await start(tx, context, { round, from, winner: candidate, record })),
+      roundId: open.id,
+      fromStopId: from.id,
+      refused,
+      winner: { submissionId: candidate.id, drive },
+    }
+  }
+  return { roundId: open.id, fromStopId: from.id, refused, winner: null }
+}
+
+/**
+ * Closes the open round once due (null while it is not) as prepared, with the round locked
+ * before its standings are read, so a like or a submission either lands before the close and
+ * counts or waits and finds the round closed. The candidates ranked ahead of the prepared winner
+ * must be exactly those set aside: they are rejected as invalidated by the stop and the winner
+ * starts; with no winner the round is voided and a fresh one opens from the same stop. A round
+ * ranked otherwise since, or not the one prepared for, is left for the next tick.
+ */
+async function closeIfDue(
+  tx: DB,
+  context: TickContext,
+  open: Round,
+  prepared: PreparedClose | null,
+): Promise<Pick<TickResult, 'closed' | 'started' | 'opened' | 'skipped'> | null> {
+  const { mission, now } = context
+  const { rules } = mission.config
+  const round = await lockOpenRound(tx, open.id)
+  const { submissions, closesAt, drivingAuthorId } = await roundStanding(tx, round, { rules, now })
+  if (!closesAt || closesAt.getTime() > now.getTime()) return null
+  const changed = { closed: null, started: null, opened: null, skipped: 'changed' } as const
+  if (prepared?.roundId !== round.id || prepared.fromStopId !== round.fromStopId) return changed
+  const ranked = rankSubmissions(submissions, { rules, drivingAuthorId })
+  const first = ranked.findIndex((candidate) => !prepared.refused.has(candidate.id))
+  const winner = first === -1 ? undefined : ranked[first]
+  if (winner?.id !== prepared.winner?.submissionId) return changed
+
+  for (const refused of first === -1 ? ranked : ranked.slice(0, first)) {
+    await rejectSubmission(tx, refused.id, { reason: 'invalidated-by-stop' })
+  }
+  if (winner && prepared.winner) {
+    await closeRound(tx, round.id, { winnerSubmissionId: winner.id, closesAt })
+    return {
+      closed: { roundId: round.id, winnerSubmissionId: winner.id },
+      ...(await start(tx, context, { round, winner, drive: prepared.winner.drive })),
     }
   }
 
   await voidRound(tx, round.id, { closesAt })
   const fresh = await openRound(tx, {
     missionId: mission.id,
-    fromStopId: from.id,
-    anchor: from,
+    fromStopId: round.fromStopId,
+    anchor: await getStop(tx, round.fromStopId),
     opensAt: now,
   })
   return { closed: null, started: null, opened: { roundId: fresh.id } }
@@ -346,16 +507,14 @@ function isDriveRefusal(error: unknown): boolean {
 }
 
 /**
- * Publishes the winner's drive, cut where the record shows no progress over the not-moving
- * backstop, starts its segment and opens the next round beside it.
+ * Publishes a winner's drive starting at `now` under a fresh segment id, cut where the record
+ * shows no progress over the not-moving backstop.
  */
-async function start(
-  tx: DB,
-  context: TickContext,
-  options: { round: Round; from: Stop; winner: ListedSubmission; record: SegmentRecord },
-): Promise<Pick<TickResult, 'started' | 'opened'>> {
-  const { store, mission, now } = context
-  const { round, from, winner } = options
+async function publishDrive(
+  store: JourneyStore,
+  options: { record: SegmentRecord; mission: Mission; now: Date },
+): Promise<PublishedDrive> {
+  const { mission, now } = options
   // The backstop is a pure function of the record, so a drive that would stall is cut here, as
   // it would be failed at the release that shows no progress over the backstop.
   const stall = backstopSlice(options.record, {
@@ -376,20 +535,36 @@ async function start(
     segmentId,
     startedAt: now.getTime(),
   })
-  const segment = await createSegment(tx, {
-    id: segmentId,
-    missionId: mission.id,
-    roundId: round.id,
-    submissionId: winner.id,
-    fromStopId: from.id,
-    startedAt: now,
+  return {
+    segmentId,
     endsAt: new Date(published.endsAt),
     manifestKey: published.manifestKey,
     outcome: record.outcome,
+  }
+}
+
+/** Starts the winner's published drive and opens the next round beside it. */
+async function start(
+  tx: DB,
+  context: TickContext,
+  options: { round: Round; winner: ListedSubmission; drive: PublishedDrive },
+): Promise<Pick<TickResult, 'started' | 'opened'>> {
+  const { mission, now } = context
+  const { round, winner, drive } = options
+  const segment = await createSegment(tx, {
+    id: drive.segmentId,
+    missionId: mission.id,
+    roundId: round.id,
+    submissionId: winner.id,
+    fromStopId: round.fromStopId,
+    startedAt: now,
+    endsAt: drive.endsAt,
+    manifestKey: drive.manifestKey,
+    outcome: drive.outcome,
   })
   const next = await openRound(tx, {
     missionId: mission.id,
-    fromStopId: from.id,
+    fromStopId: round.fromStopId,
     anchor: { x: winner.goalX, y: winner.goalY },
     opensAt: now,
   })

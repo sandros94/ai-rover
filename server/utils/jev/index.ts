@@ -2,7 +2,7 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { jevCacheOver } from '../../repositories/judgments'
 import { useDB } from '../db'
 import type { JevClient } from './client'
-import { createJevClient, TYPESAFE_API_URL } from './client'
+import { createJevClient, JEV_SERVER_LIMITS, TYPESAFE_API_URL } from './client'
 
 // Nitro auto-imports every file under `server/utils`, so this folder has no barrel re-exports.
 
@@ -26,10 +26,14 @@ export function jevCredentials(): { apiKey: string | undefined; baseURL: string 
 
 /**
  * The server's Jev client, created on first use from {@link jevCredentials} with its answers
- * cached in the database. Throws `NOT_CONFIGURED` while no key is available, and tries again on
+ * cached in the database, under {@link JEV_SERVER_LIMITS}. Throws `NOT_CONFIGURED` while no key is available, and tries again on
  * the next call.
  */
 export function useJevClient(): JevClient {
-  shared ??= createJevClient({ ...jevCredentials(), cache: jevCacheOver(useDB()) })
+  shared ??= createJevClient({
+    ...jevCredentials(),
+    ...JEV_SERVER_LIMITS,
+    cache: jevCacheOver(useDB()),
+  })
   return shared
 }

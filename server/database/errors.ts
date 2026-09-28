@@ -7,6 +7,7 @@
  *   settled submission, a stop of another mission, an identity linked elsewhere).
  * - `ROUND_CHANGED`: the round moved to another stop or anchor after the caller planned from it.
  * - `USER_GONE`: the signed-in user's account no longer exists, so nothing can be written for it.
+ * - `BUSY`: a lock the operation needs stayed held past its timeout; retrying shortly may succeed.
  *
  * Closed set: callers may match on it exhaustively, so adding a code is a breaking change.
  */
@@ -16,6 +17,7 @@ export type DbErrorCode =
   | 'INVALID_STATE'
   | 'ROUND_CHANGED'
   | 'USER_GONE'
+  | 'BUSY'
 
 export class DbError extends Error {
   override name = 'DbError'

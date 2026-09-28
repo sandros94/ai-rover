@@ -49,18 +49,21 @@ async function diagnose() {
 }
 
 const yesNo = (value: boolean) => (value ? 'yes' : 'no')
+const seconds = (s: number) => `${s.toFixed(1)} s`
 
 /** One line per section, green when everything it checks is in place. */
 const sections = computed(() => {
   const found = diagnosis.value
   if (!found) return []
-  const { database, blobs, mission, runtime } = found
+  const { database, locks, blobs, mission, runtime } = found
   const tables = Object.entries(database.tables)
+  const states = Object.entries(locks.states)
   return [
     {
       key: 'database',
       label: 'Database',
       ok: database.ok,
+      ms: database.ms,
       lines: [
         ...(database.error ? [`Error: ${database.error}`] : []),
         `Migrations: ${database.migrations.length ? database.migrations.join(', ') : 'none'}`,
@@ -68,11 +71,32 @@ const sections = computed(() => {
       ],
     },
     {
+      key: 'locks',
+      label: 'Database sessions',
+      ok: locks.ok && locks.stuck.length === 0,
+      ms: locks.ms,
+      lines: [
+        ...(locks.error ? [`Error: ${locks.error}`] : []),
+        `Sessions: ${states.length ? states.map(([state, n]) => `${state} ${n}`).join(', ') : 'none'}`,
+        `Oldest transaction: ${locks.oldestTransactionS === null ? 'none open' : seconds(locks.oldestTransactionS)}`,
+        ...locks.stuck.map(
+          (session) =>
+            `Stuck: pid ${session.pid}, ${session.state}${session.waitEventType ? `, waiting on ${session.waitEventType}` : ''}, ${seconds(session.ageS)}${session.holdsAdvisoryLock ? ', holds an advisory lock' : ''}`,
+        ),
+      ],
+    },
+    {
       key: 'mission',
       label: 'Mission read',
       ok: mission.ok,
+      ms: mission.ms,
       lines: [
         `Active mission: ${yesNo(mission.active)}`,
+        ...(mission.skipped === 'busy'
+          ? ['Tick skipped: another tick holds the mission lock']
+          : mission.skipped === 'changed'
+            ? ['Tick skipped: the mission moved while it was prepared']
+            : []),
         ...(mission.error
           ? [
               `Error: ${mission.error.name}${mission.error.code ? ` (${mission.error.code})` : ''}: ${mission.error.message}`,
@@ -85,6 +109,7 @@ const sections = computed(() => {
       key: 'blobs',
       label: 'Blobs',
       ok: blobs.ok,
+      ms: blobs.ms,
       lines: [
         ...(blobs.error ? [`Error: ${blobs.error}`] : []),
         `Keys: ${blobs.keys >= 1000 ? '1000 or more' : blobs.keys}`,
@@ -94,6 +119,7 @@ const sections = computed(() => {
       key: 'runtime',
       label: 'Runtime',
       ok: runtime.hasSessionKey && runtime.hasTypesafeToken && runtime.originsConfigured,
+      ms: undefined,
       lines: [
         `Node ${runtime.node}${runtime.region ? `, region ${runtime.region}` : ''}`,
         `Session key: ${yesNo(runtime.hasSessionKey)}`,
@@ -185,6 +211,9 @@ const sections = computed(() => {
             <div class="min-w-0">
               <p class="font-medium" :class="section.ok ? 'text-success' : 'text-error'">
                 {{ section.label }}
+                <span v-if="section.ms !== undefined" class="font-normal text-muted">
+                  · {{ section.ms }} ms
+                </span>
               </p>
               <p v-for="line in section.lines" :key="line" class="break-words text-muted">
                 {{ line }}
