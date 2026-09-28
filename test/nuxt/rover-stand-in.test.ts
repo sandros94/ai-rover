@@ -8,12 +8,14 @@ import { PerspectiveCamera, Quaternion, Vector3 } from 'three'
 import {
   ARM_NIGHT,
   armPoseAt,
+  flatFrame,
   framePlacement,
   rigTransforms,
   ROVER_RIG_NODES,
   sunCrossings,
 } from '#shared/utils/client/scene'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
+import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import { roverLookMaterial } from '#shared/utils/client/scene/rover-looks'
 import type { LoadedRoverModel, RoverModelFile } from '~/utils/rover-model'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
@@ -127,11 +129,15 @@ function expectSame(name: string, copy: Object3D, expected: Quaternion): void {
   ])
 }
 
-/** Each joint of `copy` turned as the frame and `joints` say, from the model's own rests. */
+/**
+ * Each joint of `copy` turned as the frame and `joints` say, from the model's own rests: a rig
+ * node `joints` names takes its value from `joints`, which the model applies over the frame's.
+ */
 function expectPosed(file: RoverModelFile, copy: Object3D): void {
   const rest = models[file].scene
   const rig = rigTransforms(motion.frame).joints
   for (const name of ROVER_RIG_NODES) {
+    if (name in joints) continue
     const q = rig[name]
     const expected = rest
       .getObjectByName(name)!
@@ -152,7 +158,7 @@ function expectPosed(file: RoverModelFile, copy: Object3D): void {
 async function mountRover(
   full: Promise<LoadedRoverModel>,
   lowPoly: Promise<LoadedRoverModel>,
-  props: { joints?: Record<string, number>; lodDistanceM?: number } = {},
+  props: { frame?: Float32Array; joints?: Record<string, number>; lodDistanceM?: number } = {},
 ) {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   loads.next = (file) => (file === 'full' ? full : lowPoly)
@@ -319,6 +325,58 @@ describe('the rover drawn on demand', () => {
       expect(
         Math.max(...arm.map((node, k) => node.quaternion.angleTo(before[k]!))),
       ).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('the rover steering its corner wheels', () => {
+  const STEER_NODES = ['steer_lf', 'steer_rf', 'steer_lr', 'steer_rr'] as const
+  const STEER_FIELDS = ['steerFL', 'steerFR', 'steerRL', 'steerRR'] as const
+
+  /** The rover standing still at the origin, its corner wheels at `angles` (FL, FR, RL, RR). */
+  function steered(angles: readonly number[]): Float32Array {
+    const frame = flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 })
+    for (const [k, name] of STEER_FIELDS.entries())
+      frame[KEYFRAME_FIELDS.indexOf(name)] = angles[k]!
+    return frame
+  }
+
+  /** How far `copy`'s node `name` has turned from the model's rest about the body's up axis, counter-clockwise. */
+  function steerOf(file: RoverModelFile, copy: Object3D, name: string): number {
+    const rest = models[file].scene.getObjectByName(name)!.quaternion.clone().invert()
+    const forward = new Vector3(1, 0, 0).applyQuaternion(
+      rest.multiply(copy.getObjectByName(name)!.quaternion),
+    )
+    return Math.atan2(forward.y, forward.x)
+  }
+
+  it('turns the full model and the stand-in alike to the frame angles, asking for a frame at each change', async () => {
+    const standins = copiesOf('low-poly')
+    const fulls = copiesOf('full')
+    const rover = await mountRover(
+      Promise.resolve(models.full),
+      Promise.resolve(models['low-poly']),
+      {
+        frame: steered([0, 0, 0, 0]),
+        joints: {},
+      },
+    )
+    await vi.waitFor(() => expect(castsOnly(standins()[0]!)).toBe(true), { timeout: 2000 })
+    const copies = { 'full': fulls()[0]!, 'low-poly': standins()[0]! }
+    // Standing still, as the wheels steer before a turn: only the angles change between frames.
+    const stances = [
+      [-0.84, 0.84, 0.79, -0.79],
+      [0.9, 0.35, -0.8, -0.33],
+      [0, 0, 0, 0],
+    ]
+    for (const angles of stances) {
+      tres.invalidate.mockClear()
+      await rover.setProps({ frame: steered(angles) })
+      expect(tres.invalidate).toHaveBeenCalled()
+      for (const [file, copy] of Object.entries(copies) as [RoverModelFile, Object3D][]) {
+        const read = STEER_NODES.map((name) => steerOf(file, copy, name))
+        expect([file, ...read]).toEqual([file, ...angles.map((a) => expect.closeTo(a, 5))])
+      }
     }
   })
 })

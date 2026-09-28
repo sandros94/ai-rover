@@ -1,3 +1,4 @@
+import { KEYFRAME_FIELDS } from '../../drive/keyframes'
 import type { Point3 } from '../../rover/kinematics'
 import { frameAttitude } from '../instruments/attitude-geometry'
 import type { FrameAttitude } from '../instruments/attitude-geometry'
@@ -6,8 +7,7 @@ import { framePlacement } from './placement'
 
 /**
  * The articulated nodes of the JPL rover model (`public/models/rover/*.glb`), named after the
- * URDF joints they carry. The steering links are nodes too but stay straight: keyframes carry no
- * steering.
+ * URDF joints they carry.
  */
 export const ROVER_RIG_NODES = [
   'differential',
@@ -15,6 +15,10 @@ export const ROVER_RIG_NODES = [
   'right_rocker',
   'left_bogie',
   'right_bogie',
+  'steer_lf',
+  'steer_rf',
+  'steer_lr',
+  'steer_rr',
   'wheel_lf',
   'wheel_rf',
   'wheel_lm',
@@ -33,13 +37,20 @@ export type RigNode = (typeof ROVER_RIG_NODES)[number]
  */
 export const DIFFERENTIAL_RATIO = 0.2736 / 0.6392
 
-type Articulation = Pick<FrameAttitude, 'rocker' | 'bogie' | 'spins'>
+type Articulation = Pick<FrameAttitude, 'rocker' | 'bogie' | 'spins'> & {
+  /** Corner steering angles, order FL, FR, RL, RR, as `SteeringAngles` defines them. */
+  steer: number[]
+}
+
+const STEER_FIELDS = ['steerFL', 'steerFR', 'steerRL', 'steerRR'] as const
 
 /**
  * Each rig node's URDF joint, its axis in the body frame (x forward, y left, z up) and its joint
  * value from a keyframe. The URDF frame is x forward, y right, z down, so its `0 1 0` rocker and
- * bogie axes are −y here: a positive value raises the front, the solver's nose-up convention, and
- * its `0 −1 0` drive axes are +y: forward spin carries the top of the wheel forward.
+ * bogie axes are −y here: a positive value raises the front, the solver's nose-up convention; its
+ * `0 −1 0` drive axes are +y: forward spin carries the top of the wheel forward; and its `0 0 1`
+ * steering axes are −z: a keyframe's steering angle, counter-clockwise from above, is the negated
+ * joint value.
  */
 export const RIG_JOINTS: Record<
   RigNode,
@@ -64,6 +75,10 @@ export const RIG_JOINTS: Record<
   },
   left_bogie: { urdf: 'LEFT_BOGIE', axis: { x: 0, y: -1, z: 0 }, value: (a) => a.bogie.left },
   right_bogie: { urdf: 'RIGHT_BOGIE', axis: { x: 0, y: -1, z: 0 }, value: (a) => a.bogie.right },
+  steer_lf: { urdf: 'LF_STEER', axis: { x: 0, y: 0, z: -1 }, value: (a) => -(a.steer[0] ?? 0) },
+  steer_rf: { urdf: 'RF_STEER', axis: { x: 0, y: 0, z: -1 }, value: (a) => -(a.steer[1] ?? 0) },
+  steer_lr: { urdf: 'LR_STEER', axis: { x: 0, y: 0, z: -1 }, value: (a) => -(a.steer[2] ?? 0) },
+  steer_rr: { urdf: 'RR_STEER', axis: { x: 0, y: 0, z: -1 }, value: (a) => -(a.steer[3] ?? 0) },
   wheel_lf: { urdf: 'LF_DRIVE', axis: { x: 0, y: 1, z: 0 }, value: (a) => a.spins[0] ?? 0 },
   wheel_rf: { urdf: 'RF_DRIVE', axis: { x: 0, y: 1, z: 0 }, value: (a) => a.spins[1] ?? 0 },
   wheel_lm: { urdf: 'LM_DRIVE', axis: { x: 0, y: 1, z: 0 }, value: (a) => a.spins[2] ?? 0 },
@@ -83,12 +98,15 @@ export interface RigTransforms {
 
 /**
  * Poses the JPL model from a keyframe: the body placement as recorded, and each joint turned by
- * the recorded suspension angle or wheel spin about its URDF axis. The solver's default geometry
+ * the recorded suspension angle, steering angle or wheel spin about its URDF axis. The solver's default geometry
  * shares the model's pivots, so the hubs sit on the solver's wheel centres to within the 2.5 mm
  * the wheel mounts differ by.
  */
 export function rigTransforms(frame: ArrayLike<number>): RigTransforms {
-  const attitude = frameAttitude(frame)
+  const attitude = {
+    ...frameAttitude(frame),
+    steer: STEER_FIELDS.map((name) => frame[KEYFRAME_FIELDS.indexOf(name)]!),
+  }
   const { position, quaternion } = framePlacement(frame)
   const joints = {} as Record<RigNode, Quat>
   for (const name of ROVER_RIG_NODES) {
