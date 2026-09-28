@@ -5,6 +5,7 @@ import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import type { Mesh, MeshStandardMaterial, Object3D } from 'three'
 import { ROVER_RIG_NODES } from '#shared/utils/client/scene'
+import { ARM_JOINTS, ARM_STOWED } from '#shared/utils/rover'
 import { loadRoverModel } from '~/utils/rover-model'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import RoverJoints3D from '~~/modules/dev/runtime/app/components/playground/RoverJoints3D.vue'
@@ -36,7 +37,7 @@ const jointNodes = (model: Object3D) => {
 }
 
 describe('the rover model', () => {
-  it('exposes the rig, steering and mast joints, the differential rods and the turret lamp anchor', async () => {
+  it('exposes the rig, steering, mast and arm joints, the differential rods and the turret lamp anchor', async () => {
     serveModel()
     const { scene } = await loadRoverModel('/')
     const joints = jointNodes(scene)
@@ -56,7 +57,20 @@ describe('the rover model', () => {
       expect(rod?.parent?.name).toBe('differential')
       expect((rod!.userData as { aim?: { node: string } }).aim?.node).toBe(`${side}_rocker`)
     }
-    expect(scene.getObjectByName('turret')?.parent?.name).toBe('chassis')
+    // The arm's five joints from the shoulder out, the turret's lamp on the last.
+    expect(joints).toEqual(expect.arrayContaining(ARM_JOINTS.map((j) => j.node)))
+    let parent = 'chassis'
+    for (const { node, urdf, limit } of ARM_JOINTS) {
+      const arm = scene.getObjectByName(node)!
+      expect(arm.parent?.name).toBe(parent)
+      expect(arm.userData).toMatchObject({
+        joint: urdf,
+        limit: [...limit],
+        baked: ARM_STOWED[node],
+      })
+      parent = node
+    }
+    expect(scene.getObjectByName('turret')?.parent?.name).toBe('arm_5')
   })
 
   it('draws each part in one baked material and its glass in another, 35 draw calls at most', async () => {
@@ -72,6 +86,7 @@ describe('the rover model', () => {
     // Colour, roughness and metalness come from the atlas pages, the factors stay at one.
     const opaque = materials.filter((m) => !m.transparent)
     expect(opaque.map((m) => m.name).sort()).toEqual([
+      'arm',
       'chassis 1',
       'chassis 2',
       'chassis 3',
@@ -82,7 +97,7 @@ describe('the rover model', () => {
     for (const m of opaque) expect([m.metalness, m.roughness]).toEqual([1, 1])
     // The glass's opacity per pane is its texture's alpha.
     const glass = materials.filter((m) => m.transparent)
-    expect(glass.map((m) => m.name).sort()).toEqual(['chassis glass', 'mast glass'])
+    expect(glass.map((m) => m.name).sort()).toEqual(['arm glass', 'chassis glass', 'mast glass'])
     for (const m of glass) expect(m.opacity).toBe(1)
   })
 })

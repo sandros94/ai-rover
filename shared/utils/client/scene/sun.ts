@@ -64,6 +64,26 @@ export function sunPosition(
   }
 }
 
+/**
+ * The sol fractions at which the sun's centre crosses the horizon at `latitudeDeg` in the season
+ * {@link SCENE_LS_DEG}, as {@link sunPosition} places it: rising before noon, setting after.
+ */
+export function sunCrossings(latitudeDeg: number = DEFAULT_LATITUDE_DEG): {
+  rise: number
+  set: number
+} {
+  const declination = Math.asin(Math.sin(MARS_OBLIQUITY_DEG * RAD) * Math.sin(SCENE_LS_DEG * RAD))
+  const cosH = -Math.tan(latitudeDeg * RAD) * Math.tan(declination)
+  if (!(Math.abs(cosH) < 1)) {
+    throw new ClientError(
+      'INVALID_INPUT',
+      `sunCrossings: at latitude ${latitudeDeg} the sun never crosses the horizon this season.`,
+    )
+  }
+  const half = Math.acos(cosH) / (2 * Math.PI)
+  return { rise: 0.5 - half, set: 0.5 + half }
+}
+
 export interface SkyLighting {
   /**
    * Direct sunlight: colour and irradiance, 1 for the sun high in a clear sky. Light colours are

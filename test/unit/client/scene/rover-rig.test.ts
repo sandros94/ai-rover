@@ -3,11 +3,21 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { Point3, RoverPose } from '#shared/utils/rover'
-import { DEFAULT_ROVER_GEOMETRY, poseOnTerrain } from '#shared/utils/rover'
+import { ARM_JOINTS, ARM_STOWED, DEFAULT_ROVER_GEOMETRY, poseOnTerrain } from '#shared/utils/rover'
 import type { Quat } from '#shared/utils/client/scene/rover-parts'
 import { flatFrame } from '#shared/utils/client/scene/rover-parts'
 import type { RigNode } from '#shared/utils/client/scene/rover-rig'
-import { RIG_JOINTS, rigTransforms, ROVER_RIG_NODES } from '#shared/utils/client/scene/rover-rig'
+import {
+  ARM_EASE_S,
+  ARM_NIGHT,
+  armPose,
+  nightArmBlend,
+  RIG_JOINTS,
+  rigTransforms,
+  ROVER_RIG_NODES,
+} from '#shared/utils/client/scene/rover-rig'
+import { sunCrossings } from '#shared/utils/client/scene/sun'
+import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments/sol-clock'
 
 const DEG = Math.PI / 180
 const MODEL_DIR = fileURLToPath(new URL('../../../../public/models/rover/', import.meta.url))
@@ -303,13 +313,61 @@ describe('the rig on rover.glb', () => {
     }
   })
 
-  it('marks the turret lamp at the stowed WATSON camera, ahead of the body on the left', () => {
-    const turret = nodes.get('turret')!
-    expect(turret.parent).toBe('chassis')
-    const [x, y, z] = turret.node.translation!
+  it('hangs the turret lamp from the last arm link, at the stowed WATSON camera ahead of the body on the left', () => {
+    expect(nodes.get('turret')!.parent).toBe('arm_5')
+    const rig = rigTransforms(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }))
+    const { x, y, z } = worldOrigin(nodes, rig, 'turret')
     expect(x).toBeGreaterThan(0.9)
     expect(y).toBeGreaterThan(0.5)
     expect(z).toBeGreaterThan(1.2)
     expect(z).toBeLessThan(1.6)
+    const beam = nodes.get('turret')!.node.extras as { beam?: number[] }
+    expect(Math.hypot(...beam.beam!)).toBeCloseTo(1, 5)
+  })
+
+  it('carries the arm as five URDF joints from the chassis out, at rest in the stowed pose', () => {
+    let parent = 'chassis'
+    for (const { node, urdf, limit } of ARM_JOINTS) {
+      const entry = nodes.get(node)!
+      expect(entry.parent).toBe(parent)
+      const extras = entry.node.extras as { joint?: string; limit?: number[]; baked?: number }
+      expect(extras.joint).toBe(urdf)
+      expect(extras.limit).toEqual(limit)
+      expect(extras.baked).toBeCloseTo(ARM_STOWED[node], 6)
+      parent = node
+    }
+  })
+})
+
+describe('nightArmBlend', () => {
+  const { rise, set } = sunCrossings()
+  const second = 1 / MARS_SOL_SECONDS
+
+  it('holds the arm stowed by day and in its night pose by night', () => {
+    expect(nightArmBlend(0.5)).toBe(0)
+    expect(nightArmBlend(0)).toBe(1)
+    expect(nightArmBlend(set - second)).toBe(0)
+    expect(nightArmBlend(rise - second)).toBe(1)
+  })
+
+  it(`eases over ${ARM_EASE_S} s of the sol after sunset, and back after sunrise`, () => {
+    expect(nightArmBlend(set + (ARM_EASE_S / 2) * second)).toBeCloseTo(0.5, 9)
+    expect(nightArmBlend(set + ARM_EASE_S * second)).toBeCloseTo(1, 9)
+    expect(nightArmBlend(rise + (ARM_EASE_S / 2) * second)).toBeCloseTo(0.5, 9)
+    expect(nightArmBlend(rise + ARM_EASE_S * second)).toBeCloseTo(0, 9)
+    const steps = Array.from({ length: 31 }, (_, k) => nightArmBlend(set + k * second))
+    steps.slice(1).forEach((v, k) => expect(v).toBeGreaterThanOrEqual(steps[k]!))
+  })
+
+  it('reads any sol fraction, whole sols included', () => {
+    expect(nightArmBlend(3.5)).toBe(0)
+    expect(nightArmBlend(-0.1)).toBe(nightArmBlend(0.9))
+  })
+})
+
+describe('armPose', () => {
+  it('runs from the stowed pose to the night pose', () => {
+    expect(armPose(0)).toEqual(ARM_STOWED)
+    for (const { node } of ARM_JOINTS) expect(armPose(1)[node]).toBeCloseTo(ARM_NIGHT[node], 12)
   })
 })

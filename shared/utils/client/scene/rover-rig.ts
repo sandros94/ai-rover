@@ -1,8 +1,12 @@
+import type { ArmPose } from '../../rover/arm'
+import { ARM_JOINTS, ARM_STOWED } from '../../rover/arm'
 import type { Point3 } from '../../rover/kinematics'
+import { MARS_SOL_SECONDS } from '../instruments/sol-clock'
 import { frameAttitude } from '../instruments/attitude-geometry'
 import type { FrameAttitude } from '../instruments/attitude-geometry'
 import type { Quat } from './rover-parts'
 import { framePlacement } from './rover-parts'
+import { DEFAULT_LATITUDE_DEG, sunCrossings } from './sun'
 
 /**
  * The articulated nodes of the JPL rover model (`public/models/rover/*.glb`), named after the
@@ -101,4 +105,48 @@ export function rigTransforms(frame: ArrayLike<number>): RigTransforms {
 function aboutAxis(axis: Point3, angle: number): Quat {
   const s = Math.sin(angle / 2)
   return { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(angle / 2) }
+}
+
+/**
+ * The arm at night: raised above and ahead of the front deck, the turret turned so the WATSON
+ * camera's LEDs light the ground about 3 m ahead of the front wheels. A design choice for the
+ * night view, not a configuration the rover drives in: Perseverance drives by day with its arm
+ * stowed and carries no headlights. Within the URDF's limits, and clear of the mast, the deck
+ * and the wheels over the suspension's travel (the model's tests measure it).
+ */
+export const ARM_NIGHT: ArmPose = {
+  arm_1: -1.9437,
+  arm_2: -1.2606,
+  arm_3: -1.0837,
+  arm_4: 1.2433,
+  arm_5: 4.2319,
+}
+
+/** Seconds of playback the arm takes from stowed to its night pose after sunset, and back after sunrise. */
+export const ARM_EASE_S = 30
+
+/**
+ * How far the arm has gone from stowed towards {@link ARM_NIGHT} at `solFraction`: 0 by day, 1
+ * by night, easing in and out over {@link ARM_EASE_S} of the sol's clock from the moment the
+ * sun's centre sets, and back from the moment it rises. A function of the clock alone, so a
+ * replay scrubbed to any moment draws the arm where it would be.
+ */
+export function nightArmBlend(solFraction: number, latitudeDeg = DEFAULT_LATITUDE_DEG): number {
+  const { rise, set } = sunCrossings(latitudeDeg)
+  const f = solFraction - Math.floor(solFraction)
+  const since = (from: number) => ((f - from + 1) % 1) * MARS_SOL_SECONDS
+  const night = f >= set || f < rise
+  const progress = night
+    ? Math.min(1, since(set) / ARM_EASE_S)
+    : 1 - Math.min(1, since(rise) / ARM_EASE_S)
+  return progress * progress * (3 - 2 * progress)
+}
+
+/** The arm's joint values `blend` of the way from stowed to {@link ARM_NIGHT}, joint by joint. */
+export function armPose(blend: number): ArmPose {
+  const pose = {} as ArmPose
+  for (const { node } of ARM_JOINTS) {
+    pose[node] = ARM_STOWED[node] + (ARM_NIGHT[node] - ARM_STOWED[node]) * blend
+  }
+  return pose
 }

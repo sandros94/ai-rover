@@ -13,10 +13,12 @@ import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'thr
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
+  armPose,
   framePacer,
   framePlacement,
   fullModelLedger,
   LOD_FAR_M,
+  nightArmBlend,
   routeApproach,
   routeDestination,
   SCENE_COLORS,
@@ -158,6 +160,9 @@ const lighting = computed(() => skyLighting(sun.value.elevationDeg))
 const environment = shallowRef<Texture | null>(null)
 /** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
 const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
+/** After sunset the arm raises the lamp over the front deck, and stows it again after sunrise. */
+const armBlend = computed(() => nightArmBlend(props.solFraction))
+const armJoints = computed(() => armPose(armBlend.value))
 /**
  * Haze, sky at the horizon and unseen ground in one colour, the sky's horizon at the sun's
  * elevation whatever the page's colour mode, so what is too far to make out and what has not been
@@ -303,6 +308,7 @@ onBeforeUnmount(() => {
       :ledger="ledger"
       :lamp="lamp"
       :lod-distance-m="quality.roverLodM"
+      :joints="armJoints"
       :environment="environment"
       @ready="emit('roverReady', $event)"
     />

@@ -44,7 +44,16 @@ export {
 export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
 export { flatFrame, framePlacement, fromTo, roverParts } from './rover-parts'
 export type { RigNode, RigTransforms } from './rover-rig'
-export { DIFFERENTIAL_RATIO, RIG_JOINTS, rigTransforms, ROVER_RIG_NODES } from './rover-rig'
+export {
+  ARM_EASE_S,
+  ARM_NIGHT,
+  armPose,
+  DIFFERENTIAL_RATIO,
+  nightArmBlend,
+  RIG_JOINTS,
+  rigTransforms,
+  ROVER_RIG_NODES,
+} from './rover-rig'
 export type { OverlayMesh } from './overlays'
 export { drapePath, groundDisc, ribbonMesh } from './overlays'
 export type { FullModelLedger } from './full-models'
@@ -67,6 +76,7 @@ export {
   MARS_OBLIQUITY_DEG,
   SCENE_LS_DEG,
   skyLighting,
+  sunCrossings,
   sunPosition,
 } from './sun'
 export type { SceneDevice, SceneQuality, SceneTier } from './quality'

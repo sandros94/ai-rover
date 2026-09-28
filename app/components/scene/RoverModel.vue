@@ -123,26 +123,37 @@ for (const mesh of [boxes, cylinders]) {
 }
 
 /**
- * The arm turret's white LEDs (WATSON and PIXL's), the only light the rover carries: a short
- * warm pool on the ground below and ahead of the stowed turret. It hangs from the model's
- * `turret` node once the model is in, and where the turret would be on the procedural rover.
- * Always in the scene, at zero by day, so switching it never changes the lit shaders.
+ * The arm turret's white LEDs around the WATSON camera, the only light the rover carries. On the
+ * model it hangs from the `turret` node, at the lens and along the camera's boresight
+ * (`extras.beam`), so the cone follows the arm: at night the arm holds the turret up over the
+ * front deck, lighting the ground a few metres ahead of the wheels. On the procedural rover it
+ * hangs where the turret would be, aimed at the same patch of ground. Always in the scene, at
+ * zero by day, so switching it never changes the lit shaders.
  */
-const LAMP_CANDELA = 1.2
-/** Where the lamp points from the turret, body frame: down to the ground just ahead. */
-const LAMP_AIM = { x: 0.2, y: 0, z: -1 }
-const turretLamp = props.ghost ? undefined : new SpotLight('#ffe8cc', 0, 2.2, Math.PI / 4, 0.7, 2)
+const LAMP = {
+  candela: 15,
+  /** Reach, metres: past the lit patch, which lies about 4.5 m from the raised turret. */
+  range: 9,
+  /** Half-angle of the cone, radians, and its soft edge. */
+  angle: 0.42,
+  penumbra: 0.6,
+}
+/** The procedural rover's turret and the ground the lamp lights, body frame. */
+const PROCEDURAL_LAMP = { at: new Vector3(1.25, 0, 0.55), aim: new Vector3(4.45, 0, 0) }
+const turretLamp = props.ghost
+  ? undefined
+  : new SpotLight('#ffe8cc', 0, LAMP.range, LAMP.angle, LAMP.penumbra, 2)
 if (turretLamp) {
-  hangLamp(new Vector3(1.25, 0, 0.55))
-  root.add(turretLamp, turretLamp.target)
-  watchEffect(() => (turretLamp.intensity = LAMP_CANDELA * props.lamp))
+  hangLamp(root, PROCEDURAL_LAMP.at, PROCEDURAL_LAMP.aim)
+  watchEffect(() => (turretLamp.intensity = LAMP.candela * props.lamp))
 }
 
-/** The lamp at `at` (body frame), aimed along {@link LAMP_AIM}. */
-function hangLamp(at: Vector3): void {
+/** The lamp under `parent` at `at`, aimed at `aim`, both in the parent's frame. */
+function hangLamp(parent: Object3D, at: Vector3, aim: Vector3): void {
   if (!turretLamp) return
+  parent.add(turretLamp, turretLamp.target)
   turretLamp.position.copy(at)
-  turretLamp.target.position.set(at.x + LAMP_AIM.x, at.y + LAMP_AIM.y, at.z + LAMP_AIM.z)
+  turretLamp.target.position.copy(aim)
 }
 const proceduralTriangles =
   (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
@@ -319,14 +330,11 @@ function showModel(object: Object3D | undefined): void {
       })
       applyEnvironment(object, props.environment)
       const turret = object.getObjectByName('turret')
-      if (turret) {
-        // Not yet under `root`: the model's own frame is the body frame.
-        object.updateMatrixWorld(true)
-        hangLamp(turret.getWorldPosition(new Vector3()))
-      }
+      const beam = turret?.userData.beam as [number, number, number] | undefined
+      if (turret && beam) hangLamp(turret, new Vector3(), new Vector3(...beam))
     }
     root.add(object)
-  }
+  } else hangLamp(root, PROCEDURAL_LAMP.at, PROCEDURAL_LAMP.aim)
   applyLod()
   pose(props.frame)
   invalidate()

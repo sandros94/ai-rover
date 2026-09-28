@@ -4,12 +4,17 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { CustomToneMapping, PCFShadowMap, ShaderChunk, SRGBColorSpace } from 'three'
 import {
+  ARM_EASE_S,
+  ARM_NIGHT,
   chunksFromGrid,
   flatFrame,
   qualityFor,
   skyLighting,
+  sunCrossings,
   sunPosition,
 } from '#shared/utils/client/scene'
+import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
+import { ARM_STOWED } from '#shared/utils/rover'
 import { SCENE_QUALITY_KEY } from '~/composables/useSceneQuality'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopStage from '~/components/map/StopStage.vue'
@@ -138,6 +143,36 @@ describe('StopStage in 3D', () => {
       skyLighting(sunPosition(solFraction).elevationDeg).exposure,
       9,
     )
+  })
+
+  it('raises the arm into its night pose once the sun is down, and stows it by day', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const armAt = async (solFraction: number) => {
+      const stage = await mountSuspended(StopStage, {
+        props: {
+          view: '3d',
+          terrain: { grid: grid(65), origin: { i: 0, j: 0 } },
+          seen: new Uint8Array(65 * 65).fill(1),
+          chunkVertices: 65,
+          heightAt: () => 0,
+          loading: { loaded: 1, total: 1, error: null },
+          center: { x: 32, y: 32 },
+          radius: 32,
+          rover: { x: 32, y: 32, headingRad: 0 },
+          solFraction,
+        },
+      })
+      await flushPromises()
+      return stage.findComponent(RoverModel).props('joints') as Record<string, number>
+    }
+    const { set } = sunCrossings()
+    const eased = (ARM_EASE_S + 1) / MARS_SOL_SECONDS
+    expect(await armAt(0.4)).toMatchObject(ARM_STOWED)
+    const night = await armAt(set + eased)
+    for (const [node, value] of Object.entries(ARM_NIGHT)) expect(night[node]).toBeCloseTo(value, 9)
+    // Halfway through the dusk easing, halfway between.
+    const half = await armAt(set + ARM_EASE_S / 2 / MARS_SOL_SECONDS)
+    expect(half.arm_2).toBeCloseTo((ARM_STOWED.arm_2 + ARM_NIGHT.arm_2) / 2, 3)
   })
 })
 

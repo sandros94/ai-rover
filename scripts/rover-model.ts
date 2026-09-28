@@ -27,9 +27,10 @@
  * rest rotation.
  *
  * Pose. The mobility joints sit at zero; the mast's are baked deployed (`deployedMast`), and NASA's
- * mast is taken at the frame of its deploy animation where the head stands highest. NASA's arm
- * rests in the stowed pose Perseverance drives in (it matches the arm joint angles in the
- * Mars 2020 PDS image labels to about 2 cm at the WATSON camera).
+ * mast is taken at the frame of its deploy animation where the head stands highest. The arm's
+ * five joints are baked at the stowed pose the rover reported (`ARM_STOWED`), which NASA's arm
+ * rests in at its first frame to about 2 cm at the WATSON camera; NASA animates the arm about
+ * five pivots lying on the URDF's joint axes, so each pivot's geometry is that joint's link.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -45,6 +46,7 @@ import { MeshoptSimplifier } from 'meshoptimizer'
 import type { Surface } from './rover-model/atlas'
 import { bakeAtlases } from './rover-model/atlas'
 import { fitRigid } from './rover-model/fit'
+import { ARM_JOINTS, ARM_STOWED } from '../shared/utils/rover/arm'
 import {
   assignPieces,
   glassAsBlend,
@@ -55,7 +57,7 @@ import {
   pieces,
   PointIndex,
 } from './rover-model/nasa'
-import type { LinkPoses, Mat3, Rigid, Vec3 } from './rover-model/urdf'
+import type { LinkPoses, Mat3, Rigid, UrdfJoint, Vec3 } from './rover-model/urdf'
 import {
   apply,
   C,
@@ -127,6 +129,22 @@ const KEPT: KeptLink[] = [
   { link: 'Body_WheelRightMiddle', node: 'wheel_rm' },
   { link: 'Body_WheelLeftRear', node: 'wheel_lr' },
   { link: 'Body_WheelRightRear', node: 'wheel_rr' },
+  { link: 'Body_RA_Link1', node: 'arm_1' },
+  { link: 'Body_RA_Link2', node: 'arm_2' },
+  { link: 'Body_RA_Link3', node: 'arm_3' },
+  { link: 'Body_RA_Link4', node: 'arm_4' },
+  { link: 'Body_RA_Link5', node: 'arm_5' },
+]
+/**
+ * NASA's arm pivots, from the shoulder out, and the arm link each carries: each pivot turns about
+ * its URDF joint's axis (to within 4 mm), so everything under it goes with that link.
+ */
+const ARM_PIVOTS: [nasa: string, node: string][] = [
+  ['arm.003', 'arm_1'],
+  ['arm.002', 'arm_2'],
+  ['arm', 'arm_3'],
+  ['arm.004', 'arm_4'],
+  ['turret_obj', 'arm_5'],
 ]
 /**
  * The nodes whose materials bake into shared atlas pages: parts cut from the same NASA meshes use
@@ -136,6 +154,7 @@ function atlasGroup(node: string): string {
   if (node === 'chassis') return 'chassis'
   if (node.startsWith('mast_')) return 'mast'
   if (node.startsWith('wheel_')) return 'wheels'
+  if (node.startsWith('arm_')) return 'arm'
   return 'suspension'
 }
 
@@ -159,7 +178,12 @@ const SUSPENSION = KEPT.filter((k) =>
  * shape; a flat translucent tint shows nothing finer.
  */
 const GHOST_BUDGET: Record<string, number> = {
-  chassis: 5_000,
+  chassis: 4_300,
+  arm_1: 80,
+  arm_2: 120,
+  arm_3: 120,
+  arm_4: 80,
+  arm_5: 400,
   mast_azimuth: 150,
   mast_elevation: 500,
   differential: 150,
@@ -418,7 +442,7 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     .registerExtensions(ALL_EXTENSIONS)
     .registerDependencies({ 'draco3d.decoder': await draco3d.createDecoderModule() })
   const urdf = parseUrdf(readFileSync(join(src, 'm2020.urdf'), 'utf8'))
-  const baked = deployedMast(urdf.joints)
+  const baked = new Map([...deployedMast(urdf.joints), ...stowedArm(urdf.joints)])
   const urdfPoses = linkPoses(urdf.joints, baked)
   /** A kept link's pose in the app frame. */
   const pose = (link: string): Rigid => {
@@ -475,6 +499,8 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     mastElevation.add(n)
     mastAzimuth.delete(n)
   })
+  const armOf = new Map<GltfNode, string>()
+  for (const [pivot, link] of ARM_PIVOTS) named(pivot).traverse((n) => armOf.set(n, link))
   const bakedPrimitives: Baked[] = []
   for (const node of root.listNodes()) {
     const mesh = node.getMesh()
@@ -488,8 +514,10 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
         node.getSkin() ? skinning(node, primitive, toBody) : world,
         node.getName(),
       )
+      const arm = armOf.get(node)
       if (mastElevation.has(node)) b.part.fill('mast_elevation')
       else if (mastAzimuth.has(node)) b.part.fill('mast_azimuth')
+      else if (arm) b.part.fill(arm)
       bakedPrimitives.push(b)
     }
   }
@@ -713,14 +741,20 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     nodes.get(name)!.addChild(doc.createNode(`${name}:mesh`).setMesh(mesh))
   }
 
-  // The arm turret's lamp hangs from the WATSON camera, where its LEDs are.
-  const watson = mulMat4(toBody, named('WATSON').getWorldMatrix())
-  const lamp = transformPoint(invert(nodePose.get('chassis')!), [
-    watson[12]!,
-    watson[13]!,
-    watson[14]!,
-  ])
-  nodes.get('chassis')!.addChild(doc.createNode('turret').setTranslation(round(lamp)))
+  // The turret's lamp: WATSON's LEDs ring its lens and light what it looks at, along its URDF
+  // frame's x axis (the lens sits at that end of NASA's camera). The node lies at the lens and
+  // records that direction in its own frame, which is the turret link's.
+  const watson = urdfPoses.get('Frame_WATSON')
+  if (!watson) throw new Error('rover-model: the URDF has no WATSON frame.')
+  const turretPose = nodePose.get('arm_5')!
+  const lens = toApp(watson.pose)
+  const inTurret = compose(invert(turretPose), lens)
+  nodes.get('arm_5')!.addChild(
+    doc
+      .createNode('turret')
+      .setTranslation(round(inTurret.t))
+      .setExtras({ beam: round([inTurret.r[0], inTurret.r[3], inTurret.r[6]]) }),
+  )
 
   // --- Only the new tree remains: NASA's scene, rig and animations go.
   for (const old of root.listScenes()) if (old !== scene) old.dispose()
@@ -900,6 +934,19 @@ function compact(
     out[k] = remap[vertex]!
   })
   return { positions: Float32Array.from(kept), indices: out }
+}
+
+/** The arm joints at {@link ARM_STOWED}, checked against the URDF's names and limits. */
+function stowedArm(joints: UrdfJoint[]): Map<string, number> {
+  return new Map(
+    ARM_JOINTS.map(({ node, urdf, limit }) => {
+      const joint = joints.find((j) => j.name === urdf)
+      if (!joint?.limit || joint.limit.some((x, k) => x !== limit[k])) {
+        throw new Error(`rover-model: the URDF's ${urdf} is not the arm joint ${node} expects.`)
+      }
+      return [urdf, ARM_STOWED[node]] as const
+    }),
+  )
 }
 
 function keptAncestor(link: string, poses: LinkPoses): KeptLink | undefined {
