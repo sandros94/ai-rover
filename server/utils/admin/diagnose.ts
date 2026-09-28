@@ -35,22 +35,20 @@ const MISSION_PROBE_TIMEOUT_MS = 50_000
 const STUCK_AFTER_MS = 5_000
 /** Blob prefixes the app writes under. */
 const BLOB_PREFIXES = ['missions/', 'terrain/']
-/** What a recorded migration's name looks like: a timestamp, an underscore, a slug. */
-const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+$/
 const MIGRATION_VERSION = /^\d{14}$/
 
 /**
- * A tracking row as one label: the full name when a column holds it, else a version column and a
- * slug column joined, else the whole row so an unknown layout is at least visible.
+ * The platform's tracking table records a migration by its version (the timestamp prefix of the
+ * folder name) beside status flags; the local emulation records the full folder name. Both carry
+ * the version, which is what an operator compares against the repository.
  */
 function migrationLabel(row: Record<string, unknown>): string {
   const values = Object.values(row).map(String)
-  const full = values.find((v) => MIGRATION_NAME.test(v))
-  if (full) return full
-  const version = values.find((v) => MIGRATION_VERSION.test(v))
-  const slug = values.find((v) => /^[a-z][a-z0-9_]+$/.test(v))
-  if (version && slug) return `${version}_${slug}`
-  return JSON.stringify(row)
+  return (
+    values
+      .find((v) => MIGRATION_VERSION.test(v) || MIGRATION_VERSION.test(v.slice(0, 14)))
+      ?.slice(0, 14) ?? JSON.stringify(row)
+  )
 }
 /** The blob count stops at this. */
 const MAX_BLOB_KEYS = 1000
