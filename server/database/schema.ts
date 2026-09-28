@@ -35,7 +35,7 @@ function oneOf(values: readonly string[]) {
   return sql.raw(values.map((value) => `'${value}'`).join(', '))
 }
 
-export const IDENTITY_PROVIDERS = ['github', 'atproto'] as const
+export const IDENTITY_PROVIDERS = ['github', 'discord', 'atproto'] as const
 export const MISSION_STATUSES = ['active', 'ended'] as const
 /** `void`: the drive beside the round failed, so nothing won it and it never starts a segment. */
 export const ROUND_STATUSES = ['open', 'closed', 'void'] as const
@@ -77,7 +77,7 @@ export const userIdentity = snakeCase.table(
   'user_identity',
   {
     provider: text({ enum: IDENTITY_PROVIDERS }).notNull(),
-    /** The provider's stable account id (a DID for AT Protocol, the numeric id for GitHub). */
+    /** The provider's stable account id (a DID for AT Protocol, the numeric id for GitHub and Discord). */
     subject: text().notNull(),
     userId: uuid()
       .notNull()

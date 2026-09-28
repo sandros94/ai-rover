@@ -2,16 +2,10 @@ import { HTTPError } from 'nitro/h3'
 import type { JWK_EC_Private, JWK_EC_Public } from 'unjwt/jwk'
 import { generateJWK } from 'unjwt/jwk'
 import { sign } from 'unjwt/jws'
-import { hash } from 'unsecure/hash'
 import { fetchPublic, readJsonObject } from '../http'
 import { randomToken } from '../random'
 
 export type DpopKey = JWK_EC_Private<'ES256'>
-
-/** RFC 7636 `S256`: base64url of the SHA-256 of the verifier. */
-export function pkceChallenge(verifier: string): Promise<string> {
-  return hash(verifier, { algorithm: 'SHA-256', returnAs: 'base64url' })
-}
 
 /** A fresh ES256 key for one sign-in flow; it binds the flow's tokens and dies with them. */
 export async function createDpopKey(): Promise<DpopKey> {

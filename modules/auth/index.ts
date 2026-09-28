@@ -16,11 +16,12 @@ const SERVER_UTILS = [
   'clearUserSession',
   'requireUserSession',
   'defineOAuthGitHubEventHandler',
+  'defineOAuthDiscordEventHandler',
   'defineOAuthAtprotoEventHandler',
 ]
 
 /**
- * Sessions and sign-in: a JWE cookie session, GitHub OAuth and AT Protocol OAuth (public client),
+ * Sessions and sign-in: a JWE cookie session, GitHub and Discord OAuth and AT Protocol OAuth (public client),
  * with server utils, the `useUserSession()` composable, an `authenticated` route middleware and
  * the types at `#auth`. The sign-in routes themselves are the app's: it mounts the
  * `defineOAuth…EventHandler`s and decides in `onSuccess` which user an identity belongs to.

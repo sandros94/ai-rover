@@ -16,8 +16,8 @@ import {
   createDpopKey,
   dpopProof,
   dpopRequest,
-  pkceChallenge,
 } from '~~/modules/auth/runtime/server/lib/atproto/proof'
+import { pkceChallenge } from '~~/modules/auth/runtime/server/lib/random'
 import { publicHttpsUrl } from '~~/modules/auth/runtime/server/lib/http'
 import type { AuthContext } from '~~/modules/auth/runtime/server/lib/context'
 import { createTestDb } from '../db/helpers'

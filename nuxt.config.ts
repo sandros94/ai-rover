@@ -18,6 +18,9 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  /** Brand marks Lucide does not carry, as `i-brand-<file>`. */
+  icon: { customCollections: [{ prefix: 'brand', dir: './app/assets/icons' }] },
+
   runtimeConfig: {
     /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
     typesafeToken: '',
@@ -33,6 +36,8 @@ export default defineNuxtConfig({
       origins: '',
       /** From `NUXT_OAUTH_GITHUB_CLIENT_ID` and `NUXT_OAUTH_GITHUB_CLIENT_SECRET`. */
       github: { clientId: '', clientSecret: '' },
+      /** From `NUXT_OAUTH_DISCORD_CLIENT_ID` and `NUXT_OAUTH_DISCORD_CLIENT_SECRET`. */
+      discord: { clientId: '', clientSecret: '' },
     },
   },
 

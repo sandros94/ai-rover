@@ -19,6 +19,15 @@ export interface GitHubFlow extends FlowBase {
   provider: 'github'
 }
 
+export interface DiscordFlow extends FlowBase {
+  provider: 'discord'
+  /** PKCE verifier of the authorize request. */
+  verifier: string
+}
+
+/** The flows of the providers signed in through an authorization-code redirect. */
+export type CodeFlowState = GitHubFlow | DiscordFlow
+
 export interface AtprotoFlow extends FlowBase {
   provider: 'atproto'
   iss: string
@@ -33,7 +42,7 @@ export interface AtprotoFlow extends FlowBase {
   redirectUri: string
 }
 
-export type FlowState = GitHubFlow | AtprotoFlow
+export type FlowState = CodeFlowState | AtprotoFlow
 
 export interface FlowCookie {
   seal(event: H3Event, flow: FlowState): Promise<void>

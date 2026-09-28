@@ -8,7 +8,7 @@ import { safeRedirectPath } from './origins'
 /** A proven identity, handed to `onSuccess`; no provider token survives to this point. */
 export interface OAuthResult {
   provider: AuthProvider
-  /** The provider's durable account id: GitHub's numeric id, an atproto DID. */
+  /** The provider's durable account id: GitHub's numeric id, Discord's snowflake, an atproto DID. */
   subject: string
   profile: { displayName: string; avatarUrl?: string; handle?: string }
   /** The signed-in user to attach the identity to, when the flow asked to link. */
@@ -78,7 +78,7 @@ export async function startFields(
   state: string,
 ) {
   let linkTo: string | undefined
-  if (query.link === '1') {
+  if (query.link !== undefined) {
     linkTo = (await auth.sessions.get(event)).user?.id
     if (!linkTo) throw new HTTPError({ status: 401, message: 'Sign in before linking an account.' })
   }

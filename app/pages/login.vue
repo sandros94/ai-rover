@@ -24,13 +24,13 @@ const offers = (provider: AuthProvider) => providers.value.includes(provider)
 
 const handle = ref('')
 
-function signInUrl(provider: AuthProvider, extra: Record<string, string> = {}) {
-  return `/api/auth/${provider}?${new URLSearchParams({ redirect: redirect.value, ...extra })}`
-}
-
 async function signInWithAtproto() {
   const value = handle.value.trim()
-  if (value) await navigateTo(signInUrl('atproto', { handle: value }), { external: true })
+  if (value) {
+    await navigateTo(signInUrl('atproto', { redirect: redirect.value, handle: value }), {
+      external: true,
+    })
+  }
 }
 </script>
 
@@ -51,16 +51,19 @@ async function signInWithAtproto() {
           :description="failure"
         />
 
-        <UButton
-          v-if="offers('github')"
-          :to="signInUrl('github')"
-          external
-          icon="i-lucide-github"
-          color="neutral"
-          block
-        >
-          Continue with GitHub
-        </UButton>
+        <template v-for="provider in REDIRECT_PROVIDERS" :key="provider">
+          <UButton
+            v-if="offers(provider)"
+            :data-test="`sign-in-${provider}`"
+            :to="signInUrl(provider, { redirect })"
+            external
+            :icon="PROVIDER_DISPLAY[provider].icon"
+            color="neutral"
+            block
+          >
+            Continue with {{ PROVIDER_DISPLAY[provider].label }}
+          </UButton>
+        </template>
 
         <form
           v-if="offers('atproto')"

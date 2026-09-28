@@ -1,0 +1,1 @@
+ALTER TABLE "user_identity" DROP CONSTRAINT "user_identity_provider_check", ADD CONSTRAINT "user_identity_provider_check" CHECK ("provider" in ('github', 'discord', 'atproto'));

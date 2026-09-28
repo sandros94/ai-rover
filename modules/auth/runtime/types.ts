@@ -1,5 +1,5 @@
 /** The identity providers a user can sign in with. */
-export const AUTH_PROVIDERS = ['github', 'atproto'] as const
+export const AUTH_PROVIDERS = ['github', 'discord', 'atproto'] as const
 
 export type AuthProvider = (typeof AUTH_PROVIDERS)[number]
 
