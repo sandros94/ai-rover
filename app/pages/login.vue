@@ -72,10 +72,12 @@ async function signInWithAtproto() {
             v-model="handle"
             placeholder="alice.bsky.social"
             autocomplete="username"
-            aria-label="Bluesky or AT Protocol handle"
+            aria-label="AT Protocol handle or DID"
             icon="i-lucide-at-sign"
           />
-          <UButton type="submit" :disabled="!handle.trim()" block> Continue with Bluesky </UButton>
+          <UButton type="submit" :disabled="!handle.trim()" block>
+            Continue with AT Protocol
+          </UButton>
         </form>
 
         <p v-if="!providers.length" data-test="no-sign-in" class="text-sm text-muted">

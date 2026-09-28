@@ -23,7 +23,7 @@ describe('e2e: the login page rendered on the server', async () => {
   it('offers the providers on a listed origin', async () => {
     const html = await render(LISTED)
     expect(html).toContain('Continue with GitHub')
-    expect(html).toContain('data-test="atproto-sign-in"')
+    expect(html).toContain('Continue with AT Protocol')
     expect(html).not.toContain('data-test="no-sign-in"')
   })
 

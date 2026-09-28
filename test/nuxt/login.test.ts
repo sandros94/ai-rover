@@ -30,4 +30,12 @@ describe('login page', () => {
       expect(text).not.toContain(code)
     }
   })
+
+  it('names the protocol, not one of its apps, for handle sign-in', async () => {
+    const wrapper = await mountSuspended(LoginPage, { route: '/login' })
+    const form = wrapper.find('[data-test=atproto-sign-in]')
+    expect(form.text()).toContain('Continue with AT Protocol')
+    expect(form.find('input').attributes('aria-label')).toBe('AT Protocol handle or DID')
+    expect(wrapper.text()).not.toContain('Bluesky')
+  })
 })
