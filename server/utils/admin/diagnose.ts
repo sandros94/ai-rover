@@ -37,6 +37,21 @@ const STUCK_AFTER_MS = 5_000
 const BLOB_PREFIXES = ['missions/', 'terrain/']
 /** What a recorded migration's name looks like: a timestamp, an underscore, a slug. */
 const MIGRATION_NAME = /^\d{14}_[a-z0-9_]+$/
+const MIGRATION_VERSION = /^\d{14}$/
+
+/**
+ * A tracking row as one label: the full name when a column holds it, else a version column and a
+ * slug column joined, else the whole row so an unknown layout is at least visible.
+ */
+function migrationLabel(row: Record<string, unknown>): string {
+  const values = Object.values(row).map(String)
+  const full = values.find((v) => MIGRATION_NAME.test(v))
+  if (full) return full
+  const version = values.find((v) => MIGRATION_VERSION.test(v))
+  const slug = values.find((v) => /^[a-z][a-z0-9_]+$/.test(v))
+  if (version && slug) return `${version}_${slug}`
+  return JSON.stringify(row)
+}
 /** The blob count stops at this. */
 const MAX_BLOB_KEYS = 1000
 
@@ -181,14 +196,7 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
       const ran = await rows<{ row: Record<string, unknown> }>(
         sql`select to_jsonb(m) as row from netlify.migrations m`,
       )
-      migrations.push(
-        ...ran
-          .map((r) =>
-            Object.values(r.row).find((v) => typeof v === 'string' && MIGRATION_NAME.test(v)),
-          )
-          .filter((v): v is string => typeof v === 'string')
-          .toSorted(),
-      )
+      migrations.push(...ran.map((r) => migrationLabel(r.row)).toSorted())
     }
     const present = new Set(
       (
