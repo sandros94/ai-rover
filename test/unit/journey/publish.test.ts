@@ -40,10 +40,11 @@ describe('putAll', () => {
   const entries = (n: number) =>
     Array.from({ length: n }, (_, k) => ({ key: `k/${k}`, bytes, contentType: 'x/y' }))
 
-  it(`keeps at most ${PUT_CONCURRENCY} writes in flight, and writes every entry`, async () => {
+  it(`never exceeds ${PUT_CONCURRENCY} writes in flight, overlaps them, and writes every entry`, async () => {
     const blobs = new CountingBlobs()
     const result = await putAll(createJourneyStore({ store: blobs }), entries(50))
-    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
+    expect(blobs.maxInFlight).toBeLessThanOrEqual(PUT_CONCURRENCY)
+    expect(blobs.maxInFlight).toBeGreaterThan(1)
     expect(result.written.map((w) => w.key)).toEqual(entries(50).map((e) => e.key))
     expect(new Set(blobs.writes).size).toBe(50)
   })
@@ -189,7 +190,8 @@ describe('publishSegment', () => {
       segmentId: 'seg-1',
       startedAt: 0,
     })
-    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
+    expect(blobs.maxInFlight).toBeLessThanOrEqual(PUT_CONCURRENCY)
+    expect(blobs.maxInFlight).toBeGreaterThan(1)
   })
 
   it('run again after being cut short, writes only the missing slices, then the manifest', async () => {
@@ -200,7 +202,9 @@ describe('publishSegment', () => {
     for (const key of [...lost, segmentManifestKey('seg-1')]) blobs.blobs.delete(key)
     blobs.writes.length = 0
     const result = await publishSegment(store, { segment, segmentId: 'seg-1', startedAt: 5000 })
-    expect(blobs.writes).toEqual([...lost, segmentManifestKey('seg-1')])
+    // Slices are written in parallel, in any order; the manifest comes after all of them.
+    expect(blobs.writes.slice(0, -1).sort()).toEqual([...lost].sort())
+    expect(blobs.writes.at(-1)).toBe(segmentManifestKey('seg-1'))
     expect(result.skipped).toHaveLength(slices.length - 2)
     // The manifest carries the start of the run that wrote it last.
     const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
