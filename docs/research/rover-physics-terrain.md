@@ -142,9 +142,23 @@ Values used (body geometry from §1 and the URDF [S40]):
 | --- | --- | --- |
 | Turn-in-place stance | front ±48.0°, rear ±45.3° | axle at the centre: `atan(x / y)` of each corner wheel [S38], [S39] |
 | Turn-in-place rate | 0.0264 rad/s ≈ 1.51°/s | outer corner wheel (1.59 m from the centre) at the 4.2 cm/s cap [S38] |
-| Steering rate | 0.168 rad/s ≈ 9.6°/s, ≈ 5 s into the stance | **UNVERIFIED**: no figure published; the steer actuators are identical to the drive ones [S38], whose output rate this is |
+| Steering rate | 0.168 rad/s ≈ 9.6°/s, ≈ 7.4 s into the stance with its ramps (§8) | **UNVERIFIED**: no figure published; the steer actuators are identical to the drive ones [S38], whose output rate this is |
 | Minimum arc radius | 1.17 m | inner corner wheels at the ±85° software limit [S38] |
 | Re-steer threshold | 2° | judgement call |
+
+---
+
+## 8. Acceleration: how the rover starts and stops
+
+No acceleration, deceleration or jerk figure for Perseverance's or Curiosity's drive was found in the fetched sources; the references give top rates only (0.042 m/s wheel speed, 0.168 rad/s actuator output [S38], [S41]). The profile values are therefore judgement calls, chosen so a start or stop is visible at 1× yet short beside the stops, and derived from one another where the hardware ties them together.
+
+| Quantity | Value | Basis |
+| --- | --- | --- |
+| Drive acceleration | 0.025 m/s² | **UNVERIFIED**, judgement call: rest to 0.033 m/s in about 2 s over about 3 cm; 26 N at 1,025 kg, far inside the wheels' traction at 3.69 m/s² [S1], [S11] |
+| Drive jerk | 0.04 m/s³ | **UNVERIFIED**, judgement call: 0.625 s to reach the acceleration |
+| Turn-in-place acceleration, jerk | 0.0157 rad/s², 0.0251 rad/s³ | the drive's at the outer corner wheel (1.59 m from the centre), which sets the turn rate [S38]; ramp about 2.3 s |
+| Steering acceleration, jerk | 0.095 rad/s², 0.152 rad/s³ | the drive's at the wheel radius (0.263 m): the steer and drive actuators are identical [S38]; ramp about 2.4 s |
+| Emergency deceleration | 0.1 m/s², no jerk limit | **UNVERIFIED**, judgement call: a fault stops the drive from 0.033 m/s in 0.33 s over 5 mm |
 
 ---
 
