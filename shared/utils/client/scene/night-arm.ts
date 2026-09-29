@@ -100,3 +100,11 @@ export function armSequenceSeconds(
 export function armPoseAt(solFraction: number, latitudeDeg = DEFAULT_LATITUDE_DEG): ArmPose {
   return armPoseAlong(armSequenceSeconds(solFraction, latitudeDeg))
 }
+
+/**
+ * Brightness of the arm turret's lamp, 0 off to 1 full, with the sun `elevationDeg` above the
+ * horizon: it comes on as the sun's centre sets and is full once the sun is 3° below.
+ */
+export function turretLampLevel(elevationDeg: number): number {
+  return Math.min(1, Math.max(0, -elevationDeg / 3))
+}

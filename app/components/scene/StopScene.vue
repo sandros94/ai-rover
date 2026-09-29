@@ -23,6 +23,7 @@ import {
   SCENE_COLORS,
   skyLighting,
   sunPosition,
+  turretLampLevel,
 } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { ResolvedRoverGeometry } from '#shared/utils/rover'
@@ -157,8 +158,7 @@ const sun = computed(() => sunPosition(props.solFraction))
 const lighting = computed(() => skyLighting(sun.value.elevationDeg))
 /** The sky as the rover's metals and glass reflect it. */
 const environment = shallowRef<Texture | null>(null)
-/** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
-const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
+const lamp = computed(() => turretLampLevel(sun.value.elevationDeg))
 /** After sunset the arm unstows to raise the lamp over the front deck, and stows again after sunrise. */
 const armJoints = computed(() => armPoseAt(props.solFraction))
 /**

@@ -9,12 +9,14 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import type { Material, Mesh, Object3D } from 'three'
+import type { Object3D } from 'three'
 import { useRuntimeConfig } from '#imports'
 import { flatFrame } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 import type { RoverPose } from '#shared/utils/rover'
 import { poseOnTerrain } from '#shared/utils/rover'
+import type { ModelLook } from '../../playground/model-look'
+import { MODEL_LOOKS, useModelLook } from '../../playground/model-look'
 import type { JointControl } from '../../playground/rover-joints'
 import {
   coupledJoints,
@@ -89,35 +91,8 @@ const frame = computed(() => {
   return out
 })
 
-/** Solid, see-through, or edges only: the linkage inside the body shows in the last two. */
-type Look = 'solid' | 'x-ray' | 'wireframe'
-const LOOKS: Look[] = ['solid', 'x-ray', 'wireframe']
-const look = ref<Look>('solid')
-/** The model's materials as loaded, to put back. */
-const saved = new Map<
-  Material,
-  Partial<Record<'transparent' | 'opacity' | 'depthWrite' | 'wireframe', unknown>>
->()
-watch([look, model], ([mode, object]) => {
-  object?.traverse((child) => {
-    const mesh = child as Mesh
-    if (!mesh.isMesh) return
-    for (const material of [mesh.material].flat() as (Material & { wireframe?: boolean })[]) {
-      if (!saved.has(material)) {
-        const { transparent, opacity, depthWrite, wireframe } = material
-        saved.set(material, { transparent, opacity, depthWrite, wireframe })
-      }
-      Object.assign(material, saved.get(material))
-      if (mode === 'x-ray')
-        Object.assign(material, { transparent: true, opacity: 0.25, depthWrite: false })
-      if (mode === 'wireframe') material.wireframe = true
-      material.needsUpdate = true
-    }
-  })
-})
-onBeforeUnmount(() => {
-  for (const [material, state] of saved) Object.assign(material, state, { needsUpdate: true })
-})
+const look = ref<ModelLook>('solid')
+useModelLook(model, look)
 </script>
 
 <template>
@@ -137,7 +112,7 @@ onBeforeUnmount(() => {
         <USwitch v-model="solver" label="Solver pose" />
         <UFieldGroup>
           <UButton
-            v-for="option in LOOKS"
+            v-for="option in MODEL_LOOKS"
             :key="option"
             :variant="option === look ? 'solid' : 'outline'"
             color="neutral"

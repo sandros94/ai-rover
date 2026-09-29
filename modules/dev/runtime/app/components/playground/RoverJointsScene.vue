@@ -29,16 +29,21 @@ import SceneSky from '~/components/scene/SceneSky.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import SceneSun from '~/components/scene/SceneSun.vue'
 
-const props = defineProps<{
-  /** The rover's keyframe: its placement, suspension and spins. */
-  frame: Float32Array
-  /** Joint values by model node name, over the keyframe's. */
-  joints: Record<string, number>
-  /** The ground under the rover, world metres. */
-  heightAt: (x: number, y: number) => number
-  /** Time of the sol, 0 and 1 midnight. */
-  solFraction: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** The rover's keyframe: its placement, suspension and spins. */
+    frame: Float32Array
+    /** Joint values by model node name, over the keyframe's. */
+    joints: Record<string, number>
+    /** The ground under the rover, world metres. */
+    heightAt: (x: number, y: number) => number
+    /** Time of the sol, 0 and 1 midnight. */
+    solFraction: number
+    /** The arm turret's lamp, 0 off to 1 full. */
+    lamp?: number
+  }>(),
+  { lamp: 0 },
+)
 
 const sun = computed(() => sunPosition(props.solFraction))
 const lighting = computed(() => skyLighting(sun.value.elevationDeg))
@@ -86,6 +91,6 @@ onBeforeUnmount(() => {
     <SceneSun :direction="sun.direction" :lighting="lighting" :target="target" />
     <FollowCamera :target="target" :offset="[3.5, 4, 1.2]" />
     <primitive :object="ground" />
-    <RoverModel :frame="frame" :joints="joints" :environment="environment" :lamp="0" />
+    <RoverModel :frame="frame" :joints="joints" :environment="environment" :lamp="lamp" />
   </TresCanvas>
 </template>
