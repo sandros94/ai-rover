@@ -1,134 +1,99 @@
 <script lang="ts">
+import type { Material } from 'three'
+import { MeshLambertMaterial } from 'three'
+import { SCENE_COLORS } from '#shared/utils/client/scene'
+
 let modelIds = 0
 /** A fresh id for a rover's entry in the scene's full-model ledger. */
 const nextModelId = () => ++modelIds
+
+/** A focused ghost's full model is shaded, and more opaque than its silhouette. */
+const DETAIL_OPACITY = 0.7
+/**
+ * A focused ghost's full model draws each of the model's materials by a red copy, so its textures
+ * read through the tint; one copy per material, shared by whichever ghost is focused.
+ */
+const tints = new WeakMap<Material, MeshLambertMaterial>()
+function tinted(source: Material): MeshLambertMaterial {
+  let copy = tints.get(source)
+  if (!copy) {
+    copy = new MeshLambertMaterial({
+      color: SCENE_COLORS.death,
+      map: (source as MeshLambertMaterial).map ?? null,
+      transparent: true,
+      opacity: DETAIL_OPACITY,
+      depthWrite: false,
+    })
+    tints.set(source, copy)
+  }
+  return copy
+}
 </script>
 
 <script setup lang="ts">
-import { useLoop, useTres } from '@tresjs/core'
-import type { Material, Mesh, Object3D, Texture } from 'three'
-import {
-  BoxGeometry,
-  Color,
-  CylinderGeometry,
-  Group,
-  InstancedMesh,
-  Matrix4,
-  MeshBasicMaterial,
-  MeshLambertMaterial,
-  Quaternion,
-  SpotLight,
-  Vector3,
-} from 'three'
-import { frameAttitude } from '#shared/utils/client/instruments'
-import type { FullModelLedger, RigNode, RoverPart } from '#shared/utils/client/scene'
-import {
-  framePlacement,
-  rigTransforms,
-  ROVER_RIG_NODES,
-  ROVER_TONES,
-  roverParts,
-  SCENE_COLORS,
-} from '#shared/utils/client/scene'
-import type { ResolvedRoverGeometry } from '#shared/utils/rover'
-import { DEFAULT_ROVER_GEOMETRY } from '#shared/utils/rover'
-import type { RoverVariant } from '~/composables/useRoverVariant'
+import type { Mesh, Object3D, Texture } from 'three'
+import { Group, SpotLight } from 'three'
+import type { FullModelLedger } from '#shared/utils/client/scene'
+import { framePlacement } from '#shared/utils/client/scene'
+import { applyRoverLook } from '#shared/utils/client/scene/rover-looks'
+import type { LoadedRoverModel, RoverModelStatus } from '~/utils/rover-model'
 import { applyEnvironment, loadRoverModel } from '~/utils/rover-model'
+import type { PosableRover } from '~/utils/rover-pose'
+import { posableRover, poseRover } from '~/utils/rover-pose'
 
 const props = withDefaults(
   defineProps<{
     /** The 19 keyframe values: position, attitude, spins and suspension, used as recorded. */
     frame: Float32Array
-    geometry?: ResolvedRoverGeometry
     /**
-     * Draw as a red translucent silhouette, for a death marker: the low-poly ghost model, which
-     * gains the full one while `detailed`.
+     * Draw as a red translucent silhouette, for a death marker: the low-poly model in the ghost
+     * look, which gains the full model while `detailed`. Otherwise the rover: the low-poly model
+     * as its stand-in until the full model is decoded.
      */
     ghost?: boolean
     /** A ghost in focus: the full model crossfades in over the silhouette once decoded. */
     detailed?: boolean
-    /** Which rover to draw; the JPL model by default, the procedural one standing in until it loads. */
-    variant?: RoverVariant
     /** Who may draw a full model in this scene; without one, nobody waits. */
     ledger?: FullModelLedger
     /** Brightness of the arm turret's white LEDs, 0 off to 1 full; the rover's only lamp. */
     lamp?: number
-    /**
-     * Camera distance beyond which the rover draws its low-poly model in place of the full one,
-     * metres; `null` never. Not for a ghost.
-     */
-    lodDistanceM?: number | null
     /** What the model's metals and glass reflect; see `SceneEnvironment`. */
     environment?: Texture | null
     /**
      * URDF joint values, radians, by model node name, over the keyframe's: any node carrying a
-     * joint (steering, mast, or a rig joint) turned by hand.
+     * joint (steering, mast, arm, or a rig joint) turned by hand.
      */
     joints?: Readonly<Record<string, number>>
   }>(),
   {
-    geometry: () => DEFAULT_ROVER_GEOMETRY,
     ghost: false,
     detailed: false,
-    variant: 'model',
     ledger: undefined,
     lamp: 0,
-    lodDistanceM: null,
     environment: null,
     joints: undefined,
   },
 )
 
 const emit = defineEmits<{
-  /** The drawn rover changed: the procedural one, or a JPL model once loaded. */
-  ready: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+  /** The rover's model changed (a ghost never emits it); see `RoverModelStatus`. */
+  status: [status: RoverModelStatus]
 }>()
 
 const baseURL = useRuntimeConfig().app.baseURL
-const { camera, invalidate } = useTres()
-const { onBeforeRender } = useLoop()
-
-const partsAt = (frame: Float32Array) => roverParts(frameAttitude(frame), props.geometry)
-const initial = partsAt(props.frame)
-const boxCount = initial.filter((part) => part.shape === 'box').length
-const cylinderCount = initial.length - boxCount
 
 const root = new Group()
-/** The procedural rover: drawn while the model loads, and when it cannot. */
-const placeholder = new Group()
-root.add(placeholder)
-const unitBox = new BoxGeometry(1, 1, 1)
-const unitCylinder = new CylinderGeometry(0.5, 0.5, 1, 20)
-/** A ghost's silhouette opacity; its full model, in focus, is shaded and more opaque. */
-const GHOST_OPACITY = { silhouette: 0.3, detailed: 0.7 }
-/** How long a focused ghost's full model takes to replace its silhouette, milliseconds. */
-const CROSSFADE_MS = 150
-const material = props.ghost
-  ? new MeshBasicMaterial({
-      color: SCENE_COLORS.death,
-      toneMapped: false,
-      transparent: true,
-      opacity: GHOST_OPACITY.silhouette,
-      depthWrite: false,
-    })
-  : new MeshLambertMaterial()
-// Two draw calls for the whole rover: every box, then every cylinder, as instances.
-const boxes = new InstancedMesh(unitBox, material, boxCount)
-const cylinders = new InstancedMesh(unitCylinder, material, cylinderCount)
-for (const mesh of [boxes, cylinders]) {
-  // The instances move every frame; a stale bounding sphere would cull them.
-  mesh.frustumCulled = false
-  mesh.castShadow = mesh.receiveShadow = !props.ghost
-  placeholder.add(mesh)
-}
+/** The low-poly model in its look: a ghost's silhouette, or the rover's stand-in. */
+let base: PosableRover | undefined
+/** The full model: the rover's own, or a focused ghost's, tinted. */
+let full: PosableRover | undefined
 
 /**
- * The arm turret's white LEDs around the WATSON camera, the only light the rover carries. On the
- * model it hangs from the `turret` node, at the lens and along the camera's boresight
+ * The arm turret's white LEDs around the WATSON camera, the only light the rover carries. It
+ * hangs from the drawn model's `turret` node, at the lens and along the camera's boresight
  * (`extras.beam`), so the cone follows the arm: at night the arm holds the turret up over the
- * front deck, lighting the ground a few metres ahead of the wheels. On the procedural rover it
- * hangs where the turret would be, aimed at the same patch of ground. Always in the scene, at
- * zero by day, so switching it never changes the lit shaders.
+ * front deck, lighting the ground a few metres ahead of the wheels. Always in the scene, dark
+ * while no model is drawn and at zero by day, so switching it never changes the lit shaders.
  */
 const LAMP = {
   candela: 15,
@@ -138,417 +103,257 @@ const LAMP = {
   angle: 0.42,
   penumbra: 0.6,
 }
-/** The procedural rover's turret and the ground the lamp lights, body frame. */
-const PROCEDURAL_LAMP = { at: new Vector3(1.25, 0, 0.55), aim: new Vector3(4.45, 0, 0) }
 const turretLamp = props.ghost
   ? undefined
   : new SpotLight('#ffe8cc', 0, LAMP.range, LAMP.angle, LAMP.penumbra, 2)
+const drawn = shallowRef(false)
 if (turretLamp) {
-  hangLamp(root, PROCEDURAL_LAMP.at, PROCEDURAL_LAMP.aim)
-  watchEffect(() => (turretLamp.intensity = LAMP.candela * props.lamp))
+  root.add(turretLamp, turretLamp.target)
+  watchEffect(() => (turretLamp.intensity = drawn.value ? LAMP.candela * props.lamp : 0))
 }
 
-/** The lamp under `parent` at `at`, aimed at `aim`, both in the parent's frame. */
-function hangLamp(parent: Object3D, at: Vector3, aim: Vector3): void {
-  if (!turretLamp) return
-  parent.add(turretLamp, turretLamp.target)
-  turretLamp.position.copy(at)
-  turretLamp.target.position.copy(aim)
-}
-const proceduralTriangles =
-  (boxCount * unitBox.index!.count + cylinderCount * unitCylinder.index!.count) / 3
-if (!props.ghost) {
-  const color = new Color()
-  let b = 0
-  let c = 0
-  for (const part of initial) {
-    color.set(ROVER_TONES[part.tone])
-    if (part.shape === 'box') boxes.setColorAt(b++, color)
-    else cylinders.setColorAt(c++, color)
-  }
-}
-
-const matrix = new Matrix4()
-const position = new Vector3()
-const quaternion = new Quaternion()
-const scale = new Vector3()
-
-function place(parts: RoverPart[], frame: Float32Array): void {
-  const placement = framePlacement(frame)
-  root.position.set(placement.position.x, placement.position.y, placement.position.z)
-  const q = placement.quaternion
-  root.quaternion.set(q.x, q.y, q.z, q.w)
-  let b = 0
-  let c = 0
-  for (const part of parts) {
-    position.set(part.position.x, part.position.y, part.position.z)
-    quaternion.set(part.quaternion.x, part.quaternion.y, part.quaternion.z, part.quaternion.w)
-    scale.set(part.scale.x, part.scale.y, part.scale.z)
-    matrix.compose(position, quaternion, scale)
-    if (part.shape === 'box') boxes.setMatrixAt(b++, matrix)
-    else cylinders.setMatrixAt(c++, matrix)
-  }
-  boxes.instanceMatrix.needsUpdate = true
-  cylinders.instanceMatrix.needsUpdate = true
-}
-
-place(initial, props.frame)
-
-/** A JPL model in place, with its articulated nodes and their rest rotations. */
-interface Posed {
-  object: Object3D
-  joints: { node: Object3D; rest: Quaternion; name: RigNode }[]
-  /** Nodes kept pointing at a point on another node: the differential's rods. */
-  aims: Aim[]
-  /** Every node carrying a URDF joint, by name: its rest, axis and the value baked into its rest. */
-  jointed: Map<string, { node: Object3D; rest: Quaternion; axis: Vector3; baked: number }>
-}
-
-/**
- * A node that turns to keep its rest direction `from` (its own frame) pointing at `point` on
- * `target` (the target's frame), as the model's `extras.aim` declares.
- */
-interface Aim {
-  node: Object3D
-  rest: Quaternion
-  target: Object3D
-  point: Vector3
-  from: Vector3
-}
-/** The model drawn: the full one for the rover, the silhouette for a ghost. */
-let model: Posed | undefined
-/** A focused ghost's full model, over or in place of its silhouette. */
-let detail: Posed | undefined
-/**
- * The rover's low-poly model (the ghosts' silhouette, a fiftieth of the full model's triangles):
- * the shadow caster for the full model, which casts none, and what is drawn in its place beyond
- * `lodDistanceM`. A shadow a few texels of 3 to 12 cm wide shows none of the detail the full
- * model spends its triangles on, and the shadow pass drew them all a second time.
- */
-let low: Posed | undefined
-/** Writes neither colour nor depth: the low-poly model is then in the shadow pass alone. */
-const shadowOnly = new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
-const lowShade = new MeshLambertMaterial({ color: ROVER_TONES.deck, flatShading: true })
-/** Whether the camera is beyond `lodDistanceM`. */
-let far = false
-/** How much nearer than `lodDistanceM` the camera must come back to bring the full model back. */
-const LOD_MARGIN = 0.1
-const turn = new Quaternion()
-
-function posed(object: Object3D): Posed {
-  const joints = ROVER_RIG_NODES.map((name) => {
-    const node = object.getObjectByName(name)
-    if (!node) throw new Error(`RoverModel: the rover model has no node ${name}.`)
-    return { node, rest: node.quaternion.clone(), name }
-  })
-  const aims: Aim[] = []
-  const jointed: Posed['jointed'] = new Map()
-  object.traverse((node) => {
-    const joint = node.userData as {
-      joint?: string
-      axis?: [number, number, number]
-      baked?: number
-    }
-    if (joint.joint && joint.axis) {
-      jointed.set(node.name, {
-        node,
-        rest: node.quaternion.clone(),
-        axis: new Vector3(...joint.axis).normalize(),
-        baked: joint.baked ?? 0,
-      })
-    }
-  })
-  object.traverse((node) => {
-    const aim = node.userData.aim as
-      | { node: string; point: [number, number, number]; from: [number, number, number] }
-      | undefined
-    const target = aim && object.getObjectByName(aim.node)
-    if (!aim || !target) return
-    aims.push({
-      node,
-      rest: node.quaternion.clone(),
-      target,
-      point: new Vector3(...aim.point),
-      from: new Vector3(...aim.from).normalize(),
-    })
-  })
-  return { object, joints, aims, jointed }
-}
-
-const aimAt = new Vector3()
-const aimTurn = new Quaternion()
-/** Turns each aimed node, from its rest, so its `from` direction meets its target point. */
-function aimAll(posedModel: Posed): void {
-  if (!posedModel.aims.length) return
-  posedModel.object.updateMatrixWorld(true)
-  for (const { node, rest, target, point, from } of posedModel.aims) {
-    // The target point in the node's parent frame, then relative to the node at rest.
-    node.parent!.worldToLocal(target.localToWorld(aimAt.copy(point)))
-    aimAt.sub(node.position).applyQuaternion(aimTurn.copy(rest).invert()).normalize()
-    node.quaternion.copy(rest).multiply(aimTurn.setFromUnitVectors(from, aimAt))
-  }
+/** Hangs the lamp from `rover`'s turret, at the lens, aimed along WATSON's boresight. */
+function hangLamp(rover: PosableRover): void {
+  const turret = rover.object.getObjectByName('turret')
+  const beam = turret?.userData.beam as [number, number, number] | undefined
+  if (!turretLamp || !turret || !beam) return
+  turret.add(turretLamp, turretLamp.target)
+  turretLamp.position.set(0, 0, 0)
+  turretLamp.target.position.set(...beam)
 }
 
 function pose(frame: Float32Array): void {
-  if (!model && !detail) return place(partsAt(frame), frame)
-  const rig = rigTransforms(frame)
-  root.position.set(rig.position.x, rig.position.y, rig.position.z)
-  root.quaternion.set(rig.quaternion.x, rig.quaternion.y, rig.quaternion.z, rig.quaternion.w)
-  for (const posedModel of [model, detail, low]) {
-    if (!posedModel) continue
-    for (const { node, rest, name } of posedModel.joints) {
-      const q = rig.joints[name]
-      node.quaternion.copy(rest).multiply(turn.set(q.x, q.y, q.z, q.w))
+  const { position, quaternion } = framePlacement(frame)
+  root.position.set(position.x, position.y, position.z)
+  root.quaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
+  for (const rover of [base, full]) if (rover) poseRover(rover, frame, props.joints)
+}
+
+/** A posed copy of `loaded` under the root, dressed before it is first drawn. */
+function place(loaded: LoadedRoverModel, dress: (object: Object3D) => void): PosableRover {
+  const object = loaded.scene.clone()
+  dress(object)
+  const rover = posableRover(object)
+  root.add(object)
+  poseRover(rover, props.frame, props.joints)
+  return rover
+}
+
+/* Crossfading from the low-poly model to the full one. */
+
+/** How long the full model takes to replace the low-poly one, milliseconds. */
+const CROSSFADE_MS = 150
+
+/**
+ * Draws `object` through transparent copies of its materials, one per material, until
+ * `restore()`: the materials themselves are shared with every other copy of the model, which must
+ * not fade with it. Fading in, the copies keep the source's depth writes; fading out, they write
+ * none, so the incoming model shows through.
+ */
+function fading(object: Object3D, incoming: boolean) {
+  const copies = new Map<Material, Material>()
+  const swapped: { mesh: Mesh; material: Material }[] = []
+  object.traverse((child) => {
+    const mesh = child as Mesh
+    if (!mesh.isMesh) return
+    const material = mesh.material as Material
+    let copy = copies.get(material)
+    if (!copy) {
+      copy = material.clone()
+      copy.transparent = true
+      if (!incoming) copy.depthWrite = false
+      // `clone()` leaves the shader hooks out; the model's metals reflect through them.
+      copy.onBeforeCompile = material.onBeforeCompile
+      copy.customProgramCacheKey = material.customProgramCacheKey
+      copies.set(material, copy)
     }
-    for (const [name, value] of Object.entries(props.joints ?? {})) {
-      const joint = posedModel.jointed.get(name)
-      if (!joint) continue
-      joint.node.quaternion
-        .copy(joint.rest)
-        .multiply(turn.setFromAxisAngle(joint.axis, value - joint.baked))
-    }
-    aimAll(posedModel)
+    mesh.material = copy
+    swapped.push({ mesh, material })
+  })
+  return {
+    set(p: number): void {
+      for (const [material, copy] of copies) copy.opacity = material.opacity * p
+    },
+    restore(): void {
+      for (const { mesh, material } of swapped) mesh.material = material
+      for (const copy of copies.values()) copy.dispose()
+    },
   }
 }
 
-function paint(object: Object3D, fill: Material): void {
-  object.traverse((child) => {
-    if ((child as Mesh).isMesh) (child as Mesh).material = fill
-  })
+let fade: { frame: number; restore: () => void } | undefined
+
+/** Ends a crossfade where it stands, both models back on their own materials. */
+function stopFade(): void {
+  if (!fade) return
+  cancelAnimationFrame(fade.frame)
+  fade.restore()
+  fade = undefined
 }
 
-/** Draws the JPL model `object` in place of the current rover, or the procedural one without it. */
-function showModel(object: Object3D | undefined): void {
-  if (model) root.remove(model.object)
-  model = object && posed(object)
-  placeholder.visible = !object && !detail
-  if (object) {
-    if (props.ghost) paint(object, material)
-    else {
-      object.traverse((child) => {
-        child.receiveShadow = true
-      })
-      applyEnvironment(object, props.environment)
-      const turret = object.getObjectByName('turret')
-      const beam = turret?.userData.beam as [number, number, number] | undefined
-      if (turret && beam) hangLamp(turret, new Vector3(), new Vector3(...beam))
+/** Fades `outgoing` out and `incoming` in over {@link CROSSFADE_MS}, then hides `outgoing`. */
+function crossfade(outgoing: Object3D, incoming: Object3D, done: () => void): void {
+  stopFade()
+  const from = fading(outgoing, false)
+  const to = fading(incoming, true)
+  const started = performance.now()
+  const current = {
+    frame: 0,
+    restore: () => {
+      from.restore()
+      to.restore()
+    },
+  }
+  fade = current
+  const step = () => {
+    const p = Math.min(1, (performance.now() - started) / CROSSFADE_MS)
+    from.set(1 - p)
+    to.set(p)
+    if (p < 1) {
+      current.frame = requestAnimationFrame(step)
+      return
     }
-    root.add(object)
-  } else hangLamp(root, PROCEDURAL_LAMP.at, PROCEDURAL_LAMP.aim)
-  applyLod()
-  pose(props.frame)
-  invalidate()
+    stopFade()
+    outgoing.visible = false
+    done()
+  }
+  step()
 }
 
-/** Shows the full model or the low-poly one for the camera distance, and who casts the shadow. */
-function applyLod(): void {
-  if (props.ghost) return
-  const caster = !!low
-  model?.object.traverse((child) => {
-    child.castShadow = !caster
+/** Shows `rover`, the full model, in place of the low-poly one, crossfading if that is drawn. */
+function swapIn(rover: PosableRover, done: () => void = () => {}): void {
+  full = rover
+  if (base?.object.visible) crossfade(base.object, rover.object, done)
+  else done()
+}
+
+/* The low-poly model. */
+
+let unmounted = false
+
+loadRoverModel(baseURL, 'low-poly')
+  .then((loaded) => {
+    // The rover never goes back to its stand-in once the full model is in.
+    if (unmounted || (full && !props.ghost)) return
+    base = place(loaded, (object) => applyRoverLook(object, props.ghost ? 'ghost' : 'standin'))
+    if (full) {
+      // A focused ghost's full model came first: the silhouette waits hidden for the unfocus.
+      base.object.visible = false
+      return
+    }
+    if (props.ghost) return
+    hangLamp(base)
+    drawn.value = true
+    emit('status', 'standin')
   })
-  if (model) model.object.visible = !(far && low)
-  if (!low) return
-  low.object.visible = !!model
-  paint(low.object, far ? lowShade : shadowOnly)
-}
-
-if (!props.ghost) {
-  loadRoverModel(baseURL, 'ghost')
-    .then((loaded) => {
-      if (unmounted) return
-      const object = loaded.scene.clone()
-      object.traverse((child) => {
-        child.castShadow = true
-        child.receiveShadow = true
-      })
-      low = posed(object)
-      root.add(object)
-      applyLod()
-      pose(props.frame)
-      invalidate()
-    })
-    .catch((error: unknown) => {
-      // The full model casts its own shadow and stays at any distance.
-      console.warn('RoverModel: the low-poly model did not load.', error)
-    })
-
-  onBeforeRender(() => {
-    const cam = camera.value
-    const limit = props.lodDistanceM
-    if (!cam || !low || !model) return
-    const distance = cam.position.distanceTo(root.position)
-    const next = limit !== null && distance > limit * (far ? 1 - LOD_MARGIN : 1)
-    if (next === far) return
-    far = next
-    applyLod()
-    invalidate()
+  .catch((error: unknown) => {
+    if (unmounted || full) return
+    console.warn('RoverModel: the low-poly rover model did not load.', error)
+    if (!props.ghost) emit('status', 'unavailable')
   })
-}
-
-watch(
-  () => props.environment,
-  (environment) => {
-    if (model && !props.ghost) applyEnvironment(model.object, environment)
-  },
-)
 
 /* The full model: the rover's own, or a focused ghost's. At most two exist per scene. */
 
 const ledgerId = `${props.ghost ? 'ghost' : 'rover'}:${nextModelId()}`
 let holding = false
-/**
- * A focused ghost's full model: tinted and shaded, faded in over its silhouette, each of the
- * model's materials by its own tinted copy so its textures read through the red.
- */
-const detailMaterials = new Map<Material, MeshLambertMaterial>()
-let detailOpacity = 0
-function tinted(source: Material): MeshLambertMaterial {
-  let copy = detailMaterials.get(source)
-  if (!copy) {
-    copy = new MeshLambertMaterial({
-      color: SCENE_COLORS.death,
-      map: (source as MeshLambertMaterial).map ?? null,
-      transparent: true,
-      opacity: detailOpacity,
-      depthWrite: false,
-    })
-    detailMaterials.set(source, copy)
-  }
-  return copy
-}
-function setDetailOpacity(opacity: number): void {
-  detailOpacity = opacity
-  for (const copy of detailMaterials.values()) copy.opacity = opacity
-}
-let fade = 0
 
-function stopFade(): void {
-  if (fade) cancelAnimationFrame(fade)
-  fade = 0
-}
-
-/** Crossfades from the silhouette to the full model over {@link CROSSFADE_MS}. */
-function fadeIn(): void {
-  stopFade()
-  const started = performance.now()
-  const step = () => {
-    const p = Math.min(1, (performance.now() - started) / CROSSFADE_MS)
-    setDetailOpacity(GHOST_OPACITY.detailed * p)
-    material.opacity = GHOST_OPACITY.silhouette * (1 - p)
-    if (model) model.object.visible = p < 1
-    invalidate()
-    fade = p < 1 ? requestAnimationFrame(step) : 0
-  }
-  step()
-}
-
-async function showDetail(): Promise<void> {
-  try {
-    const full = await loadRoverModel(baseURL, 'full')
-    if (unmounted || !props.detailed || detail) return
-    const object = full.scene.clone()
-    object.traverse((child) => {
-      const mesh = child as Mesh
-      if (mesh.isMesh) mesh.material = tinted(mesh.material as Material)
-    })
-    detail = posed(object)
-    placeholder.visible = false
-    root.add(object)
-    pose(props.frame)
-    invalidate()
-    fadeIn()
-  } catch (error) {
-    // The silhouette stays.
-    console.warn('RoverModel: the full model did not load for the focused ghost.', error)
-    dropDetail()
-  }
-}
-
-/** Back to the silhouette at once, the full model's slot freed. */
-function dropDetail(): void {
-  stopFade()
-  if (detail) root.remove(detail.object)
-  detail = undefined
-  material.opacity = GHOST_OPACITY.silhouette
-  if (model) model.object.visible = true
-  placeholder.visible = !model
-  setDetailOpacity(0)
-  if (holding) props.ledger?.release(ledgerId)
+/** Frees the full model's slot, or withdraws the request still waiting for one. */
+function release(): void {
+  props.ledger?.release(ledgerId)
   holding = false
-  invalidate()
 }
 
-let unmounted = false
+/** Waits for a full model's slot, then loads the full model. */
+async function loadFull(): Promise<LoadedRoverModel> {
+  if (!holding) {
+    await new Promise<void>((granted) =>
+      props.ledger ? props.ledger.request(ledgerId, granted) : granted(),
+    )
+    holding = true
+  }
+  return loadRoverModel(baseURL, 'full')
+}
 
-if (props.ghost) {
+if (!props.ghost) {
+  loadFull()
+    .then((loaded) => {
+      if (unmounted) return
+      const rover = place(loaded, (object) => {
+        object.traverse((child) => {
+          child.castShadow = child.receiveShadow = true
+        })
+        applyEnvironment(object, props.environment)
+      })
+      hangLamp(rover)
+      drawn.value = true
+      emit('status', 'full')
+      swapIn(rover, () => {
+        if (base) root.remove(base.object)
+        base = undefined
+      })
+    })
+    .catch((error: unknown) => {
+      if (unmounted) return
+      // The stand-in stays; the slot goes to a ghost.
+      console.warn('RoverModel: the full rover model did not load; the stand-in stays.', error)
+      release()
+    })
+} else {
   watch(
     () => props.detailed,
     (detailed) => {
       if (!detailed) return dropDetail()
       if (holding) return
-      const grant = () => {
-        holding = true
-        void showDetail()
-      }
-      if (props.ledger) props.ledger.request(ledgerId, grant)
-      else grant()
+      loadFull()
+        .then((loaded) => {
+          if (unmounted || !props.detailed || full) return
+          swapIn(
+            place(loaded, (object) =>
+              object.traverse((child) => {
+                const mesh = child as Mesh
+                if (mesh.isMesh) mesh.material = tinted(mesh.material as Material)
+              }),
+            ),
+          )
+        })
+        .catch((error: unknown) => {
+          // The silhouette stays.
+          console.warn('RoverModel: the full model did not load for the focused ghost.', error)
+          dropDetail()
+        })
     },
     { immediate: true },
   )
 }
 
-watch(
-  () => props.variant,
-  async (wanted) => {
-    if (wanted === 'procedural') {
-      showModel(undefined)
-      if (!props.ghost && holding) {
-        props.ledger?.release(ledgerId)
-        holding = false
-      }
-      emit('ready', { variant: wanted, triangles: proceduralTriangles, loadMs: 0 })
-      return
-    }
-    try {
-      if (!props.ghost && !holding) {
-        // The rover takes a full model's slot; it waits only if two ghosts somehow hold both.
-        await new Promise<void>((granted) =>
-          props.ledger ? props.ledger.request(ledgerId, granted) : granted(),
-        )
-        holding = true
-      }
-      const loaded = await loadRoverModel(baseURL, props.ghost ? 'ghost' : 'full')
-      if (unmounted || props.variant !== wanted) return
-      showModel(loaded.scene.clone())
-      emit('ready', { variant: wanted, triangles: loaded.triangles, loadMs: loaded.loadMs })
-    } catch (error) {
-      // The procedural rover stays: the scene works without the download.
-      console.warn('RoverModel: the rover model did not load; drawing the procedural rover.', error)
-    }
-  },
-  { immediate: true },
-)
+/** Back to a ghost's silhouette at once, the full model's slot freed. */
+function dropDetail(): void {
+  stopFade()
+  if (full) root.remove(full.object)
+  full = undefined
+  if (base) base.object.visible = true
+  release()
+}
+
 watch(() => props.frame, pose)
 watch(
   () => props.joints,
   () => pose(props.frame),
   { deep: true },
 )
+watch(
+  () => props.environment,
+  (environment) => {
+    if (full && !props.ghost) applyEnvironment(full.object, environment)
+  },
+)
+pose(props.frame)
 
 onBeforeUnmount(() => {
   unmounted = true
   stopFade()
-  if (holding) props.ledger?.release(ledgerId)
-  // Only this rover's own resources: the loaded models' are shared by every rover on the page.
-  boxes.dispose()
-  cylinders.dispose()
-  unitBox.dispose()
-  unitCylinder.dispose()
-  material.dispose()
-  for (const copy of detailMaterials.values()) copy.dispose()
-  shadowOnly.dispose()
-  lowShade.dispose()
+  release()
+  // Only this rover's own resources: materials and geometry are shared by every copy on the page.
   turretLamp?.dispose()
 })
 </script>

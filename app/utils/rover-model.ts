@@ -15,13 +15,22 @@ export interface LoadedRoverModel {
 
 /**
  * Which build of the rover: `full`, the rover itself at full resolution with its materials and
- * textures; `ghost`, the untextured low-poly silhouette the death markers draw.
+ * textures; `low-poly`, the same nodes and joints at about 2 000 untextured triangles, drawn in a look
+ * (`RoverLook`): the death markers' ghosts, and the stand-in while the full model loads.
  */
-export type RoverModelFile = 'full' | 'ghost'
+export type RoverModelFile = 'full' | 'low-poly'
+
+/**
+ * What the rover is drawn as: `loading` before either model is in; `standin`, the low-poly model
+ * in the rover's paint while the full model loads, or for good when it cannot; `full`, the full
+ * model; `unavailable`, nothing, the low-poly model having failed to load and the full one not
+ * (yet) in.
+ */
+export type RoverModelStatus = 'loading' | 'standin' | 'full' | 'unavailable'
 
 const FILES: Record<RoverModelFile, string> = {
-  full: 'models/rover/rover.glb',
-  ghost: 'models/rover/rover-ghost.glb',
+  'full': 'models/rover/rover.glb',
+  'low-poly': 'models/rover/rover-ghost.glb',
 }
 
 const loads = new Map<RoverModelFile, Promise<LoadedRoverModel>>()

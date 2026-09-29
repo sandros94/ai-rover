@@ -26,8 +26,7 @@ import {
   turretLampLevel,
 } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
-import type { ResolvedRoverGeometry } from '#shared/utils/rover'
-import type { RoverVariant } from '~/composables/useRoverVariant'
+import type { RoverModelStatus } from '~/utils/rover-model'
 import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
 import GoalMarkers from './GoalMarkers.vue'
@@ -46,7 +45,6 @@ const props = withDefaults(
   defineProps<{
     /** The 19 keyframe values at the playback time. */
     frame: Float32Array
-    geometry?: ResolvedRoverGeometry
     /** The stop disk's chunks; without any, the rover stands on a flat grid at its own height. */
     chunks?: { chunk: TerrainChunk }[]
     /** Height span of the disk for the colour ramp; required with `chunks`. */
@@ -69,8 +67,6 @@ const props = withDefaults(
     sight?: Uint8Array
     /** The stop's survey: ground beyond it is not drawn, and a thin ring marks its edge. */
     survey?: { center: { x: number; y: number }; radius: number }
-    /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
-    roverVariant?: RoverVariant
     /** The open round's goals, on the ground, flagged. */
     goals?: readonly { id: string; x: number; y: number; z: number }[]
     /** What the pointer can inspect; without any, nothing is picked. */
@@ -88,7 +84,6 @@ const props = withDefaults(
     toneMapping?: ToneMapping
   }>(),
   {
-    geometry: undefined,
     chunks: () => [],
     heightRange: () => ({ min: 0, max: 1 }),
     heightAt: undefined,
@@ -102,7 +97,6 @@ const props = withDefaults(
     fog: undefined,
     sight: undefined,
     survey: undefined,
-    roverVariant: undefined,
     goals: () => [],
     pickables: () => [],
     focusedId: null,
@@ -115,8 +109,8 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** The rover drawn changed: the procedural one, or a JPL model once loaded. */
-  roverReady: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+  /** What the rover is drawn as changed; see `RoverModelStatus`. */
+  roverStatus: [status: RoverModelStatus]
   /** The mouse is over an object, or none. */
   hover: [id: string | null, client: { x: number; y: number }]
   /** A tap or click on an object, or on none. */
@@ -287,7 +281,6 @@ onBeforeUnmount(() => {
       v-if="deaths.length > 0"
       :deaths="deaths"
       :height-at="heightAt"
-      :geometry="geometry"
       :radius-m="deathRadiusM"
       :focused-id="focusedId"
       :ledger="ledger"
@@ -301,14 +294,11 @@ onBeforeUnmount(() => {
     />
     <RoverModel
       :frame="frame"
-      :geometry="geometry"
-      :variant="roverVariant"
       :ledger="ledger"
       :lamp="lamp"
-      :lod-distance-m="quality.roverLodM"
       :joints="armJoints"
       :environment="environment"
-      @ready="emit('roverReady', $event)"
+      @status="emit('roverStatus', $event)"
     />
     <ScenePicker
       v-if="pickables.length > 0"

@@ -50,7 +50,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 
 - Keyframe playback against wall-clock + polled CDN-cached mission-state endpoint (see `docs/decisions.md`).
 - Ten instruments built in the playground (attitude, speed and efficiency, sol clock, event feed, slip, reveals, planner telemetry, judgment card, round countdown, journey stats). Done.
-- Tres/Three stop-disk scene with LOD, procedural rover, trail, ghosts and route: on the public page behind a 2D/3D toggle, fog lifting with the drive's reveals. Remaining: the hero rover model.
+- Tres/Three stop-disk scene with LOD, rover (low-poly stand-in, then NASA/JPL's full model), trail, ghosts and route: on the public page behind a 2D/3D toggle, fog lifting with the drive's reveals.
 - Journey: `/drives` lists settled drives; `/drives/<id>` replays one on the disk and mask the rover knew then.
 - Dashboard assembly: done on the home page with live playback, vote cards and the instrument grid.
 - 2D fogged picking map with relief, client-side path preview using the shared planner, submit → server judgment. Done.

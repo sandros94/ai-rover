@@ -151,13 +151,5 @@ export const SCENE_COLORS = Object.freeze({
   }),
 })
 
-/** Rover part colours by tone (see `PartTone`): white body, grey links, aluminium wheels. */
-export const ROVER_TONES = Object.freeze({
-  body: '#e7e2d6',
-  deck: '#b9b3a6',
-  link: '#6f6c66',
-  tyre: '#a3a3a0',
-  spoke: '#2b2a28',
-  mast: '#d4d0c6',
-  rtg: '#4b4a47',
-})
+/** The rover's off-white paint, on the low-poly stand-in drawn until the full model is in. */
+export const ROVER_PAINT = '#e7e2d6'

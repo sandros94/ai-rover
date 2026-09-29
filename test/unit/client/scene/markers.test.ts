@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Point3 } from '#shared/utils/rover'
-import type { Quat } from '#shared/utils/client/scene/rover-parts'
+import type { Quat } from '#shared/utils/client/scene/placement'
 import {
   ARRIVAL_RADIUS_M,
   FLAG_CANT_RAD,

@@ -11,7 +11,7 @@ export {
   reliefLight,
   reliefRgb,
   rgbHex,
-  ROVER_TONES,
+  ROVER_PAINT,
   SCENE_COLORS,
   SEEN_STOPS,
   srgbToLinear,
@@ -41,8 +41,8 @@ export {
   recolourChunkMesh,
   refogChunkMesh,
 } from './terrain-mesh'
-export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
-export { flatFrame, framePlacement, fromTo, roverParts } from './rover-parts'
+export type { Quat } from './placement'
+export { flatFrame, framePlacement, fromTo } from './placement'
 export type { RigNode, RigTransforms } from './rover-rig'
 export type { MotionLimits, MotionProfile } from './motion-profile'
 export { motionProfile } from './motion-profile'

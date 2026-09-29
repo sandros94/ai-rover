@@ -138,6 +138,9 @@ describe('StopStage in 3D', () => {
     // The scene filled three's custom tone mapping slot with AgX before anything compiled.
     expect(ShaderChunk.tonemapping_pars_fragment).toContain('agxLook( color )')
 
+    // No rover model loads here: the scene draws without one, and says so.
+    expect(stage.find('[data-test=rover-unavailable]').text()).toBe('Rover model unavailable')
+
     // The first frame takes the automatic exposure at once.
     for (const callback of tres.beforeRender) callback({ delta: 1 / 60 })
     expect(tres.renderer.toneMappingExposure).toBeCloseTo(
@@ -200,7 +203,6 @@ describe('StopScene at a quality tier', () => {
     })
     // The low tier's ground only receives: the rover alone casts.
     expect(stage.findComponent(TerrainChunks).props('casters')).toBeNull()
-    expect(stage.findComponent(RoverModel).props('lodDistanceM')).toBe(low.roverLodM)
   })
 
   it('applies a new tier at once, the ground casting around the camera target', async () => {
@@ -220,7 +222,6 @@ describe('StopScene at a quality tier', () => {
       y: 32,
       rangeM: high.casterRangeM,
     })
-    expect(stage.findComponent(RoverModel).props('lodDistanceM')).toBe(high.roverLodM)
   })
 })
 

@@ -1,8 +1,8 @@
 import type { Point3 } from '../../rover/kinematics'
 import { frameAttitude } from '../instruments/attitude-geometry'
 import type { FrameAttitude } from '../instruments/attitude-geometry'
-import type { Quat } from './rover-parts'
-import { framePlacement } from './rover-parts'
+import type { Quat } from './placement'
+import { framePlacement } from './placement'
 
 /**
  * The articulated nodes of the JPL rover model (`public/models/rover/*.glb`), named after the

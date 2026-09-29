@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
-import { useRuntimeConfig } from '#imports'
+import { computed, defineAsyncComponent, reactive, ref } from 'vue'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
-import type { RoverVariant } from '~/composables/useRoverVariant'
+import type { RoverLook } from '#shared/utils/client/scene/rover-looks'
+import type { LoadedRoverModel, RoverModelFile } from '~/utils/rover-model'
 
 const props = defineProps<{
   /** The 19 keyframe values at the scrub time. */
@@ -10,32 +10,27 @@ const props = defineProps<{
 }>()
 
 // Lazy: three.js loads with the scene, never with the playground shell.
-const StopScene = defineAsyncComponent(
-  () =>
-    // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
-    import('~/components/scene/StopScene.vue'),
-)
+const RoverModelsScene = defineAsyncComponent(() => import('./RoverModelsScene.vue'))
 
-const VARIANTS: { value: RoverVariant; label: string }[] = [
-  { value: 'procedural', label: 'Procedural' },
-  { value: 'model', label: 'Model' },
+const LOOKS: { value: RoverLook; label: string }[] = [
+  { value: 'standin', label: 'Stand-in' },
+  { value: 'ghost', label: 'Ghost' },
 ]
+const look = ref<RoverLook>('standin')
 
-const variant = ref<RoverVariant>('model')
-const shown = ref<{ variant: RoverVariant; triangles: number; loadMs: number }>()
-/** The model file's size, from the same load the scene made (the loader caches it). */
-const bytes = ref<number>()
-const baseURL = useRuntimeConfig().app.baseURL
-
-async function onReady(info: { variant: RoverVariant; triangles: number; loadMs: number }) {
-  shown.value = info
-  if (info.variant !== 'model' || bytes.value) return
-  // Lazy, like the scene: the loader brings three.js.
-  const { loadRoverModel } = await import('~/utils/rover-model')
-  bytes.value = (await loadRoverModel(baseURL)).bytes
+const MODELS: { file: RoverModelFile; label: string }[] = [
+  { file: 'full', label: 'Full' },
+  { file: 'low-poly', label: 'Low-poly' },
+]
+const loaded = reactive<Partial<Record<RoverModelFile, LoadedRoverModel | Error>>>({})
+const stats = (file: RoverModelFile): string => {
+  const result = loaded[file]
+  if (!result) return 'loading…'
+  if (result instanceof Error) return result.message
+  return `${result.triangles.toLocaleString('en')} triangles · ${(result.bytes / 1e6).toFixed(2)} MB · loaded in ${Math.round(result.loadMs)} ms`
 }
 
-/** The frame moved to the origin, attitude, spins and suspension kept: the rover alone on a plane. */
+/** The frame moved to the origin, attitude, spins and suspension kept: the rovers alone on a plane. */
 const atOrigin = computed(() => {
   const frame = props.frame.slice()
   for (const name of ['x', 'y', 'z'] as const) frame[KEYFRAME_FIELDS.indexOf(name)] = 0
@@ -48,34 +43,36 @@ const atOrigin = computed(() => {
     <div class="flex flex-wrap items-center gap-3">
       <UFieldGroup>
         <UButton
-          v-for="option in VARIANTS"
+          v-for="option in LOOKS"
           :key="option.value"
-          :variant="option.value === variant ? 'solid' : 'outline'"
+          :variant="option.value === look ? 'solid' : 'outline'"
           color="neutral"
-          @click="variant = option.value"
+          @click="look = option.value"
         >
           {{ option.label }}
         </UButton>
       </UFieldGroup>
-      <p class="text-sm text-muted" data-testid="rover-model-stats">
-        <template v-if="shown && shown.variant === variant">
-          {{ shown.triangles.toLocaleString('en') }} triangles
-          <template v-if="shown.variant === 'model'">
-            <template v-if="bytes">· {{ (bytes / 1e6).toFixed(2) }} MB</template>
-            · loaded in {{ Math.round(shown.loadMs) }} ms
-          </template>
-        </template>
-        <template v-else>Loading…</template>
+      <p
+        v-for="model in MODELS"
+        :key="model.file"
+        class="text-sm text-muted"
+        data-testid="rover-model-stats"
+      >
+        <span class="font-medium text-default">{{ model.label }}</span> · {{ stats(model.file) }}
       </p>
     </div>
     <div class="h-[60vh] min-h-72 overflow-hidden rounded-md border border-default">
       <ClientOnly>
-        <StopScene :frame="atOrigin" :rover-variant="variant" @rover-ready="onReady" />
+        <RoverModelsScene
+          :frame="atOrigin"
+          :look="look"
+          @loaded="(file, result) => (loaded[file] = result)"
+        />
       </ClientOnly>
     </div>
     <p class="text-xs text-muted">
-      Rover model: NASA/JPL-Caltech (m2020-urdf-models). The procedural rover shows while the model
-      loads.
+      Rover model: NASA/JPL-Caltech (m2020-urdf-models). The full model on the left, the low-poly
+      one on the right in the chosen look.
     </p>
   </div>
 </template>
