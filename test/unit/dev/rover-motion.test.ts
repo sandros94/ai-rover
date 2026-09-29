@@ -55,6 +55,43 @@ describe('the arc', () => {
   })
 })
 
+describe('the scripted rates', () => {
+  /** Largest step between samples `dt` apart of each series, and the series at the ends. */
+  function series(demo: 'point-turn' | 'arc', read: (t: number) => number, dt = 0.01) {
+    const d = duration(demo)
+    const at = Array.from({ length: Math.ceil(d / dt) + 1 }, (_, k) => read(k * dt))
+    const rate = at.slice(1).map((v, k) => (v - at[k]!) / dt)
+    const jumps = rate.slice(1).map((v, k) => Math.abs(v - rate[k]!) / dt)
+    return { rate, maxAccel: Math.max(...jumps) }
+  }
+
+  it.each(['point-turn', 'arc'] as const)(
+    'steers and turns from rest to rest, rates continuous: %s',
+    (demo) => {
+      const steer = series(demo, (t) => motionAt(demo, t).joints.steer_lf!)
+      const turn = series(demo, (t) => heading(motionAt(demo, t).frame))
+      for (const { rate, maxAccel } of [steer, turn]) {
+        expect(Math.abs(rate[0]!)).toBeLessThan(1e-6)
+        expect(Math.abs(rate.at(-1)!)).toBeLessThan(1e-6)
+        // Bounded by the scripts' own peak accelerations, 8°/s² for steering.
+        expect(maxAccel).toBeLessThan(8.1 * DEG)
+      }
+      // The steering has settled before the body turns, and starts back only once it stops (rates
+      // under 0.006°/s being the instants either side of a switch).
+      const moving = turn.rate.map((v) => Math.abs(v) > 1e-4)
+      const steering = steer.rate.map((v) => Math.abs(v) > 1e-4)
+      expect(moving.some((m, k) => m && steering[k])).toBe(false)
+    },
+  )
+
+  it('peaks at 3°/s in the point turn and 4 cm/s along the arc', () => {
+    const turn = series('point-turn', (t) => heading(motionAt('point-turn', t).frame))
+    expect(Math.max(...turn.rate)).toBeCloseTo(3 * DEG, 4)
+    const arc = series('arc', (t) => heading(motionAt('arc', t).frame))
+    expect(Math.max(...arc.rate) * 4).toBeCloseTo(0.04, 4)
+  })
+})
+
 describe('dusk and dawn', () => {
   it('unstows the arm after sunset with the lamp coming on, and stows it after sunrise', () => {
     const d = duration('dusk-dawn')

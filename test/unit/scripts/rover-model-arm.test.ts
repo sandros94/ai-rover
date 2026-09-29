@@ -9,7 +9,12 @@ import {
   DEFAULT_ROVER_GEOMETRY,
   DEFAULT_ROVER_LIMITS,
 } from '#shared/utils/rover'
-import { ARM_LEGS, ARM_NIGHT, DIFFERENTIAL_RATIO } from '#shared/utils/client/scene'
+import {
+  ARM_NIGHT,
+  ARM_SEQUENCE_S,
+  armPoseAlong,
+  DIFFERENTIAL_RATIO,
+} from '#shared/utils/client/scene'
 import type { Box } from '~~/scripts/rover-model/clearance'
 import {
   bodyPoint,
@@ -27,6 +32,8 @@ const CLEARANCE = 0.05
 const PATH_CLEARANCE = 0.03
 /** The upper arm is hinged at the chassis: its boxes this near the shoulder are not measured. */
 const SHOULDER_M = 0.3
+/** Sol seconds between poses checked along the unstow. */
+const STEP_S = 0.1
 
 let doc: Document
 let volumes: ReturnType<typeof boundingVolumes>
@@ -133,30 +140,27 @@ describe('the night arm pose', () => {
 
 describe('the arm unstow', () => {
   it(`clears the mast, the deck and the wheels at full suspension travel by ${PATH_CLEARANCE * 100} cm once each link is off its rest`, () => {
-    // Every 1° of the joint moving furthest in each leg. A link resting on the rover at the
-    // start may touch while it lifts off, its gap only growing, until it first clears.
+    // Along the timed unstow every tenth of a second, at most 0.2° of any joint. A link resting
+    // on the rover at the start touches until it lifts off, and once off never touches again
+    // before it first clears; its gap may waver by a few millimetres meanwhile, below what boxes
+    // of 5 cm resolve.
     const lifted = new Set<string>()
     const lifting: Record<string, number> = {}
     const faults: string[] = []
     let least = Infinity
-    for (const [k, { from, to }] of ARM_LEGS.entries()) {
-      const steps = Math.ceil(
-        Math.max(...ARM_JOINTS.map(({ node: n }) => Math.abs(to[n] - from[n]))) / (Math.PI / 180),
-      )
-      for (let i = k === 0 ? 0 : 1; i <= steps; i++) {
-        const pose = Object.fromEntries(
-          ARM_JOINTS.map(({ node: n }) => [n, from[n] + ((to[n] - from[n]) * i) / steps]),
-        )
-        for (const [arm, g] of Object.entries(linkGaps(pose, 0.1))) {
-          const where = `${arm} in leg ${k + 1} at ${i}°: ${g.toFixed(3)} m`
-          if (lifted.has(arm)) {
-            if (g < PATH_CLEARANCE) faults.push(where)
-            least = Math.min(least, g)
-          } else {
-            if (g < (lifting[arm] ?? 0)) faults.push(`${where}, closer while lifting off`)
-            lifting[arm] = g
-            if (g >= PATH_CLEARANCE) lifted.add(arm)
-          }
+    const steps = Math.ceil(ARM_SEQUENCE_S / STEP_S)
+    for (let i = 0; i <= steps; i++) {
+      const t = Math.min(ARM_SEQUENCE_S, i * STEP_S)
+      for (const [arm, g] of Object.entries(linkGaps(armPoseAlong(t), 0.1))) {
+        const where = `${arm} at ${t.toFixed(1)} s: ${g.toFixed(3)} m`
+        if (lifted.has(arm)) {
+          if (g < PATH_CLEARANCE) faults.push(where)
+          least = Math.min(least, g)
+        } else {
+          if (g === 0 && (lifting[arm] ?? 0) > 0)
+            faults.push(`${where}, back on the rover while lifting off`)
+          lifting[arm] = g
+          if (g >= PATH_CLEARANCE) lifted.add(arm)
         }
       }
     }

@@ -5,8 +5,10 @@ import {
   flatFrame,
   sunCrossings,
   sunPosition,
+  motionProfile,
   turretLampLevel,
 } from '#shared/utils/client/scene'
+import type { MotionLimits, MotionProfile } from '#shared/utils/client/scene'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 
@@ -17,39 +19,24 @@ import { KEYFRAME_FIELDS } from '#shared/utils/drive'
  */
 
 const DEG = Math.PI / 180
-/** Seconds the corner wheels take to steer from straight to any stance, and back. */
-const STEER_S = 8
+/**
+ * How the corner wheels steer between straight and a stance, the widest-steered one at these
+ * limits and the others in proportion, so all four start and stop together.
+ */
+const STEER: MotionLimits = { rate: 8 * DEG, acceleration: 8 * DEG, jerk: 16 * DEG }
 /** Seconds held still before the motion starts and after it ends. */
 const HOLD_S = 2
-/** The point turn: a quarter turn to the left at 3°/s. */
-const POINT_TURN_RAD = 90 * DEG
-const TURN_RATE = 3 * DEG
-/** The arc: left about a centre 4 m off the middle axle, at 4 cm/s for 90 s. */
+/** The point turn: a quarter turn to the left, peaking at 3°/s. */
+const POINT_TURN = motionProfile(90 * DEG, { rate: 3 * DEG, acceleration: 1 * DEG, jerk: 1 * DEG })
+/** The arc: left about a centre 4 m off the middle axle, its middle 3.6 m along its path, peaking at 4 cm/s. */
 const ARC_RADIUS_M = 4
-const ARC_SPEED_MPS = 0.04
-const ARC_DRIVE_S = 90
+const ARC = motionProfile(3.6, { rate: 0.04, acceleration: 0.02, jerk: 0.02 })
 /** The dusk window opens a minute before sunset and runs until the lamp is full. */
 const DUSK_BEFORE_S = 60
 const DUSK_AFTER_S = 840
 /** The dawn window opens with the lamp full and closes a minute after the arm has stowed. */
 const DAWN_BEFORE_S = 840
 const DAWN_AFTER_S = ARM_SEQUENCE_S + 60
-
-export type MotionDemo = 'point-turn' | 'arc' | 'dusk-dawn'
-
-export const MOTION_DEMOS: readonly { id: MotionDemo; title: string; durationS: number }[] = [
-  {
-    id: 'point-turn',
-    title: 'Point turn',
-    durationS: 2 * HOLD_S + 2 * STEER_S + POINT_TURN_RAD / TURN_RATE,
-  },
-  { id: 'arc', title: 'Arc', durationS: 2 * HOLD_S + 2 * STEER_S + ARC_DRIVE_S },
-  {
-    id: 'dusk-dawn',
-    title: 'Dusk and dawn',
-    durationS: DUSK_BEFORE_S + DUSK_AFTER_S + DAWN_BEFORE_S + DAWN_AFTER_S,
-  },
-]
 
 /** The model's steered corners and every wheel, by keyframe spin field, body frame. */
 const G = DEFAULT_ROVER_GEOMETRY
@@ -70,6 +57,37 @@ const WHEELS = [
 /** The model's steering joints turn about the body's −z: a positive value steers right. */
 const STEER_NODES = ['steer_lf', 'steer_rf', 'steer_lr', 'steer_rr'] as const
 
+/**
+ * A turn about `centre` (body frame at the start): each corner's steering, left positive, square
+ * to the line from the centre; the widest one's steering profile; and the heading turned as
+ * `turn` runs along its distance, `perUnit` radians per unit of it.
+ */
+function turnPlan(centre: { x: number; y: number }, turn: MotionProfile, perUnit: number) {
+  const steer = WHEELS.map((w) => Math.atan(-(w.x - centre.x) / (w.y - centre.y)))
+  const widest = Math.max(...steer.filter((_, k) => WHEELS[k]!.steer).map(Math.abs))
+  return { centre, steer, widest, steering: motionProfile(widest, STEER), turn, perUnit }
+}
+type TurnPlan = ReturnType<typeof turnPlan>
+
+const TURNS = {
+  'point-turn': turnPlan({ x: 0, y: 0 }, POINT_TURN, 1),
+  'arc': turnPlan({ x: 0, y: ARC_RADIUS_M }, ARC, 1 / ARC_RADIUS_M),
+}
+const turnSpan = ({ steering, turn }: TurnPlan) =>
+  2 * HOLD_S + 2 * steering.durationS + turn.durationS
+
+export type MotionDemo = 'point-turn' | 'arc' | 'dusk-dawn'
+
+export const MOTION_DEMOS: readonly { id: MotionDemo; title: string; durationS: number }[] = [
+  { id: 'point-turn', title: 'Point turn', durationS: turnSpan(TURNS['point-turn']) },
+  { id: 'arc', title: 'Arc', durationS: turnSpan(TURNS.arc) },
+  {
+    id: 'dusk-dawn',
+    title: 'Dusk and dawn',
+    durationS: DUSK_BEFORE_S + DUSK_AFTER_S + DAWN_BEFORE_S + DAWN_AFTER_S,
+  },
+]
+
 export interface MotionState {
   /** The 19 keyframe values: placement and wheel spins. */
   frame: Float32Array
@@ -85,29 +103,22 @@ export function motionAt(demo: MotionDemo, t: number): MotionState {
   const span = MOTION_DEMOS.find((d) => d.id === demo)!.durationS
   const at = Math.min(span, Math.max(0, t))
   if (demo === 'dusk-dawn') return twilightAt(at)
-  return demo === 'point-turn'
-    ? turnAbout({ x: 0, y: 0 }, TURN_RATE, POINT_TURN_RAD / TURN_RATE, at)
-    : turnAbout({ x: 0, y: ARC_RADIUS_M }, ARC_SPEED_MPS / ARC_RADIUS_M, ARC_DRIVE_S, at)
+  return turnAbout(TURNS[demo], at)
 }
 
 /**
- * Steer into the stance for turning about `centre` (body frame at the start), turn about it at
- * `rate` rad/s for `turnS` seconds, steer straight again. Each wheel rolls along its circle about
- * the centre: steered square to the line from the centre, spinning at its distance from the
- * centre times the rate over the wheel radius; a centre on the middle axle leaves the middle
- * wheels straight.
+ * Steer into the stance for turning about the plan's centre, turn about it, steer straight
+ * again, each from rest to rest. Each wheel rolls along its circle about the centre: steered
+ * square to the line from the centre, spinning by its distance from the centre times the heading
+ * turned over the wheel radius; a centre on the middle axle leaves the middle wheels straight.
  */
-function turnAbout(
-  centre: { x: number; y: number },
-  rate: number,
-  turnS: number,
-  t: number,
-): MotionState {
-  const turning = Math.min(turnS, Math.max(0, t - HOLD_S - STEER_S))
-  const steerIn = Math.min(1, Math.max(0, (t - HOLD_S) / STEER_S))
-  const steerOut = Math.min(1, Math.max(0, (t - HOLD_S - STEER_S - turnS) / STEER_S))
-  const stance = steerIn * (1 - steerOut)
-  const heading = rate * turning
+function turnAbout(plan: TurnPlan, t: number): MotionState {
+  const { centre, steering, turn, widest } = plan
+  const steerS = steering.durationS
+  const into = steering.positionAt(t - HOLD_S) / widest
+  const outOf = steering.positionAt(t - HOLD_S - steerS - turn.durationS) / widest
+  const stance = into - outOf
+  const heading = turn.positionAt(t - HOLD_S - steerS) * plan.perUnit
   // The body origin, carried about the centre from the start.
   const frame = flatFrame({
     x: centre.x - centre.x * Math.cos(heading) + centre.y * Math.sin(heading),
@@ -117,15 +128,14 @@ function turnAbout(
   })
   const joints: Record<string, number> = { ...ARM_STOWED }
   for (const node of STEER_NODES) joints[node] = 0
-  for (const wheel of WHEELS) {
+  for (const [k, wheel] of WHEELS.entries()) {
     const dx = wheel.x - centre.x
     const dy = wheel.y - centre.y
-    // Steered, left positive, so the wheel rolls square to the line from the centre.
-    const steer = Math.atan(-dx / dy)
+    const steer = plan.steer[k]!
     if (wheel.steer) joints[wheel.steer] = -steer * stance
-    // The wheel's ground velocity about the centre, along its heading.
-    const along = rate * (-dy * Math.cos(steer) + dx * Math.sin(steer))
-    frame[KEYFRAME_FIELDS.indexOf(wheel.spin)] = (along * turning) / G.wheelRadius
+    // The wheel's ground path about the centre per radian of heading, along its heading.
+    const along = -dy * Math.cos(steer) + dx * Math.sin(steer)
+    frame[KEYFRAME_FIELDS.indexOf(wheel.spin)] = (along * heading) / G.wheelRadius
   }
   return { frame, joints, solFraction: 0.4, lamp: 0 }
 }

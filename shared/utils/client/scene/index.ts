@@ -44,8 +44,10 @@ export {
 export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
 export { flatFrame, framePlacement, fromTo, roverParts } from './rover-parts'
 export type { RigNode, RigTransforms } from './rover-rig'
+export type { MotionLimits, MotionProfile } from './motion-profile'
+export { motionProfile } from './motion-profile'
 export {
-  ARM_JOINT_RATE,
+  ARM_JOINT_MOTION,
   ARM_LEGS,
   ARM_NIGHT,
   ARM_SEQUENCE_S,

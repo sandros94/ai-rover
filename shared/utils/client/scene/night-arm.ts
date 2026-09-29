@@ -1,6 +1,8 @@
 import type { ArmPose } from '../../rover/arm'
 import { ARM_JOINTS, ARM_STOWED } from '../../rover/arm'
 import { MARS_SOL_SECONDS } from '../instruments/sol-clock'
+import type { MotionLimits, MotionProfile } from './motion-profile'
+import { motionProfile } from './motion-profile'
 import { DEFAULT_LATITUDE_DEG, sunCrossings } from './sun'
 
 /**
@@ -41,25 +43,38 @@ export const ARM_UNSTOW: readonly ArmPose[] = [
 ]
 
 /**
- * How fast the joint that moves furthest in a leg turns, radians per second of the sol; the
- * others turn in proportion, so each leg's joints start and stop together. A design choice:
- * Perseverance's real unstow is a sequence of several minutes whose joint rates are not
- * published; 2°/s makes this one take a few minutes of the sol.
+ * How the joint that moves furthest in a leg turns: from rest to rest along a jerk-limited
+ * S-curve peaking at 2°/s, reached in 1.5 s (2°/s², 4°/s³); the others turn in proportion, so
+ * each leg's joints start and stop together. Design choices: Perseverance's real unstow is a
+ * sequence of several minutes whose joint rates and accelerations are not published; 2°/s makes
+ * this one take a few minutes of the sol.
  */
-export const ARM_JOINT_RATE = (2 * Math.PI) / 180
+export const ARM_JOINT_MOTION: MotionLimits = {
+  rate: (2 * Math.PI) / 180,
+  acceleration: (2 * Math.PI) / 180,
+  jerk: (4 * Math.PI) / 180,
+}
 
-/** Each leg of {@link ARM_UNSTOW}: its end poses and the sol seconds it starts at and lasts. */
+/** Each leg of {@link ARM_UNSTOW}: its end poses, the sol seconds it starts at and lasts, and its furthest mover's profile. */
 export const ARM_LEGS = ARM_UNSTOW.slice(1).reduce<
-  { from: ArmPose; to: ArmPose; startS: number; durationS: number }[]
+  {
+    from: ArmPose
+    to: ArmPose
+    startS: number
+    durationS: number
+    widest: MotionProfile & { distance: number }
+  }[]
 >((legs, to, k) => {
   const from = ARM_UNSTOW[k]!
   const last = legs.at(-1)
-  const widest = Math.max(...ARM_JOINTS.map(({ node }) => Math.abs(to[node] - from[node])))
+  const distance = Math.max(...ARM_JOINTS.map(({ node }) => Math.abs(to[node] - from[node])))
+  const widest = { ...motionProfile(distance, ARM_JOINT_MOTION), distance }
   legs.push({
     from,
     to,
     startS: last ? last.startS + last.durationS : 0,
-    durationS: widest / ARM_JOINT_RATE,
+    durationS: widest.durationS,
+    widest,
   })
   return legs
 }, [])
@@ -71,7 +86,7 @@ export const ARM_SEQUENCE_S = ARM_LEGS.at(-1)!.startS + ARM_LEGS.at(-1)!.duratio
 export function armPoseAlong(seconds: number): ArmPose {
   const leg =
     ARM_LEGS.find(({ startS, durationS }) => seconds < startS + durationS) ?? ARM_LEGS.at(-1)!
-  const s = Math.min(1, Math.max(0, (seconds - leg.startS) / leg.durationS))
+  const s = leg.widest.positionAt(seconds - leg.startS) / leg.widest.distance
   const pose = {} as ArmPose
   for (const { node } of ARM_JOINTS) {
     pose[node] = leg.from[node] + (leg.to[node] - leg.from[node]) * s

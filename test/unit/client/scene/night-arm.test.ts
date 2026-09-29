@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ARM_JOINTS, ARM_STOWED } from '#shared/utils/rover'
 import {
-  ARM_JOINT_RATE,
+  ARM_JOINT_MOTION,
   ARM_LEGS,
   ARM_NIGHT,
   ARM_SEQUENCE_S,
@@ -10,6 +10,7 @@ import {
   armPoseAt,
   armSequenceSeconds,
 } from '#shared/utils/client/scene/night-arm'
+import { motionProfile } from '#shared/utils/client/scene/motion-profile'
 import { sunCrossings } from '#shared/utils/client/scene/sun'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments/sol-clock'
 
@@ -35,29 +36,45 @@ describe('the arm unstow', () => {
     }
   })
 
-  it('turns the widest-moving joint of each leg at the joint rate, a few minutes in all', () => {
+  it('times each leg by its widest-moving joint, every joint on the straight line between its ends', () => {
     for (const leg of ARM_LEGS) {
       const widest = Math.max(
         ...ARM_JOINTS.map(({ node }) => Math.abs(leg.to[node] - leg.from[node])),
       )
-      expect(widest / leg.durationS).toBeCloseTo(ARM_JOINT_RATE, 12)
-      // Mid-leg, every joint is on the straight line between the leg's ends.
-      const mid = armPoseAlong(leg.startS + leg.durationS / 2)
-      for (const { node } of ARM_JOINTS) {
-        expect(mid[node]).toBeCloseTo((leg.from[node] + leg.to[node]) / 2, 12)
+      expect(leg.durationS).toBe(motionProfile(widest, ARM_JOINT_MOTION).durationS)
+      for (const f of [0.1, 0.5, 0.8]) {
+        const pose = armPoseAlong(leg.startS + leg.durationS * f)
+        const s = motionProfile(widest, ARM_JOINT_MOTION).positionAt(leg.durationS * f) / widest
+        for (const { node } of ARM_JOINTS) {
+          expect(pose[node]).toBeCloseTo(leg.from[node] + (leg.to[node] - leg.from[node]) * s, 12)
+        }
       }
     }
     expect(ARM_SEQUENCE_S).toBeGreaterThan(120)
     expect(ARM_SEQUENCE_S).toBeLessThan(600)
   })
 
-  it('moves continuously: no joint jumps between two poses a second apart', () => {
-    for (let t = 0; t <= ARM_SEQUENCE_S + 1; t += 1) {
+  it('starts and stops each leg at rest, no joint exceeding its peak rate or acceleration', () => {
+    const dt = 0.01
+    const rates: number[] = []
+    for (let t = -dt; t <= ARM_SEQUENCE_S + dt; t += dt) {
       const a = armPoseAlong(t)
-      const b = armPoseAlong(t + 1)
-      for (const { node } of ARM_JOINTS) {
-        expect(Math.abs(b[node] - a[node])).toBeLessThanOrEqual(ARM_JOINT_RATE + 1e-12)
-      }
+      const b = armPoseAlong(t + dt)
+      rates.push(Math.max(...ARM_JOINTS.map(({ node }) => Math.abs(b[node] - a[node]) / dt)))
+    }
+    expect(Math.max(...rates)).toBeLessThanOrEqual(ARM_JOINT_MOTION.rate * (1 + 1e-9))
+    rates
+      .slice(1)
+      .forEach((v, k) =>
+        expect(Math.abs(v - rates[k]!)).toBeLessThanOrEqual(
+          ARM_JOINT_MOTION.acceleration * dt * 1.01,
+        ),
+      )
+    for (const { startS } of ARM_LEGS.slice(1)) {
+      const before = armPoseAlong(startS - 1e-3)
+      const after = armPoseAlong(startS + 1e-3)
+      for (const { node } of ARM_JOINTS)
+        expect(Math.abs(after[node] - before[node])).toBeLessThan(1e-7)
     }
   })
 })
