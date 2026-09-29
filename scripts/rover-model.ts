@@ -3,8 +3,9 @@
  * describe the same vehicle: NASA's Perseverance glTF (`NASA-3D-Resources`, pinned commit) gives
  * every part the rover shows, with its materials, textures and glass; JPL's `m2020-urdf-models`
  * (pinned commit) gives the joints the mobility system turns about. `rover.glb` is the rover at
- * full resolution; `rover-ghost.glb` the death markers' silhouette, decimated to about 10k
- * triangles, untextured. Deterministic for the pinned sources; re-running overwrites both.
+ * full resolution; `rover-ghost.glb` the same parts on the same nodes at 2 000 triangles, fitted
+ * to the full model's silhouette (`rover-model/ghost-fit.ts`), untextured. Deterministic for the
+ * pinned sources; re-running overwrites both.
  *
  * Why both. The URDF's meshes carry one plain material over a baked texture atlas, no glass, no
  * normals, and no link for the differential's cross-links; NASA's model has 47 physically based
@@ -42,10 +43,14 @@ import { NodeIO } from '@gltf-transform/core'
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { prune } from '@gltf-transform/functions'
 import draco3d from 'draco3dgltf'
-import { MeshoptSimplifier } from 'meshoptimizer'
 import type { Surface } from './rover-model/atlas'
 import { bakeAtlases } from './rover-model/atlas'
 import { fitRigid } from './rover-model/fit'
+import type { Shape } from './rover-model/ghost'
+import { wheel } from './rover-model/ghost'
+import type { GhostFitOptions, GhostPart } from './rover-model/ghost-fit'
+import { fitGhost } from './rover-model/ghost-fit'
+import { boundsDelta, boundsOf, SILHOUETTE_VIEWS, silhouetteIoU } from './rover-model/silhouette'
 import { ARM_JOINTS, ARM_STOWED } from '../shared/utils/rover/arm'
 import {
   assignPieces,
@@ -95,14 +100,7 @@ const GLASS_OPACITY = 0.3
 
 type Variant =
   | { file: string; kind: 'full' }
-  | {
-      file: string
-      kind: 'silhouette'
-      /** Target triangles per app node. */
-      triangles: Record<string, number>
-      /** Simplifier error ceiling, as a fraction of each mesh's extent. */
-      error: number
-    }
+  | { file: string; kind: 'ghost'; fit: GhostFitOptions }
 
 /** A URDF link kept as an app node, and the joint it turns about. */
 interface KeptLink {
@@ -174,40 +172,31 @@ const SUSPENSION = KEPT.filter((k) =>
 )
 
 /**
- * The ghost's budget, about 10k triangles: the body keeps its outline, the wheels and links their
- * shape; a flat translucent tint shows nothing finer.
+ * The ghost, the death markers' low-poly rover. Its silhouette is measured from the six views the model's tests compare it from; the fit is
+ * held to the full model's per view rather than on their sum (`emphasis`), and each part to its
+ * own silhouette too (`isolation`), as parts move out from behind one another. The ladder and
+ * the refining steps trade build time for fidelity; these fit in about two minutes.
  */
-const GHOST_BUDGET: Record<string, number> = {
-  chassis: 4_300,
-  arm_1: 80,
-  arm_2: 120,
-  arm_3: 120,
-  arm_4: 80,
-  arm_5: 400,
-  mast_azimuth: 150,
-  mast_elevation: 500,
-  differential: 150,
-  left_rocker: 300,
-  right_rocker: 300,
-  left_bogie: 260,
-  right_bogie: 260,
-  steer_lf: 200,
-  steer_rf: 200,
-  steer_lr: 160,
-  steer_rr: 160,
-  wheel_lf: 330,
-  wheel_rf: 330,
-  wheel_lm: 330,
-  wheel_rm: 330,
-  wheel_lr: 330,
-  wheel_rr: 330,
-  left_differential_link: 40,
-  right_differential_link: 40,
+const GHOST: GhostFitOptions = {
+  looks: SILHOUETTE_VIEWS.map((v) => v.look),
+  resolution: 512,
+  budget: 2_000,
+  ladder: [20, 30, 40, 50, 60, 80, 100, 120, 150, 180, 220, 270, 330, 400, 500, 600, 750, 900],
+  cell: 0.01,
+  isolation: 0.25,
+  tolerance: 0.015,
+  emphasis: { goal: 0.94, boost: 4 },
+  refine: { steps: [0.02, 0.012, 0.006, 0.003, 0.0015], passes: 8, reach: 0.05 },
 }
+/**
+ * The wheels' prisms: 16 sides draw the tread's circle to within its grousers at the ghost's
+ * sizes, 70 triangles a wheel with the rim and the hub.
+ */
+const GHOST_WHEEL = { segments: 16, hubSegments: 8 }
 
 const VARIANTS: Variant[] = [
   { file: 'rover.glb', kind: 'full' },
-  { file: 'rover-ghost.glb', kind: 'silhouette', triangles: GHOST_BUDGET, error: 0.08 },
+  { file: 'rover-ghost.glb', kind: 'ghost', fit: GHOST },
 ]
 
 // ---------------------------------------------------------------------------------------------
@@ -661,6 +650,8 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
   if (variant.kind === 'full') {
     for (const material of root.listMaterials()) glassAsBlend(material, GLASS_OPACITY)
   }
+  const ghost =
+    variant.kind === 'ghost' ? await fitParts(bakedPrimitives, nodePose, variant.fit) : undefined
   /** The full model's triangles, one surface per material per node, before baking. */
   const surfaces: Surface[] = []
   const meshes = new Map<string, ReturnType<Document['createMesh']>>()
@@ -686,12 +677,8 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
         )
         surfaces.push({ node: name, material, ...merged })
       }
-    } else if (list.length) {
-      const merged = gather(list, inNode, false)
-      const shape = await silhouette(merged.positions, merged.indices, {
-        target: variant.triangles[name] ?? 100,
-        error: variant.error,
-      })
+    } else if (ghost?.has(name)) {
+      const shape = inFrame(ghost.get(name)!, inNode)
       mesh.addPrimitive(
         doc
           .createPrimitive()
@@ -895,56 +882,112 @@ function gather(list: { b: Baked; t: number }[], inNode: Rigid, textured: boolea
 }
 
 /**
- * A mesh decimated to about `target` triangles, positions only: vertices sharing a position are
- * merged first (texture seams would otherwise pin the simplifier), then meshopt simplifies within
- * `error` of the mesh's extent, dropping pieces too small to matter.
+ * The ghost's parts fitted together (`rover-model/ghost-fit.ts`), in the body frame at rest: each
+ * part's NASA meshes fitted on their own, each wheel a primitive. Prints what the fit chose and
+ * how its silhouette and extents compare with the full model's.
  */
-async function silhouette(
-  positions: Float32Array,
-  indices: Uint32Array,
-  options: { target: number; error: number },
-): Promise<{ positions: Float32Array<ArrayBuffer>; indices: Uint32Array<ArrayBuffer> }> {
-  const byPosition = new Map<string, number>()
-  const merged: number[] = []
-  const remap = new Uint32Array(positions.length / 3)
-  for (let v = 0; v < remap.length; v++) {
-    const p = positions.subarray(3 * v, 3 * v + 3)
-    const key = `${p[0]},${p[1]},${p[2]}`
-    let kept = byPosition.get(key)
-    if (kept === undefined) {
-      kept = merged.length / 3
-      byPosition.set(key, kept)
-      merged.push(p[0]!, p[1]!, p[2]!)
+async function fitParts(
+  baked: Baked[],
+  nodePose: Map<string, Rigid>,
+  options: GhostFitOptions,
+): Promise<Map<string, Shape>> {
+  const bySource = new Map<string, Map<string, number[]>>()
+  for (const b of baked) {
+    for (let t = 0; t < b.part.length; t++) {
+      let sources = bySource.get(b.part[t]!)
+      if (!sources) bySource.set(b.part[t]!, (sources = new Map()))
+      let list = sources.get(b.source)
+      if (!list) sources.set(b.source, (list = []))
+      for (let k = 0; k < 3; k++) {
+        const v = b.indices[3 * t + k]!
+        list.push(b.positions[3 * v]!, b.positions[3 * v + 1]!, b.positions[3 * v + 2]!)
+      }
     }
-    remap[v] = kept
   }
-  const points = Float32Array.from(merged)
-  let out: Uint32Array = indices.map((v) => remap[v]!)
-  if (options.target * 3 < out.length) {
-    await MeshoptSimplifier.ready
-    ;[out] = MeshoptSimplifier.simplify(out, points, 3, options.target * 3, options.error, [
-      'Prune',
-    ])
+  const parts: GhostPart[] = []
+  for (const [name, placed] of nodePose) {
+    const sources = bySource.get(name)
+    if (!sources) continue
+    const { r, t } = placed
+    const axes: [Vec3, Vec3, Vec3] = [0, 1, 2].map(
+      (j) => [r[j]!, r[3 + j]!, r[6 + j]!] as Vec3,
+    ) as [Vec3, Vec3, Vec3]
+    const groups = [...sources].map(([source, list]) => ({
+      name: `${name}/${source}`,
+      triangles: Float32Array.from(list),
+    }))
+    const triangles = Float32Array.from([...sources.values()].flat())
+    // A wheel turns about its node's y axis; its outboard face looks away from the body's middle.
+    // The rim is open between the spokes, which simplifying at a wheel's budget closes: a fitted
+    // tread, rim and hub draw it better.
+    const fixed = WHEELS.some((w) => w.node === name)
+      ? wheel(triangles, {
+          axis: axes[1],
+          outboard: t[0] * axes[1][0] + t[1] * axes[1][1] + t[2] * axes[1][2] > 0 ? 1 : -1,
+          ...GHOST_WHEEL,
+        })
+      : undefined
+    parts.push({ name, axes, triangles, groups, ...(fixed && { fixed }) })
   }
-  return compact(points, out)
+  const fit = await fitGhost(parts, options)
+
+  const count = (shape: Shape) => shape.indices.length / 3
+  for (const part of parts) {
+    const kinds = fit.choices
+      .filter((c) => c.group.startsWith(`${part.name}/`) && c.kind !== 'none')
+      .map((c) => `${c.group.slice(part.name.length + 1)} ${c.kind} ${c.triangles}`)
+    const reached = fit.extents
+      .filter((e) => e.part === part.name)
+      .map((e) => `${e.face} ${e.kind}`)
+    console.log(
+      `  ghost ${part.name}: ${count(fit.shapes.get(part.name)!)} triangles` +
+        (part.fixed ? ' (fitted wheel)' : ` (${kinds.join(', ')})`) +
+        (reached.length ? `; extent reached at ${reached.join(', ')}` : ''),
+    )
+  }
+  const flat = (shape: Shape) => {
+    const out = new Float32Array(shape.indices.length * 3)
+    shape.indices.forEach((v, k) => out.set(shape.positions.subarray(3 * v, 3 * v + 3), 3 * k))
+    return out
+  }
+  const full = Float32Array.from(parts.flatMap((p) => [...p.triangles]))
+  const ghost = Float32Array.from([...fit.shapes.values()].flatMap((s) => [...flat(s)]))
+  const iou = SILHOUETTE_VIEWS.map(
+    ({ name, look }) =>
+      `${name} ${silhouetteIoU(full, ghost, look, options.resolution).toFixed(4)}`,
+  )
+  console.log(`  ghost silhouette IoU: ${iou.join(', ')}`)
+  const worst = parts
+    .map((p) => {
+      const inPart = invert(nodePose.get(p.name)!)
+      const local = (tris: Float32Array) => {
+        const out = new Float32Array(tris.length)
+        for (let i = 0; i < tris.length; i += 3) {
+          out.set(transformPoint(inPart, [tris[i]!, tris[i + 1]!, tris[i + 2]!]), i)
+        }
+        return out
+      }
+      const delta = boundsDelta(
+        boundsOf(local(p.triangles)),
+        boundsOf(local(flat(fit.shapes.get(p.name)!))),
+      )
+      return { name: p.name, delta }
+    })
+    .sort((a, b) => b.delta - a.delta)[0]!
+  console.log(
+    `  ghost extents: within ${(worst.delta * 100).toFixed(2)} cm (${worst.name} the furthest)`,
+  )
+  return fit.shapes
 }
 
-/** Only the vertices `indices` uses, renumbered in first-use order. */
-function compact(
-  positions: Float32Array,
-  indices: Uint32Array,
-): { positions: Float32Array<ArrayBuffer>; indices: Uint32Array<ArrayBuffer> } {
-  const remap = new Int32Array(positions.length / 3).fill(-1)
-  const kept: number[] = []
-  const out = new Uint32Array(indices.length)
-  indices.forEach((vertex, k) => {
-    if (remap[vertex] === -1) {
-      remap[vertex] = kept.length / 3
-      kept.push(...positions.subarray(3 * vertex, 3 * vertex + 3))
-    }
-    out[k] = remap[vertex]!
-  })
-  return { positions: Float32Array.from(kept), indices: out }
+/** A body-frame shape carried into a node's frame. */
+function inFrame(shape: Shape, inNode: Rigid): Shape {
+  const positions = new Float32Array(shape.positions.length)
+  for (let i = 0; i < positions.length; i += 3) {
+    const p = shape.positions
+    positions.set(transformPoint(inNode, [p[i]!, p[i + 1]!, p[i + 2]!]), i)
+  }
+  return { positions, indices: Uint32Array.from(shape.indices) }
 }
 
 /** The arm joints at {@link ARM_STOWED}, checked against the URDF's names and limits. */

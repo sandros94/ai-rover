@@ -13,7 +13,7 @@
 - Fitted onto the URDF by the six wheel centres (0.2 mm rms) and re-expressed in the app's body frame (x forward, y left, z up).
 - Cut into one node per URDF joint: the wheels by wheel centre, the suspension's pieces by the URDF link mesh they lie on, the head, mast and the arm's five links by NASA's own hierarchy, the arm posed at rest as the rover reported it stowed (Mars 2020 Navcam PDS label, sol 100). The differential's crank goes with each rocker; each rod gets a node under the differential bar that keeps it pointing at its crank.
 - Materials baked: each moving part's materials into atlas pages shared by the parts cut from the same meshes, NASA's texels copied unscaled and the plain materials as palette colours, normal scales baked into the normal maps; the specular and IOR settings of three opaque materials dropped. The transmissive glass (camera lenses, name-plate cover) drawn blended at 30 % opacity, as one palette material per part. Each part's triangles joined per page. Geometry meshopt-compressed with positions quantized to 14 bits per mesh; pages stored as WebP (colour lossy, normals near-lossless).
-- `rover-ghost.glb`, the silhouette drawn for the places a rover was lost: the same nodes and pose, each node's mesh decimated with meshoptimizer after merging vertices by position (9,724 triangles in all), with no texture.
+- `rover-ghost.glb`, the silhouette drawn for the places a rover was lost: the same nodes and pose, each wheel a fitted prism and every other part's meshes simplified with meshoptimizer or boxed, then fitted to the full model's silhouette (1,987 triangles in all), with no texture.
 
 ## Terms
 
