@@ -298,6 +298,7 @@ onBeforeUnmount(() => {
       :lamp="lamp"
       :joints="armJoints"
       :environment="environment"
+      :lod-distance-m="quality.roverLodM"
       @status="emit('roverStatus', $event)"
     />
     <ScenePicker

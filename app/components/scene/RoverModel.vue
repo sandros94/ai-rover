@@ -31,11 +31,12 @@ function tinted(source: Material): MeshLambertMaterial {
 </script>
 
 <script setup lang="ts">
+import { useLoop, useTres } from '@tresjs/core'
 import type { Mesh, Object3D, Texture } from 'three'
 import { Group, SpotLight } from 'three'
 import type { FullModelLedger } from '#shared/utils/client/scene'
 import { framePlacement } from '#shared/utils/client/scene'
-import { applyRoverLook } from '#shared/utils/client/scene/rover-looks'
+import { applyRoverLook, applyShadowCaster } from '#shared/utils/client/scene/rover-looks'
 import type { LoadedRoverModel, RoverModelStatus } from '~/utils/rover-model'
 import { applyEnvironment, loadRoverModel } from '~/utils/rover-model'
 import type { PosableRover } from '~/utils/rover-pose'
@@ -48,7 +49,7 @@ const props = withDefaults(
     /**
      * Draw as a red translucent silhouette, for a death marker: the low-poly model in the ghost
      * look, which gains the full model while `detailed`. Otherwise the rover: the low-poly model
-     * as its stand-in until the full model is decoded.
+     * as its stand-in until the full model is decoded, and in its place beyond `lodDistanceM`.
      */
     ghost?: boolean
     /** A ghost in focus: the full model crossfades in over the silhouette once decoded. */
@@ -64,6 +65,11 @@ const props = withDefaults(
      * joint (steering, mast, arm, or a rig joint) turned by hand.
      */
     joints?: Readonly<Record<string, number>>
+    /**
+     * Camera distance beyond which the rover draws its low-poly model, in the stand-in look, in
+     * place of the full one, metres; `null` never. Not for a ghost.
+     */
+    lodDistanceM?: number | null
   }>(),
   {
     ghost: false,
@@ -72,6 +78,7 @@ const props = withDefaults(
     lamp: 0,
     environment: null,
     joints: undefined,
+    lodDistanceM: null,
   },
 )
 
@@ -81,9 +88,15 @@ const emit = defineEmits<{
 }>()
 
 const baseURL = useRuntimeConfig().app.baseURL
+/** The scene is drawn on demand: every change below that shows asks for a frame. */
+const { camera, invalidate } = useTres()
+const { onBeforeRender } = useLoop()
 
 const root = new Group()
-/** The low-poly model in its look: a ghost's silhouette, or the rover's stand-in. */
+/**
+ * The low-poly model: a ghost's silhouette; for the rover, its stand-in, or its shadow caster
+ * while the full model is drawn.
+ */
 let base: PosableRover | undefined
 /** The full model: the rover's own, or a focused ghost's, tinted. */
 let full: PosableRover | undefined
@@ -109,7 +122,10 @@ const turretLamp = props.ghost
 const drawn = shallowRef(false)
 if (turretLamp) {
   root.add(turretLamp, turretLamp.target)
-  watchEffect(() => (turretLamp.intensity = drawn.value ? LAMP.candela * props.lamp : 0))
+  watchEffect(() => {
+    turretLamp.intensity = drawn.value ? LAMP.candela * props.lamp : 0
+    invalidate()
+  })
 }
 
 /** Hangs the lamp from `rover`'s turret, at the lens, aimed along WATSON's boresight. */
@@ -127,6 +143,7 @@ function pose(frame: Float32Array): void {
   root.position.set(position.x, position.y, position.z)
   root.quaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
   for (const rover of [base, full]) if (rover) poseRover(rover, frame, props.joints)
+  invalidate()
 }
 
 /** A posed copy of `loaded` under the root, dressed before it is first drawn. */
@@ -209,6 +226,7 @@ function crossfade(outgoing: Object3D, incoming: Object3D, done: () => void): vo
     const p = Math.min(1, (performance.now() - started) / CROSSFADE_MS)
     from.set(1 - p)
     to.set(p)
+    invalidate()
     if (p < 1) {
       current.frame = requestAnimationFrame(step)
       return
@@ -220,11 +238,57 @@ function crossfade(outgoing: Object3D, incoming: Object3D, done: () => void): vo
   step()
 }
 
-/** Shows `rover`, the full model, in place of the low-poly one, crossfading if that is drawn. */
-function swapIn(rover: PosableRover, done: () => void = () => {}): void {
+/* Which of the rover's two models is drawn. */
+
+/** Whether the camera is beyond `lodDistanceM`. */
+let far = false
+/** How much nearer than `lodDistanceM` the camera must come back for the full model. */
+const LOD_MARGIN = 0.1
+
+/**
+ * Draws the rover's full model once it is in and the camera is within `lodDistanceM`, else the
+ * low-poly model in the stand-in look. While the full model is drawn the low-poly one stays as its
+ * shadow caster, and the full model casts none; without a low-poly model the full one casts its
+ * own shadow and is drawn at any distance. The lamp hangs from whichever is drawn: a light under
+ * a hidden node is dark.
+ */
+function showRover(): void {
+  const detailed = !!full && !(far && base)
+  if (full) {
+    full.object.visible = detailed
+    const casts = !base
+    full.object.traverse((child) => (child.castShadow = casts))
+  }
+  if (base) {
+    base.object.visible = true
+    if (detailed) applyShadowCaster(base.object)
+    else applyRoverLook(base.object, 'standin')
+  }
+  const lit = detailed ? full : base
+  if (lit) {
+    hangLamp(lit)
+    drawn.value = true
+  }
+  invalidate()
+}
+
+/**
+ * The rover's full model is in: it crossfades in over the stand-in when that is drawn and the
+ * camera is near, else it takes its place at once.
+ */
+function arriveFull(rover: PosableRover): void {
   full = rover
-  if (base?.object.visible) crossfade(base.object, rover.object, done)
-  else done()
+  if (base?.object.visible && !far) {
+    // Drawn through the fade, shown by `showRover` once it ends.
+    crossfade(base.object, rover.object, showRover)
+  } else showRover()
+}
+
+/** A focused ghost's full model is in: it crossfades in over the silhouette when that is drawn. */
+function arriveDetail(rover: PosableRover): void {
+  full = rover
+  if (base?.object.visible) crossfade(base.object, rover.object, () => {})
+  else invalidate()
 }
 
 /* The low-poly model. */
@@ -233,18 +297,15 @@ let unmounted = false
 
 loadRoverModel(baseURL, 'low-poly')
   .then((loaded) => {
-    // The rover never goes back to its stand-in once the full model is in.
-    if (unmounted || (full && !props.ghost)) return
+    if (unmounted) return
     base = place(loaded, (object) => applyRoverLook(object, props.ghost ? 'ghost' : 'standin'))
-    if (full) {
+    if (!props.ghost) {
+      if (!full) emit('status', 'standin')
+      showRover()
+    } else if (full) {
       // A focused ghost's full model came first: the silhouette waits hidden for the unfocus.
       base.object.visible = false
-      return
-    }
-    if (props.ghost) return
-    hangLamp(base)
-    drawn.value = true
-    emit('status', 'standin')
+    } else invalidate()
   })
   .catch((error: unknown) => {
     if (unmounted || full) return
@@ -279,18 +340,15 @@ if (!props.ghost) {
     .then((loaded) => {
       if (unmounted) return
       const rover = place(loaded, (object) => {
+        // The stand-in casts the shadow through the crossfade; `showRover` settles who casts.
         object.traverse((child) => {
-          child.castShadow = child.receiveShadow = true
+          child.castShadow = false
+          child.receiveShadow = true
         })
         applyEnvironment(object, props.environment)
       })
-      hangLamp(rover)
-      drawn.value = true
       emit('status', 'full')
-      swapIn(rover, () => {
-        if (base) root.remove(base.object)
-        base = undefined
-      })
+      arriveFull(rover)
     })
     .catch((error: unknown) => {
       if (unmounted) return
@@ -307,7 +365,7 @@ if (!props.ghost) {
       loadFull()
         .then((loaded) => {
           if (unmounted || !props.detailed || full) return
-          swapIn(
+          arriveDetail(
             place(loaded, (object) =>
               object.traverse((child) => {
                 const mesh = child as Mesh
@@ -333,6 +391,7 @@ function dropDetail(): void {
   full = undefined
   if (base) base.object.visible = true
   release()
+  invalidate()
 }
 
 watch(() => props.frame, pose)
@@ -345,9 +404,24 @@ watch(
   () => props.environment,
   (environment) => {
     if (full && !props.ghost) applyEnvironment(full.object, environment)
+    invalidate()
   },
 )
 pose(props.frame)
+
+if (!props.ghost) {
+  onBeforeRender(() => {
+    const cam = camera.value
+    const limit = props.lodDistanceM
+    if (!cam || !full || !base) return
+    const distance = cam.position.distanceTo(root.position)
+    const next = limit !== null && distance > limit * (far ? 1 - LOD_MARGIN : 1)
+    if (next === far) return
+    far = next
+    stopFade()
+    showRover()
+  })
+}
 
 onBeforeUnmount(() => {
   unmounted = true

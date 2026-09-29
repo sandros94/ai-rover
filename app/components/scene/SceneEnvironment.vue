@@ -33,7 +33,7 @@ const emit = defineEmits<{
 const WIDTH = 64
 const HEIGHT = 32
 
-const { renderer } = useTres()
+const { renderer, invalidate } = useTres()
 if (!(renderer instanceof WebGL)) {
   throw new Error('SceneEnvironment: prefiltering the sky needs the WebGL renderer.')
 }
@@ -87,6 +87,8 @@ function paint(): void {
   emit('change', next.texture)
   target?.dispose()
   target = next
+  // The scene is drawn on demand; the reflections changed.
+  invalidate()
 }
 
 // The dome's colours are 8-bit hex strings, so this runs only when the sky visibly changes.

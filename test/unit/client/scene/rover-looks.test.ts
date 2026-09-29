@@ -4,6 +4,7 @@ import { BoxGeometry, Group, Mesh as ThreeMesh } from 'three'
 import { ROVER_PAINT, SCENE_COLORS } from '#shared/utils/client/scene/palette'
 import {
   applyRoverLook,
+  applyShadowCaster,
   GHOST_OPACITY,
   ROVER_LOOKS,
   roverLookMaterial,
@@ -61,5 +62,17 @@ describe('rover looks', () => {
     }
     // The copies share their geometry as loaded.
     expect(meshes[0]!.geometry).toBe(meshes[2]!.geometry)
+  })
+
+  it('draws a shadow caster into shadow maps alone, one material for every copy', () => {
+    const { roots, meshes } = copies()
+    for (const root of roots) applyShadowCaster(root)
+    const material = meshes[0]!.material as MeshBasicMaterial
+    expect(material).toMatchObject({ colorWrite: false, depthWrite: false })
+    for (const look of ROVER_LOOKS) expect(material).not.toBe(roverLookMaterial(look))
+    for (const mesh of meshes) {
+      expect(mesh.material).toBe(material)
+      expect([mesh.castShadow, mesh.receiveShadow]).toEqual([true, false])
+    }
   })
 })

@@ -5,7 +5,7 @@ import { ROVER_PAINT, SCENE_COLORS } from './palette'
 /**
  * How a copy of the low-poly rover is drawn: `ghost`, the red translucent silhouette of a death
  * marker; `standin`, the rover in its paint, lit and shadowed like the full model, drawn until the
- * full model is in or when it cannot load. Closed set.
+ * full model is in, when it cannot load, and in its place when the camera is far. Closed set.
  */
 export type RoverLook = 'ghost' | 'standin'
 
@@ -52,6 +52,25 @@ export function applyRoverLook(object: Object3D, look: RoverLook): void {
   const shadowed = look === 'standin'
   object.traverse((child) => {
     child.castShadow = child.receiveShadow = shadowed
+    const mesh = child as Mesh
+    if (mesh.isMesh) mesh.material = material
+  })
+}
+
+let caster: Material | undefined
+
+/**
+ * Draws every mesh of `object`, a copy of the low-poly rover, into shadow maps alone: in the view
+ * it writes neither colour nor depth, one material shared by every such copy. The rover's shadow
+ * is cast this way while its full model is drawn, which casts none: at the shadow map's texels of
+ * a few centimetres the full model's detail does not show, and it cost most of the shadow pass.
+ */
+export function applyShadowCaster(object: Object3D): void {
+  caster ??= new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+  const material = caster
+  object.traverse((child) => {
+    child.castShadow = true
+    child.receiveShadow = false
     const mesh = child as Mesh
     if (mesh.isMesh) mesh.material = material
   })
