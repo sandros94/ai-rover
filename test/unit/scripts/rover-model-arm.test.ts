@@ -9,7 +9,7 @@ import {
   DEFAULT_ROVER_GEOMETRY,
   DEFAULT_ROVER_LIMITS,
 } from '#shared/utils/rover'
-import { ARM_NIGHT, armPose, DIFFERENTIAL_RATIO } from '#shared/utils/client/scene'
+import { ARM_LEGS, ARM_NIGHT, DIFFERENTIAL_RATIO } from '#shared/utils/client/scene'
 import type { Box } from '~~/scripts/rover-model/clearance'
 import {
   bodyPoint,
@@ -23,6 +23,8 @@ import {
 const MODEL = 'public/models/rover/rover.glb'
 /** The gap the night pose keeps from the rest of the rover, metres, on the bounding boxes. */
 const CLEARANCE = 0.05
+/** The gap every link keeps along the unstow once off its rest, metres. */
+const PATH_CLEARANCE = 0.03
 /** The upper arm is hinged at the chassis: its boxes this near the shoulder are not measured. */
 const SHOULDER_M = 0.3
 
@@ -78,17 +80,23 @@ beforeAll(async () => {
   }
 })
 
-/** The arm's smallest gap to the rest of the rover at `pose`, up to 0.3 m. */
-function clearance(pose: Record<string, number>): number {
+/** Each moving arm link's smallest gap to the rest of the rover at `pose`, up to `reach`. */
+function linkGaps(pose: Record<string, number>, reach = 0.3): Record<string, number> {
   poseModel(doc, pose)
-  return Math.min(
-    ...['arm_2', 'arm_3', 'arm_4', 'arm_5'].map((arm) =>
+  return Object.fromEntries(
+    ['arm_2', 'arm_3', 'arm_4', 'arm_5'].map((arm) => [
+      arm,
       (arm === 'arm_2' ? obstacles.beyondShoulder : obstacles.all).gap(
         posedBoxes(doc, volumes, arm),
-        0.3,
+        reach,
       ),
-    ),
+    ]),
   )
+}
+
+/** The arm's smallest gap to the rest of the rover at `pose`, up to 0.3 m. */
+function clearance(pose: Record<string, number>): number {
+  return Math.min(...Object.values(linkGaps(pose)))
 }
 
 describe('the night arm pose', () => {
@@ -121,12 +129,39 @@ describe('the night arm pose', () => {
     expect(ahead - DEFAULT_ROVER_GEOMETRY.wheelRadius).toBeLessThan(3.5)
     expect(Math.abs(at[1] + direction![1] * s)).toBeLessThan(0.5)
   })
+})
 
-  it('stays clear on its way up from stowed, once off its rest', () => {
-    // The boxes of the arm lifting off its rest still touch the rest's for the first quarter of
-    // the way; after that the turret passes the mast closest, about 3 cm off.
-    for (let k = 6; k <= 20; k++) {
-      expect(clearance(armPose(k / 20)), `at ${k / 20}`).toBeGreaterThan(0.02)
+describe('the arm unstow', () => {
+  it(`clears the mast, the deck and the wheels at full suspension travel by ${PATH_CLEARANCE * 100} cm once each link is off its rest`, () => {
+    // Every 1° of the joint moving furthest in each leg. A link resting on the rover at the
+    // start may touch while it lifts off, its gap only growing, until it first clears.
+    const lifted = new Set<string>()
+    const lifting: Record<string, number> = {}
+    const faults: string[] = []
+    let least = Infinity
+    for (const [k, { from, to }] of ARM_LEGS.entries()) {
+      const steps = Math.ceil(
+        Math.max(...ARM_JOINTS.map(({ node: n }) => Math.abs(to[n] - from[n]))) / (Math.PI / 180),
+      )
+      for (let i = k === 0 ? 0 : 1; i <= steps; i++) {
+        const pose = Object.fromEntries(
+          ARM_JOINTS.map(({ node: n }) => [n, from[n] + ((to[n] - from[n]) * i) / steps]),
+        )
+        for (const [arm, g] of Object.entries(linkGaps(pose, 0.1))) {
+          const where = `${arm} in leg ${k + 1} at ${i}°: ${g.toFixed(3)} m`
+          if (lifted.has(arm)) {
+            if (g < PATH_CLEARANCE) faults.push(where)
+            least = Math.min(least, g)
+          } else {
+            if (g < (lifting[arm] ?? 0)) faults.push(`${where}, closer while lifting off`)
+            lifting[arm] = g
+            if (g >= PATH_CLEARANCE) lifted.add(arm)
+          }
+        }
+      }
     }
-  })
+    expect(faults).toEqual([])
+    expect([...lifted].sort()).toEqual(['arm_2', 'arm_3', 'arm_4', 'arm_5'])
+    expect(least).toBeGreaterThanOrEqual(PATH_CLEARANCE)
+  }, 120_000)
 })

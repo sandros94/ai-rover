@@ -4,8 +4,9 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { CustomToneMapping, PCFShadowMap, ShaderChunk, SRGBColorSpace } from 'three'
 import {
-  ARM_EASE_S,
   ARM_NIGHT,
+  ARM_SEQUENCE_S,
+  armPoseAlong,
   chunksFromGrid,
   flatFrame,
   qualityFor,
@@ -145,7 +146,7 @@ describe('StopStage in 3D', () => {
     )
   })
 
-  it('raises the arm into its night pose once the sun is down, and stows it by day', async () => {
+  it('unstows the arm into its night pose once the sun is down, and stows it by day', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const armAt = async (solFraction: number) => {
       const stage = await mountSuspended(StopStage, {
@@ -166,13 +167,13 @@ describe('StopStage in 3D', () => {
       return stage.findComponent(RoverModel).props('joints') as Record<string, number>
     }
     const { set } = sunCrossings()
-    const eased = (ARM_EASE_S + 1) / MARS_SOL_SECONDS
     expect(await armAt(0.4)).toMatchObject(ARM_STOWED)
-    const night = await armAt(set + eased)
+    const night = await armAt(set + (ARM_SEQUENCE_S + 1) / MARS_SOL_SECONDS)
     for (const [node, value] of Object.entries(ARM_NIGHT)) expect(night[node]).toBeCloseTo(value, 9)
-    // Halfway through the dusk easing, halfway between.
-    const half = await armAt(set + ARM_EASE_S / 2 / MARS_SOL_SECONDS)
-    expect(half.arm_2).toBeCloseTo((ARM_STOWED.arm_2 + ARM_NIGHT.arm_2) / 2, 3)
+    // Halfway through the unstow, at the sequence's halfway point.
+    const half = await armAt(set + ARM_SEQUENCE_S / 2 / MARS_SOL_SECONDS)
+    const along = armPoseAlong(ARM_SEQUENCE_S / 2)
+    for (const [node, value] of Object.entries(along)) expect(half[node]).toBeCloseTo(value, 3)
   })
 })
 
