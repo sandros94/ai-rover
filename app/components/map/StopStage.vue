@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { GroundView, MapObject, PreviewResult, RoverObject } from '#shared/utils/client'
-import { liftSeen } from '#shared/utils/client'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import type { MapViewMode } from '~/composables/useMapView'
+import type { StopFog } from '~/composables/useStopFog'
 import StopMap from './StopMap.vue'
 import TerrainProgress from './TerrainProgress.vue'
 
@@ -32,8 +32,10 @@ const props = withDefaults(
     ground?: GroundView
     /** The stop's own seen flags, one byte per disk vertex. */
     seen?: Uint8Array
-    /** What the playing drive has seen so far, as disk-grid indices, lifted from the fog. */
+    /** What the playing drive has seen so far, as disk-grid indices; read only without `fog`. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
+    /** The fog over `seen` with the reveals lifted, sight included, from an owner sharing it. */
+    fog?: StopFog
     /** Vertices per chunk side; the 3D view needs it with the ground. */
     chunkVertices?: number
     heightAt: (x: number, y: number) => number | undefined
@@ -71,6 +73,7 @@ const props = withDefaults(
     ground: undefined,
     seen: undefined,
     reveals: () => [],
+    fog: undefined,
     chunkVertices: undefined,
     mastHeight: undefined,
     trail: () => [],
@@ -93,9 +96,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{ pick: [point: MapPoint]; hover: [point: MapPoint | null] }>()
 
-/** The 2D fog: the stop's flags with the drive's reveals lifted; the 3D view lifts its own. */
-const shownSeen = computed(() => props.seen && liftSeen(props.seen, props.reveals))
-
 /** The survey for the 3D view, one object while it stays, so the scene does not redraw its ring. */
 const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
   const { center, radius } = props
@@ -105,16 +105,23 @@ const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
   return { center: { x: center.x, y: center.y }, radius }
 })
 
-/** What the rover has in line of sight now over what has been revealed, across the whole disk. */
-const sight = useCurrentSight(
-  () => shownSeen.value,
-  () => props.ground ?? props.terrain,
-  () => props.rover,
-  () =>
-    props.mastHeight === undefined
+const NO_REVEALS: readonly { vertices: ArrayLike<number> }[] = []
+/*
+ * The fog depends on the ground and the rover, never on the view: an owner drawing the stop in
+ * more than one view computes it once and hands it to each stage as `fog`. Without it the stage
+ * computes its own, whose inputs stay empty while one is handed, so it costs nothing then.
+ */
+const own = useStopFog({
+  seen: () => (props.fog ? undefined : props.seen),
+  reveals: () => (props.fog ? NO_REVEALS : props.reveals),
+  ground: () => (props.fog ? undefined : (props.ground ?? props.terrain)),
+  eye: () => (props.fog ? undefined : props.rover),
+  sight: () =>
+    props.fog || props.mastHeight === undefined
       ? undefined
       : { mastHeight: props.mastHeight, radiusM: props.radius },
-)
+})
+const fog = computed(() => props.fog ?? own.value)
 </script>
 
 <template>
@@ -122,8 +129,9 @@ const sight = useCurrentSight(
     <StopMap
       v-if="view === '2d'"
       :terrain="ground ?? terrain"
-      :seen="shownSeen"
-      :sight="sight"
+      :seen="fog.seen"
+      :fade="fog.fade"
+      :sight="fog.sight"
       :center="center"
       :radius="radius"
       :rover="rover"
@@ -147,7 +155,8 @@ const sight = useCurrentSight(
       v-else-if="(ground ?? terrain) && chunkVertices"
       :terrain="(ground ?? terrain)!"
       :seen="seen"
-      :sight="sight"
+      :fade="fog.fade"
+      :sight="fog.sight"
       :survey="survey"
       :chunk-vertices="chunkVertices"
       :height-at="heightAt"
@@ -159,7 +168,6 @@ const sight = useCurrentSight(
       :stops="trail"
       :deaths="deaths"
       :death-radius-m="deathRadiusM"
-      :reveals="reveals"
       :objects="objects"
       :rover-object="roverObject"
       :lighting="{ solFraction }"

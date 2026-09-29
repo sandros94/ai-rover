@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { defineComponent, h, nextTick, shallowRef } from 'vue'
-import { createDiskGround, expandRect, FOG_FILL, groundView } from '#shared/utils/client'
+import {
+  createDiskGround,
+  expandRect,
+  FOG_FILL,
+  groundView,
+  revealTimes,
+} from '#shared/utils/client'
 import { groundRgb, hillshadeAt, reliefLight } from '#shared/utils/client/scene'
 import { generateChunk } from '#shared/utils/terrain'
 import { journeyFixture } from '../unit/client/helpers'
@@ -22,6 +28,11 @@ beforeAll(() => {
   })
 })
 afterAll(() => vi.restoreAllMocks())
+
+/** The fog over `seen` with nothing fading, as `useRevealFade` gives it first. */
+function settled(seen: Uint8Array) {
+  return { fog: { seen, revealedAt: revealTimes(seen), now: 0 } }
+}
 
 function grid(size: number) {
   const heights = new Float32Array(size * size).map((_, k) => (k % size) * 0.1)
@@ -205,6 +216,7 @@ describe('StopMap over ground still arriving', () => {
       props: {
         terrain: { grid: flat, origin: { i: -30, j: -30 } },
         seen,
+        fade: settled(seen),
         center: { x: 0, y: 0 },
         radius: 20,
       },
@@ -243,6 +255,7 @@ describe('StopMap over ground still arriving', () => {
     for (let j = 0; j < size; j++) for (let i = 20; i < size; i++) seen[j * size + i] = 1
     const sight = shallowRef(sightOf(40))
     const terrain = { grid: flat, origin: { i: -30, j: -30 } }
+    const fade = settled(seen)
     puts.length = 0
     const wrapper = await mountSuspended(
       defineComponent({
@@ -250,6 +263,7 @@ describe('StopMap over ground still arriving', () => {
           h(StopMap, {
             terrain,
             seen,
+            fade,
             sight: sight.value,
             center: { x: 0, y: 0 },
             // Past the grid's corners: the whole grid lies within the survey.

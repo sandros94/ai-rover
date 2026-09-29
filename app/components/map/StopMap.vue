@@ -37,6 +37,7 @@ import { RELIEF_STOPS, rgbHex, routeDestination, SEEN_STOPS } from '#shared/util
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import { surveyMask } from '#shared/utils/terrain'
+import type { RevealFrame } from '~/composables/useRevealFade'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 
 const props = withDefaults(
@@ -46,8 +47,10 @@ const props = withDefaults(
      * each chunk's rectangle as it lands.
      */
     terrain?: GroundView
-    /** One byte per grid vertex; unseen ground is hidden under fog, and fades in as it grows. */
+    /** One byte per grid vertex; unseen ground is hidden under fog, and no ground without `fade`. */
     seen?: Uint8Array
+    /** `seen` as drawn now, newly seen ground fading in, by `useRevealFade` over `seen`. */
+    fade?: RevealFrame
     /**
      * One byte per grid vertex, 1 where the rover has the ground in sight now; revealed ground
      * out of it, or all of it while there is none, is drawn as seen before.
@@ -79,6 +82,7 @@ const props = withDefaults(
   {
     terrain: undefined,
     seen: undefined,
+    fade: undefined,
     sight: undefined,
     rover: undefined,
     trail: () => [],
@@ -161,10 +165,7 @@ const heightRange = computed(() => {
 
 const colorMode = useColorMode()
 const fogRgb = computed(() => FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light'])
-const fade = useRevealFade(
-  () => props.seen,
-  () => props.terrain?.grid,
-)
+const fade = toRef(() => props.fade)
 
 /** Contours are built per tile of this many cells, so a reveal rebuilds only the tiles it touches. */
 const CONTOUR_TILE = 64

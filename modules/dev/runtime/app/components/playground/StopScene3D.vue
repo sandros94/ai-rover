@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { LinearToneMapping } from 'three'
-import { useCurrentSight, useRoute, useScenePassTiming, useSceneQuality } from '#imports'
-import { createTerrainSampler, destinationObject, liftSeen } from '#shared/utils/client'
+import { useRoute, useScenePassTiming, useSceneQuality, useStopFog } from '#imports'
+import { createTerrainSampler, destinationObject } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
@@ -137,13 +137,14 @@ const reveals = useRevealsUntil(
   () => props.record,
   () => t.value,
 )
-/** What the rover has in line of sight at the scrub time, across the whole disk. */
-const sight = useCurrentSight(
-  () => props.disk && liftSeen(props.disk.visible, reveals.value),
-  () => terrain.value,
-  () => ({ x: props.frame[field('x')]!, y: props.frame[field('y')]! }),
-  () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
-)
+/** The stop's fog with the drive's reveals lifted, and the rover's sight at the scrub time. */
+const fog = useStopFog({
+  seen: () => props.disk?.visible,
+  reveals: () => reveals.value,
+  ground: () => terrain.value,
+  eye: () => ({ x: props.frame[field('x')]!, y: props.frame[field('y')]! }),
+  sight: () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
+})
 
 const deaths = computed(() => {
   const { start, outcome } = props.record
@@ -186,7 +187,8 @@ const deaths = computed(() => {
           class="aspect-square"
           :terrain="terrain"
           :seen="disk.visible"
-          :sight="sight"
+          :fade="fog.fade"
+          :sight="fog.sight"
           :chunk-vertices="CHUNK_VERTICES"
           :height-at="heightAt"
           :frame="frame"
@@ -196,7 +198,6 @@ const deaths = computed(() => {
           :route="record.plan.polyline"
           :stops="stops"
           :deaths="deaths"
-          :reveals="reveals"
           :objects="objects"
           :lighting="lighting"
         />

@@ -155,6 +155,23 @@ const trail = computed(() =>
   props.state.trail.map((s) => ({ x: s.x, y: s.y, current: s.index === stop.index })),
 )
 
+/** The rover as playback shows it, else at the stop; changes every animation frame. */
+const rover = computed(
+  () => props.track.rover.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad },
+)
+
+/** Once for every stage the slot draws: the fog, sight included, is the same in each view. */
+const fog = useStopFog({
+  seen: () => revealed.value,
+  reveals: () => props.track.reveals.value,
+  ground: () => arriving.value ?? terrain.value,
+  eye: () => rover.value,
+  sight: () => {
+    const m = manifest.value
+    return m && { mastHeight: m.world.mastHeight, radiusM: m.radius }
+  },
+})
+
 const submissions = computed(() =>
   (props.state.round?.submissions ?? []).map((s) => ({ id: s.id, goal: s.goal })),
 )
@@ -162,14 +179,13 @@ const submissions = computed(() =>
 /** The stage's props: changes every animation frame while a drive plays. */
 const stage = computed((): StageProps => {
   const { track } = props
-  const rover = track.rover.value ?? { x: stop.x, y: stop.y, headingRad: stop.headingRad }
   const status = roverStatus(props.state)
   const motion = status === 'driving' ? track.motion.value : undefined
   return {
     terrain: terrain.value,
     ground: arriving.value,
     seen: revealed.value,
-    reveals: track.reveals.value,
+    fog: fog.value,
     chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
     heightAt,
     loading: { loaded: loaded.value, total: total.value, error: error.value },
@@ -178,7 +194,7 @@ const stage = computed((): StageProps => {
       : { x: stop.x, y: stop.y },
     radius: manifest.value?.radius ?? 500,
     mastHeight: manifest.value?.world.mastHeight,
-    rover,
+    rover: rover.value,
     trail: trail.value,
     plan: track.plan.value,
     driven: track.driven.value,
@@ -194,7 +210,7 @@ const stage = computed((): StageProps => {
     picked: picked.value,
     objects: props.objects,
     solFraction: track.solFraction.value,
-    roverObject: roverObject(rover, {
+    roverObject: roverObject(rover.value, {
       status,
       speedMps: motion?.speedMps ?? null,
       progress: motion?.progress ?? null,

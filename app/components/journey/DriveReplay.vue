@@ -134,19 +134,34 @@ onMounted(() => {
 })
 onBeforeUnmount(() => clearInterval(ticker))
 
+/** The rover as playback shows it, else at the stop the drive left; changes every frame. */
+const roverAt = computed(() => rover.value ?? { ...drive.value.from, headingRad: 0 })
+
+/** Once for every stage drawn: the fog, sight included, is the same in each view. */
+const fog = useStopFog({
+  seen: () => revealed.value,
+  reveals: () => snapshot.value.reveals,
+  ground: () => ground.value ?? terrain.value,
+  eye: () => roverAt.value,
+  sight: () => {
+    const m = manifest.value
+    return m && { mastHeight: m.world.mastHeight, radiusM: m.radius }
+  },
+})
+
 /** The stage's props: changes every animation frame, so it is read where the stage draws. */
 const stage = computed((): StageProps => ({
   terrain: terrain.value,
   ground: ground.value,
   seen: revealed.value,
-  reveals: snapshot.value.reveals,
+  fog: fog.value,
   chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
   heightAt,
   loading: { loaded: loaded.value, total: total.value, error: error.value ?? playback.error.value },
   center: manifest.value ? manifest.value.stop : drive.value.from,
   radius: manifest.value?.radius ?? 500,
   mastHeight: manifest.value?.world.mastHeight,
-  rover: rover.value ?? { ...drive.value.from, headingRad: 0 },
+  rover: roverAt.value,
   trail: shownTrail.value,
   plan: plan.value,
   driven: driven.value,
@@ -161,7 +176,7 @@ const stage = computed((): StageProps => ({
     new Date(drive.value.startedAt).getTime() + snapshot.value.t * 1000,
   ).fraction,
   objects: objects.value,
-  roverObject: roverObject(rover.value ?? { ...drive.value.from, headingRad: 0 }, {
+  roverObject: roverObject(roverAt.value, {
     status: 'driving',
     speedMps: motion.value?.speedMps ?? null,
     progress: motion.value?.progress ?? null,

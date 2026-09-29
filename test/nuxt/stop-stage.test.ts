@@ -16,13 +16,18 @@ vi.mock('~/components/scene/DiskScene.vue', async () => {
     default: vue.defineComponent({
       name: 'DiskScene',
       props: {
-        reveals: { type: Array, default: () => [] },
+        fade: { type: Object, default: undefined },
         sight: { type: Uint8Array, default: undefined },
       },
       setup: (props) => () =>
         vue.h('div', {
           'data-test': 'scene',
-          'data-reveals': String(props.reveals.length),
+          'data-seen': String(
+            (props.fade as { fog: { seen: Uint8Array } } | undefined)?.fog.seen.reduce(
+              (n, v) => n + v,
+              0,
+            ) ?? 'none',
+          ),
           'data-sight': String(props.sight?.reduce((n, v) => n + v, 0) ?? 'none'),
         }),
     }),
@@ -69,14 +74,15 @@ async function mountChoice() {
 afterEach(() => localStorage.removeItem(MAP_VIEW_KEY))
 
 describe('StopStage', () => {
-  it('draws the 2D map or the scene, with the same reveals, as its view says', async () => {
+  it("draws the 2D map or the scene, with the drive's reveals lifted, as its view says", async () => {
     const flat = await mountStage('2d')
     expect(flat.find('[data-test=map]').exists()).toBe(true)
     expect(flat.find('[data-test=scene]').exists()).toBe(false)
 
     const scene = await mountStage('3d')
     expect(scene.find('[data-test=map]').exists()).toBe(false)
-    expect(scene.find('[data-test=scene]').attributes('data-reveals')).toBe('1')
+    // Two vertices revealed over ground the stop never saw.
+    expect(scene.find('[data-test=scene]').attributes('data-seen')).toBe('2')
   })
 
   it("hands both views the rover's line of sight over the whole disk, driving or not", async () => {

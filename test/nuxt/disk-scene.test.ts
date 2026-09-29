@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import type { BufferAttribute, Group, Mesh } from 'three'
-import { defineComponent, h, nextTick, shallowRef } from 'vue'
+import { computed, defineComponent, h, nextTick, shallowRef } from 'vue'
 import { createDiskGround, groundView } from '#shared/utils/client'
 import { generateChunk, revealedOverDisk } from '#shared/utils/terrain'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import DiskScene from '~/components/scene/DiskScene.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import TerrainChunks from '~/components/scene/TerrainChunks.vue'
+import { useRevealFade } from '~/composables/useRevealFade'
 import { journeyFixture } from '../unit/client/helpers'
 
 // The canvas needs WebGL; the terrain layer alone draws into a plain group.
@@ -47,14 +48,23 @@ describe('DiskScene over ground still arriving', () => {
     const view = shallowRef(groundView(ground, stopManifest.heightRange))
     const wrapper = await mountSuspended(
       defineComponent({
-        setup: () => () =>
-          h(DiskScene, {
-            terrain: view.value,
-            seen: revealedOverDisk(mask, ground),
-            chunkVertices: 65,
-            heightAt: () => 0,
-            rest: { x: 0, y: 0, headingRad: 0 },
-          }),
+        setup: () => {
+          // Read with the view, as the stop's flags cover the ground arrived so far.
+          const seen = computed(() => view.value && revealedOverDisk(mask, ground))
+          const fade = useRevealFade(
+            () => seen.value,
+            () => view.value.grid,
+          )
+          return () =>
+            h(DiskScene, {
+              terrain: view.value,
+              seen: seen.value,
+              fade: fade.value,
+              chunkVertices: 65,
+              heightAt: () => 0,
+              rest: { x: 0, y: 0, headingRad: 0 },
+            })
+        },
       }),
     )
     await nextTick()
@@ -94,15 +104,22 @@ describe("DiskScene as the rover's sight changes", () => {
     const view = groundView(ground, stopManifest.heightRange)
     const wrapper = await mountSuspended(
       defineComponent({
-        setup: () => () =>
-          h(DiskScene, {
-            terrain: view,
-            seen,
-            sight: sight.value,
-            chunkVertices: 65,
-            heightAt: () => 0,
-            rest: { x: 0, y: 0, headingRad: 0 },
-          }),
+        setup: () => {
+          const fade = useRevealFade(
+            () => seen,
+            () => view.grid,
+          )
+          return () =>
+            h(DiskScene, {
+              terrain: view,
+              seen,
+              fade: fade.value,
+              sight: sight.value,
+              chunkVertices: 65,
+              heightAt: () => 0,
+              rest: { x: 0, y: 0, headingRad: 0 },
+            })
+        },
       }),
     )
     await nextTick()
