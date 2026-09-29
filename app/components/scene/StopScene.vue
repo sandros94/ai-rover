@@ -6,12 +6,14 @@ if (import.meta.client) installAgXLook()
 </script>
 
 <script setup lang="ts">
+import type { TresContext } from '@tresjs/core'
 import { TresCanvas } from '@tresjs/core'
-import type { ToneMapping } from 'three'
+import type { ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
+  framePacer,
   framePlacement,
   fullModelLedger,
   LOD_FAR_M,
@@ -168,17 +170,72 @@ const plane = new GridHelper(40, 40, '#a8a29e', '#57534e')
 plane.rotation.x = Math.PI / 2
 watchEffect(() => plane.position.set(rover.value.x, rover.value.y, rover.value.z))
 onBeforeUnmount(() => plane.dispose())
+
+/** The viewer's quality tier: shadows, pixel ratio, frame cap and the rover's detail. */
+const { quality } = useSceneQuality()
+const shadowCasters = computed(() =>
+  quality.value.shadows === 'full'
+    ? { x: target.value.x, y: target.value.y, rangeM: quality.value.casterRangeM }
+    : null,
+)
+
+/**
+ * The scene is drawn on demand: when something in it changed (a prop, the camera, a model or
+ * the exposure settling, each asking through Tres' `invalidate`), at most `frameCap` times a
+ * second, or at the display's rate while the view is handled.
+ */
+const pacer = framePacer(() => quality.value.frameCap)
+let context: TresContext | undefined
+const handled = () => pacer.interact(performance.now())
+const INPUTS = ['pointerdown', 'pointermove', 'wheel'] as const
+
+/** In development, per-pass GPU times for the playground's readout. */
+const passTiming = import.meta.dev ? useScenePassTiming() : undefined
+let untime: (() => void) | undefined
+
+function onReady(ready: TresContext): void {
+  context = ready
+  const renderer = ready.renderer.instance as WebGLRenderer
+  ready.renderer.replaceRenderFunction((notify) => {
+    const camera = ready.camera.activeCamera.value
+    const now = performance.now()
+    // Not due yet: Tres keeps the frame asked for and offers it again next display frame.
+    if (!camera || !pacer.due(now)) return
+    renderer.render(ready.scene.value, camera)
+    pacer.drawn(now)
+    notify()
+  })
+  for (const type of INPUTS) renderer.domElement.addEventListener(type, handled, { passive: true })
+  if (import.meta.dev) {
+    untime = timeScenePasses(renderer, (timing) => {
+      passTiming!.value = timing
+    })
+  }
+}
+watch(
+  () => [{ ...props }, quality.value],
+  () => context?.renderer.invalidate(),
+)
+// The camera eases onto a new focus: drawn at the display's rate like any handling.
+watch(() => props.focusKey, handled)
+onBeforeUnmount(() => {
+  untime?.()
+  const canvas = context?.renderer.instance.domElement
+  for (const type of INPUTS) canvas?.removeEventListener(type, handled)
+})
 </script>
 
 <template>
   <TresCanvas
-    :dpr="[1, 2]"
+    :dpr="[1, quality.maxDpr]"
+    render-mode="on-demand"
     power-preference="high-performance"
     :tone-mapping="toneMapping"
     :output-color-space="SRGBColorSpace"
-    shadows
+    :shadows="quality.shadows !== 'off'"
     :shadow-map-type="SHADOW_MAP"
     :clear-color="atmosphere"
+    @ready="onReady"
   >
     <SceneAtmosphere :color="atmosphere" :near="HAZE.near" :far="HAZE.far" />
     <SceneSky :direction="sun.direction" :lighting="lighting" />
@@ -187,6 +244,8 @@ onBeforeUnmount(() => plane.dispose())
       :lighting="lighting"
       :target="target"
       :exposure-bias="exposureBias"
+      :shadows="quality.shadows !== 'off'"
+      :shadow-map-size="quality.shadowMapSize"
     />
     <FollowCamera
       :target="target"
@@ -202,6 +261,7 @@ onBeforeUnmount(() => plane.dispose())
       :fog="fog"
       :sight="sight"
       :survey="survey"
+      :casters="shadowCasters"
     />
     <primitive v-else :object="plane" />
     <RouteLine
@@ -234,6 +294,7 @@ onBeforeUnmount(() => plane.dispose())
       :variant="roverVariant"
       :ledger="ledger"
       :lamp="lamp"
+      :lod-distance-m="quality.roverLodM"
       @ready="emit('roverReady', $event)"
     />
     <ScenePicker

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useCurrentSight, usePlanPreview } from '#imports'
-import { destinationObject, liftSeen } from '#shared/utils/client'
+import { usePlanPreview, useStopFog } from '#imports'
+import { destinationObject } from '#shared/utils/client'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
@@ -14,12 +14,11 @@ import { PLAYGROUND_PROPS, useRevealsUntil } from '../../playground/registry'
 
 const props = defineProps(PLAYGROUND_PROPS)
 
-/** The stop's own view with what the drive has revealed by the scrub time lifted from the fog. */
+/** What the drive has revealed by the scrub time, lifted from the fog. */
 const reveals = useRevealsUntil(
   () => props.record,
   () => props.frame[KEYFRAME_FIELDS.indexOf('t')]!,
 )
-const seen = computed(() => props.disk && liftSeen(props.disk.visible, reveals.value))
 
 const value = (name: (typeof KEYFRAME_FIELDS)[number]) =>
   props.frame[KEYFRAME_FIELDS.indexOf(name)]!
@@ -36,13 +35,14 @@ const rover = computed(() => {
 /** One object per disk: a new one each frame would redraw all of the ground each frame. */
 const terrain = computed(() => props.disk && { grid: props.disk.grid, origin: props.disk.origin })
 
-/** What the rover has in line of sight at the scrub time, across the whole disk. */
-const sight = useCurrentSight(
-  () => seen.value,
-  () => terrain.value,
-  () => rover.value,
-  () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
-)
+/** The stop's fog with the drive's reveals lifted, and the rover's sight at the scrub time. */
+const fog = useStopFog({
+  seen: () => props.disk?.visible,
+  reveals: () => reveals.value,
+  ground: () => terrain.value,
+  eye: () => rover.value,
+  sight: () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
+})
 
 const anchor = computed(() => ({ x: props.record.start.x, y: props.record.start.y }))
 
@@ -93,8 +93,7 @@ function onHover(point: MapPoint | null): void {
     <StopMap
       class="aspect-square rounded-lg"
       :terrain="terrain"
-      :seen="seen"
-      :sight="sight"
+      :fog="fog"
       :center="disk.center"
       :radius="DEFAULT_STOP_RADIUS"
       :rover="rover"

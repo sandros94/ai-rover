@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ToneMapping } from 'three'
 import type { FogSurface, GridRect, GroundView, MapObject, RoverObject } from '#shared/utils/client'
-import { fogSurface, gridHeightAt, liftSeen, ROVER_ID } from '#shared/utils/client'
+import { fogSurface, gridHeightAt, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
+import type { StopFog } from '~/composables/useStopFog'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 import type { Pickable } from './ScenePicker.vue'
 import StopScene from './StopScene.vue'
@@ -24,13 +25,12 @@ const props = withDefaults(
   defineProps<{
     /** The disk, whole or still arriving. */
     terrain: GroundView
-    /** The stop's own seen flags, one byte per disk vertex. */
-    seen?: Uint8Array
     /**
-     * One byte per disk vertex, 1 where the rover has the ground in sight now; revealed ground
-     * out of it, or all of it while there is none, is drawn as seen before.
+     * The fog: unseen ground sits at the height of what the stop itself has seen (`stopSeen`),
+     * fading in as it is revealed (`fade`); revealed ground out of `sight`, or all of it while
+     * there is none, is drawn as seen before. Without a fog, or a `fade`, no fog is drawn.
      */
-    sight?: Uint8Array
+    fog?: Pick<StopFog, 'stopSeen' | 'fade' | 'sight'>
     /** Vertices per chunk side, as the chunk cache reports them. */
     chunkVertices: number
     /** The stop's survey: ground beyond it is not drawn, a ring marks its edge. */
@@ -51,8 +51,6 @@ const props = withDefaults(
      */
     deaths?: (MapPoint & { headingRad?: number; id?: string })[]
     deathRadiusM?: number
-    /** What the playing drive has seen so far, as disk-grid vertex indices. */
-    reveals?: readonly { vertices: ArrayLike<number> }[]
     /**
      * Stops, deaths, submissions and the destination to inspect; submissions are drawn as
      * flagged goals, the destination's flag stands at the route's end.
@@ -64,8 +62,7 @@ const props = withDefaults(
     lighting?: { solFraction?: number; exposureBias?: number; toneMapping?: ToneMapping }
   }>(),
   {
-    seen: undefined,
-    sight: undefined,
+    fog: undefined,
     survey: undefined,
     frame: undefined,
     keyframes: undefined,
@@ -74,7 +71,6 @@ const props = withDefaults(
     stops: () => [],
     deaths: () => [],
     deathRadiusM: undefined,
-    reveals: () => [],
     objects: () => [],
     roverObject: undefined,
     lighting: () => ({}),
@@ -105,18 +101,13 @@ function syncChunks(terrain: GroundView): void {
   chunks.value = [...chunks.value, ...added]
 }
 
-/** Fog updates per second, as the 2D map's: reveals arrive every metre, not every frame. */
-const REVEAL_HZ = 10
-const reveals = useThrottled(() => props.reveals, REVEAL_HZ)
-const shownSeen = computed(() => props.seen && liftSeen(props.seen, reveals.value))
-const fade = useRevealFade(
-  () => shownSeen.value,
-  () => props.terrain.grid,
-)
+const fade = toRef(() => props.fog?.fade)
 
+/** Its own ref: the fog object changes with every sight, the stop's flags only with the stop. */
+const stopSeen = computed(() => props.fog?.stopSeen)
 /** Mean height of the ground the stop itself has seen, over the ground in so far. */
 const stopMean = computed(() => {
-  const seen = props.seen
+  const seen = stopSeen.value
   let sum = 0
   let count = 0
   const heights = props.terrain.grid.heights
@@ -137,7 +128,7 @@ const stopMean = computed(() => {
  * drift with reveals; while ground arrives it sits at the mean of what is in, and settles once
  * the last chunk is.
  */
-const fog = shallowRef<ChunkFog & { rects?: GridRect[] }>()
+const chunkFog = shallowRef<ChunkFog & { rects?: GridRect[] }>()
 let surface: FogSurface | undefined
 /** The mean the surface was computed with, and how many placed rectangles it covers. */
 let surfaced = { mean: 0, placed: 0 }
@@ -147,7 +138,7 @@ watch(
     const placed = terrain.placed ?? []
     if (!frame) {
       surface = undefined
-      fog.value = undefined
+      chunkFog.value = undefined
       syncChunks(terrain)
       return
     }
@@ -174,8 +165,8 @@ watch(
       surfaced.placed = placed.length
     }
     syncChunks(terrain)
-    if (rects?.length === 0 && fog.value?.surface === surface) return
-    fog.value = {
+    if (rects?.length === 0 && chunkFog.value?.surface === surface) return
+    chunkFog.value = {
       surface: surface!,
       layout: layout.value,
       rects,
@@ -186,7 +177,7 @@ watch(
 
 /** Height of the ground as drawn: overlays crossing unseen ground follow the fog, not what it hides. */
 const drawnHeightAt = computed(() => {
-  const current = fog.value
+  const current = chunkFog.value
   if (!current) return props.heightAt
   const place = { ...props.terrain.grid, origin: props.terrain.origin }
   return (x: number, y: number) =>
@@ -291,8 +282,8 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :route="route"
       :deaths="ghosts"
       :death-radius-m="deathRadiusM"
-      :fog="fog"
-      :sight="sight"
+      :fog="chunkFog"
+      :sight="props.fog?.sight"
       :survey="survey"
       :drawn-height-at="drawnHeightAt"
       :goals="goals"

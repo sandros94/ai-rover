@@ -37,6 +37,7 @@ import { RELIEF_STOPS, rgbHex, routeDestination, SEEN_STOPS } from '#shared/util
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import { surveyMask } from '#shared/utils/terrain'
+import type { StopFog } from '~/composables/useStopFog'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 
 const props = withDefaults(
@@ -46,13 +47,12 @@ const props = withDefaults(
      * each chunk's rectangle as it lands.
      */
     terrain?: GroundView
-    /** One byte per grid vertex; unseen ground is hidden under fog, and fades in as it grows. */
-    seen?: Uint8Array
     /**
-     * One byte per grid vertex, 1 where the rover has the ground in sight now; revealed ground
-     * out of it, or all of it while there is none, is drawn as seen before.
+     * The fog: unseen ground (`seen` 0) is hidden and fades in as it is revealed; revealed ground
+     * out of `sight`, or all of it while there is none, is drawn as seen before. With `seen` and
+     * no `fade` (flags that do not fit the grid) no ground is drawn; without a fog, all of it.
      */
-    sight?: Uint8Array
+    fog?: Pick<StopFog, 'seen' | 'fade' | 'sight'>
     /** The survey: ground beyond `radius` of `center` is not drawn, only a ring at its edge. */
     center: MapPoint
     radius: number
@@ -78,8 +78,7 @@ const props = withDefaults(
   }>(),
   {
     terrain: undefined,
-    seen: undefined,
-    sight: undefined,
+    fog: undefined,
     rover: undefined,
     trail: () => [],
     plan: () => [],
@@ -161,10 +160,7 @@ const heightRange = computed(() => {
 
 const colorMode = useColorMode()
 const fogRgb = computed(() => FOG_FILL[colorMode.value === 'dark' ? 'dark' : 'light'])
-const fade = useRevealFade(
-  () => props.seen,
-  () => props.terrain?.grid,
-)
+const fade = toRef(() => props.fog?.fade)
 
 /** Contours are built per tile of this many cells, so a reveal rebuilds only the tiles it touches. */
 const CONTOUR_TILE = 64
@@ -205,7 +201,8 @@ const inside = computed<Uint8Array | undefined>((previous) => {
 /** The sight when it fits the grid drawn; one that does not is no sight. */
 const shownSight = computed(() => {
   const grid = props.terrain?.grid
-  return grid && props.sight?.length === grid.width * grid.height ? props.sight : undefined
+  const sight = props.fog?.sight
+  return grid && sight?.length === grid.width * grid.height ? sight : undefined
 })
 
 /** What changed since the last paint; without it everything is repainted. */
@@ -232,7 +229,7 @@ function paint(update?: ReliefUpdate): void {
   const { width, height } = grid
   const frame = fade.value
   // Flags that do not fit the grid leave nothing to hide by: draw no ground rather than all of it.
-  if (props.seen && !frame) {
+  if (props.fog?.seen && !frame) {
     relief = undefined
     painted.value++
     return
@@ -953,7 +950,7 @@ const focusRing = computed(() => {
             <span>{{ legend.min }} m</span><span>{{ legend.max }} m</span>
           </div>
         </div>
-        <div v-if="seen" data-test="legend-seen">
+        <div v-if="fog?.seen" data-test="legend-seen">
           <div class="h-1.5 w-6 rounded-sm" :style="{ background: legend.seen }" />
           <span>seen before</span>
         </div>

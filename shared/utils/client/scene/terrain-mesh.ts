@@ -373,6 +373,17 @@ export function chunkDistance(
 }
 
 /**
+ * Whether a chunk casts shadows for shadow casters `casters`: ground within `rangeM` of the point
+ * does, farther ground only receives, and with no casters no ground does.
+ */
+export function chunkCastsShadow(
+  chunk: Pick<Chunk, 'cx' | 'cy' | 'vertexCount' | 'cellSize'>,
+  casters: { x: number; y: number; rangeM: number } | null,
+): boolean {
+  return casters !== null && chunkDistance(chunk, casters) <= casters.rangeM
+}
+
+/**
  * Cuts a stitched grid (as `assembleDiskGrid` or the dev disk route lays one out) back into its
  * chunks of `vertexCount` vertices, row by row from the south-west; chunks with any missing
  * height are skipped.

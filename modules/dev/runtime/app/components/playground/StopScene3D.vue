@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { LinearToneMapping } from 'three'
-import { useCurrentSight, useRoute } from '#imports'
-import { createTerrainSampler, destinationObject, liftSeen } from '#shared/utils/client'
+import { useRoute, useScenePassTiming, useSceneQuality, useStopFog } from '#imports'
+import { createTerrainSampler, destinationObject } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
@@ -72,6 +72,17 @@ const clock = computed(() => {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 })
 
+/** The viewer's scene quality, as the settings will set it, and what drawing costs at it. */
+const { choice, deviceTier } = useSceneQuality()
+const tiers = computed(() => [
+  { label: `Auto (${deviceTier.value})`, value: 'auto' },
+  { label: 'High', value: 'high' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'Low', value: 'low' },
+])
+const timing = useScenePassTiming()
+const ms = (value: number) => value.toFixed(2)
+
 const field = (name: (typeof KEYFRAME_FIELDS)[number]) => KEYFRAME_FIELDS.indexOf(name)
 
 const cut = computed(() =>
@@ -126,13 +137,14 @@ const reveals = useRevealsUntil(
   () => props.record,
   () => t.value,
 )
-/** What the rover has in line of sight at the scrub time, across the whole disk. */
-const sight = useCurrentSight(
-  () => props.disk && liftSeen(props.disk.visible, reveals.value),
-  () => terrain.value,
-  () => ({ x: props.frame[field('x')]!, y: props.frame[field('y')]! }),
-  () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
-)
+/** The stop's fog with the drive's reveals lifted, and the rover's sight at the scrub time. */
+const fog = useStopFog({
+  seen: () => props.disk?.visible,
+  reveals: () => reveals.value,
+  ground: () => terrain.value,
+  eye: () => ({ x: props.frame[field('x')]!, y: props.frame[field('y')]! }),
+  sight: () => ({ mastHeight: DEFAULT_MAST_HEIGHT, radiusM: DEFAULT_STOP_RADIUS }),
+})
 
 const deaths = computed(() => {
   const { start, outcome } = props.record
@@ -161,14 +173,20 @@ const deaths = computed(() => {
         <USlider v-model="bias" :min="-3" :max="3" :step="0.1" aria-label="Exposure bias" />
       </label>
       <USwitch v-model="cycling" :label="`Cycle a sol in ${CYCLE_S} s`" />
+      <USelect
+        v-model="choice"
+        :items="tiers"
+        class="w-40"
+        aria-label="Scene quality"
+        data-test="scene-quality"
+      />
     </div>
     <div class="mx-auto max-w-[min(100%,70vh)] overflow-hidden rounded-md border border-default">
       <ClientOnly>
         <DiskScene
           class="aspect-square"
           :terrain="terrain"
-          :seen="disk.visible"
-          :sight="sight"
+          :fog="fog"
           :chunk-vertices="CHUNK_VERTICES"
           :height-at="heightAt"
           :frame="frame"
@@ -178,12 +196,21 @@ const deaths = computed(() => {
           :route="record.plan.polyline"
           :stops="stops"
           :deaths="deaths"
-          :reveals="reveals"
           :objects="objects"
           :lighting="lighting"
         />
       </ClientOnly>
     </div>
+    <p v-if="timing" class="font-mono text-xs tabular-nums" data-test="pass-timing">
+      {{ timing.fps.toFixed(0) }} fps · GPU shadow {{ ms(timing.shadowMs) }} ms + main
+      {{ ms(timing.mainMs) }} ms<template v-if="!timing.timed"> (no timer queries)</template> · CPU
+      {{ ms(timing.cpuMs) }} ms · {{ timing.calls.toFixed(0) }} calls ({{
+        timing.shadowCalls.toFixed(0)
+      }}
+      shadow) · {{ (timing.triangles / 1000).toFixed(0) }}k triangles ({{
+        (timing.shadowTriangles / 1000).toFixed(0)
+      }}k shadow) · dpr {{ timing.pixelRatio }} · {{ timing.gpu }}
+    </p>
     <p class="text-xs text-muted">
       {{ cut.length }} chunks · {{ reveals.length }} / {{ record.reveals.length }} reveals · drag to
       orbit, wheel or pinch to zoom · the red ghost {{ DEMO_DEATH_M }} m behind the start is a demo

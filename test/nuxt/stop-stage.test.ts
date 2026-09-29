@@ -4,6 +4,7 @@ import { defineComponent, h, nextTick, shallowRef } from 'vue'
 import { SIGHT_INTERVAL_MS } from '~/composables/useCurrentSight'
 import { flushPromises } from '@vue/test-utils'
 import { MAP_VIEW_KEY } from '~/composables/useMapView'
+import type { StopFog } from '~/composables/useStopFog'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopMap from '~/components/map/StopMap.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
@@ -16,14 +17,17 @@ vi.mock('~/components/scene/DiskScene.vue', async () => {
     default: vue.defineComponent({
       name: 'DiskScene',
       props: {
-        reveals: { type: Array, default: () => [] },
-        sight: { type: Uint8Array, default: undefined },
+        fog: { type: Object, default: undefined },
       },
       setup: (props) => () =>
         vue.h('div', {
           'data-test': 'scene',
-          'data-reveals': String(props.reveals.length),
-          'data-sight': String(props.sight?.reduce((n, v) => n + v, 0) ?? 'none'),
+          'data-seen': String(
+            (props.fog as StopFog | undefined)?.fade?.fog.seen.reduce((n, v) => n + v, 0) ?? 'none',
+          ),
+          'data-sight': String(
+            (props.fog as StopFog | undefined)?.sight?.reduce((n, v) => n + v, 0) ?? 'none',
+          ),
         }),
     }),
   }
@@ -69,14 +73,15 @@ async function mountChoice() {
 afterEach(() => localStorage.removeItem(MAP_VIEW_KEY))
 
 describe('StopStage', () => {
-  it('draws the 2D map or the scene, with the same reveals, as its view says', async () => {
+  it("draws the 2D map or the scene, with the drive's reveals lifted, as its view says", async () => {
     const flat = await mountStage('2d')
     expect(flat.find('[data-test=map]').exists()).toBe(true)
     expect(flat.find('[data-test=scene]').exists()).toBe(false)
 
     const scene = await mountStage('3d')
     expect(scene.find('[data-test=map]').exists()).toBe(false)
-    expect(scene.find('[data-test=scene]').attributes('data-reveals')).toBe('1')
+    // Two vertices revealed over ground the stop never saw.
+    expect(scene.find('[data-test=scene]').attributes('data-seen')).toBe('2')
   })
 
   it("hands both views the rover's line of sight over the whole disk, driving or not", async () => {
@@ -112,7 +117,7 @@ describe('StopStage', () => {
       )
     const flat = await mount('2d')
     await flushPromises()
-    const shown = () => flat.findComponent(StopMap).props('sight') as Uint8Array | undefined
+    const shown = () => (flat.findComponent(StopMap).props('fog') as StopFog | undefined)?.sight
     expect(shown()?.reduce((n, v) => n + v, 0)).toBe(within(64))
     frame.value = new Float32Array(19)
     await nextTick()
@@ -149,7 +154,7 @@ describe('StopStage', () => {
       }),
     )
     await flushPromises()
-    const shown = () => wrapper.findComponent(StopMap).props('sight') as Uint8Array
+    const shown = () => (wrapper.findComponent(StopMap).props('fog') as StopFog).sight!
     const first = shown()
     // Driving: a step does not recompute at once, but within the interval.
     rover.value = { x: 1, y: 0, headingRad: 0 }

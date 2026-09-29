@@ -25,6 +25,7 @@ export type {
   TerrainChunk,
 } from './terrain-mesh'
 export {
+  chunkCastsShadow,
   chunkDistance,
   chunkFogged,
   chunkLevel,
@@ -68,3 +69,18 @@ export {
   skyLighting,
   sunPosition,
 } from './sun'
+export type { SceneDevice, SceneQuality, SceneTier } from './quality'
+export { defaultTier, isSceneTier, qualityFor, SCENE_TIERS } from './quality'
+export type { FramePacer } from './pacing'
+export { framePacer, INTERACTION_TAIL_MS } from './pacing'
+export {
+  heldSunDirection,
+  SHADOW_DEPTH_STEP_M,
+  SHADOW_HALF_MAX_M,
+  SHADOW_HALF_MIN_M,
+  SHADOW_SHRINK_MARGIN,
+  SHADOW_STEP,
+  shadowHalf,
+  snapShadowCentre,
+  SUN_HOLD_RAD,
+} from './shadow'
