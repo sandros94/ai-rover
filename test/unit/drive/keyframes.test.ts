@@ -134,11 +134,14 @@ describe('interpolatePose', () => {
     expect(interpolatePose(keyframes, 0.5)).toEqual(keyframes.data.subarray(23, 46))
   })
 
-  it('interpolates linearly and slerps the quaternion', () => {
+  it('interpolates fields that change evenly evenly, the position on the recorded speeds', () => {
     const tuple = interpolatePose(keyframes, 0.25)
     expect(tuple[F.t]).toBe(0.25)
-    expect(tuple[F.x]).toBeCloseTo(0.5, 6)
-    expect(tuple[F.y]).toBeCloseTo(1, 6)
+    // A cubic Hermite whose tangents are the speed along each frame's heading (0° and 45°),
+    // 0.04 m/s over 0.5 s; at the midpoint they enter as (m0 − m1) / 8.
+    const m = 0.04 * 0.5
+    expect(tuple[F.x]).toBeCloseTo(0.5 + (m - m * Math.cos(Math.PI / 4)) / 8, 6)
+    expect(tuple[F.y]).toBeCloseTo(1 + (0 - m * Math.sin(Math.PI / 4)) / 8, 6)
     expect(tuple[F.z]).toBeCloseTo(0.05, 6)
     expect(tuple[F.spinRR]).toBeCloseTo(3, 5)
     expect(tuple[F.bogieR]).toBeCloseTo(-0.01, 6)
