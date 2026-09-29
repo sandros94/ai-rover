@@ -43,6 +43,10 @@ describe('qualityFor', () => {
     }
   })
 
+  it('caps the frame rate at 120 on the high tier and 60 on the others', () => {
+    expect(SCENE_TIERS.map((tier) => qualityFor(tier).frameCap)).toEqual([120, 60, 60])
+  })
+
   it('returns a fresh object, so a caller cannot change a tier for everyone', () => {
     const quality = qualityFor('high')
     quality.maxDpr = 9

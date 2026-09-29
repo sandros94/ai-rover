@@ -36,7 +36,7 @@ const TIERS: Record<SceneTier, Omit<SceneQuality, 'tier'>> = {
     // The shadow square's largest half side: every chunk it covers casts.
     casterRangeM: 120,
     maxDpr: 2,
-    frameCap: 60,
+    frameCap: 120,
     roverLodM: 60,
   },
   medium: {
@@ -44,7 +44,7 @@ const TIERS: Record<SceneTier, Omit<SceneQuality, 'tier'>> = {
     shadowMapSize: 2048,
     casterRangeM: 64,
     maxDpr: 1.5,
-    frameCap: 30,
+    frameCap: 60,
     roverLodM: 40,
   },
   low: {
@@ -52,7 +52,7 @@ const TIERS: Record<SceneTier, Omit<SceneQuality, 'tier'>> = {
     shadowMapSize: 1024,
     casterRangeM: 0,
     maxDpr: 1,
-    frameCap: 30,
+    frameCap: 60,
     roverLodM: 20,
   },
 }
