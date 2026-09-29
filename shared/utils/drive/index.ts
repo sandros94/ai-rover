@@ -28,18 +28,27 @@ export type { SpeedModel, Steering, SteeringAngles, StopModel } from './models'
 export {
   DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
+  driveLimits,
   groundSpeedMps,
   IMAGING_END_MARGIN,
   imagingAllowed,
   imagingStopCount,
+  imagingStopsAt,
   minArcRadiusM,
+  rampTimeS,
   STEER_LIMIT_RAD,
   STEER_THRESHOLD_RAD,
   steerDurationS,
   steeringFor,
   steeringTimeS,
+  steerLimits,
+  steerTravelRad,
   STRAIGHT_WHEELS,
+  turnDurationS,
+  turnLimits,
 } from './models'
+export type { Move, ProfileLimits, ProfileSample } from './profile'
+export { moveAt, peakRate, planMove, rampAt, rampDistance, rampDurationS } from './profile'
 export type { DriveStatus, StatusRun } from './status'
 export { statusAt, statusRuns } from './status'
 export type { JourneyKey } from './keys'

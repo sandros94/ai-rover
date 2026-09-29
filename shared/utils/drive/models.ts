@@ -3,6 +3,8 @@ import type { ResolvedRoverGeometry } from '../rover/geometry'
 import { DEFAULT_ROVER_GEOMETRY } from '../rover/geometry'
 import { AUTONAV_EFFECTIVE_MPS, ROVER_MAX_SPEED_MPS } from '../rover/speed'
 import { DriveError } from './errors'
+import type { ProfileLimits } from './profile'
+import { planMove } from './profile'
 
 /** Rover speed on the ground; omitted fields take the defaults below. */
 export interface SpeedModel {
@@ -21,6 +23,26 @@ export interface SpeedModel {
   turnRateRadPerS?: number
   /** Rate each corner wheel steers at, rad/s, standing still. Default 0.168 (about 9.6°/s). */
   steerRateRadPerS?: number
+  /**
+   * Largest drive acceleration and deceleration, m/s². Default 0.025: with the jerk below, rest
+   * to 0.033 m/s in about 2 s over about 3 cm.
+   */
+  accelMps2?: number
+  /** Largest rate of change of the drive acceleration, m/s³. Default 0.04. */
+  jerkMps3?: number
+  /**
+   * Deceleration of a drive ended by a fault under the rover (a failing pose, getting stuck),
+   * m/s², constant and without a jerk limit. Default 0.1: from 0.033 m/s to rest in 0.33 s.
+   */
+  emergencyDecelMps2?: number
+  /** Largest angular acceleration of a turn in place, rad/s². Default about 0.0157. */
+  turnAccelRadPerS2?: number
+  /** Largest angular jerk of a turn in place, rad/s³. Default about 0.0251. */
+  turnJerkRadPerS3?: number
+  /** Largest angular acceleration of a corner wheel steering, rad/s². Default about 0.095. */
+  steerAccelRadPerS2?: number
+  /** Largest angular jerk of a corner wheel steering, rad/s³. Default about 0.152. */
+  steerJerkRadPerS3?: number
 }
 
 /**
@@ -42,20 +64,78 @@ export interface StopModel {
 
 const DEG = Math.PI / 180
 
+/** Distance from the body centre to the corner wheel on the widest turn-in-place circle, metres. */
+const OUTER_CORNER_M = Math.max(
+  Math.hypot(DEFAULT_ROVER_GEOMETRY.frontWheel.x, DEFAULT_ROVER_GEOMETRY.frontWheel.y),
+  Math.hypot(DEFAULT_ROVER_GEOMETRY.rearWheel.x, DEFAULT_ROVER_GEOMETRY.rearWheel.y),
+)
+// UNVERIFIED, both: no acceleration or jerk of the rover is published. Judgement calls that make
+// a start or a stop take about 2 s, a ramp visible at 1× yet short beside the stops; at 1,025 kg
+// the acceleration asks 26 N of the wheels, far inside their traction on Mars.
+const ACCEL_MPS2 = 0.025
+const JERK_MPS3 = 0.04
+
 /** The speed model a drive uses for omitted fields. */
 export const DEFAULT_SPEED_MODEL: Readonly<Required<SpeedModel>> = Object.freeze({
   cruiseSpeedMps: AUTONAV_EFFECTIVE_MPS,
   slopeSlowdown: 0.5,
-  turnRateRadPerS:
-    ROVER_MAX_SPEED_MPS /
-    Math.max(
-      Math.hypot(DEFAULT_ROVER_GEOMETRY.frontWheel.x, DEFAULT_ROVER_GEOMETRY.frontWheel.y),
-      Math.hypot(DEFAULT_ROVER_GEOMETRY.rearWheel.x, DEFAULT_ROVER_GEOMETRY.rearWheel.y),
-    ),
+  turnRateRadPerS: ROVER_MAX_SPEED_MPS / OUTER_CORNER_M,
   // UNVERIFIED: no steering rate is published. The steer actuators are identical to the drive
   // actuators, whose output tops out at 0.168 rad/s, so the steering is taken to turn as fast.
   steerRateRadPerS: 0.168,
+  accelMps2: ACCEL_MPS2,
+  jerkMps3: JERK_MPS3,
+  // UNVERIFIED: a judgement call, four times the drive's deceleration.
+  emergencyDecelMps2: 0.1,
+  // The turn is driven by its outer corner wheels, which ramp as a drive does.
+  turnAccelRadPerS2: ACCEL_MPS2 / OUTER_CORNER_M,
+  turnJerkRadPerS3: JERK_MPS3 / OUTER_CORNER_M,
+  // The steer actuators are identical to the drive actuators: a steering joint ramps as a drive
+  // wheel does to roll the drive's ramp.
+  steerAccelRadPerS2: ACCEL_MPS2 / DEFAULT_ROVER_GEOMETRY.wheelRadius,
+  steerJerkRadPerS3: JERK_MPS3 / DEFAULT_ROVER_GEOMETRY.wheelRadius,
 })
+
+/** The drive's profile limits at the cruise speed `rate`, m/s. */
+export function driveLimits(
+  rate: number,
+  model: Pick<Required<SpeedModel>, 'accelMps2' | 'jerkMps3'> = DEFAULT_SPEED_MODEL,
+): ProfileLimits {
+  return { rate, accel: model.accelMps2, jerk: model.jerkMps3 }
+}
+
+/** The profile limits of a turn in place, radians of heading. */
+export function turnLimits(
+  model: Pick<
+    Required<SpeedModel>,
+    'turnRateRadPerS' | 'turnAccelRadPerS2' | 'turnJerkRadPerS3'
+  > = DEFAULT_SPEED_MODEL,
+): ProfileLimits {
+  return {
+    rate: model.turnRateRadPerS,
+    accel: model.turnAccelRadPerS2,
+    jerk: model.turnJerkRadPerS3,
+  }
+}
+
+/** The profile limits of a steering joint, radians. */
+export function steerLimits(
+  model: Pick<
+    Required<SpeedModel>,
+    'steerRateRadPerS' | 'steerAccelRadPerS2' | 'steerJerkRadPerS3'
+  > = DEFAULT_SPEED_MODEL,
+): ProfileLimits {
+  return {
+    rate: model.steerRateRadPerS,
+    accel: model.steerAccelRadPerS2,
+    jerk: model.steerJerkRadPerS3,
+  }
+}
+
+/** Seconds a turn in place of `angleRad` takes, from rest to rest. */
+export function turnDurationS(angleRad: number, limits: ProfileLimits = turnLimits()): number {
+  return planMove(Math.abs(angleRad), limits).durationS
+}
 
 /**
  * The stop model a drive uses for omitted fields. UNVERIFIED, all three: the references give no
@@ -82,11 +162,18 @@ export function imagingAllowed(drivenM: number, plannedM: number): boolean {
   return drivenM >= margin && plannedM - drivenM >= margin
 }
 
+/** Where along a path of `lengthM` the imaging stops fall: every `everyM` where {@link imagingAllowed}. */
+export function imagingStopsAt(lengthM: number, everyM: number): number[] {
+  const at: number[] = []
+  for (let k = 1; k * everyM < lengthM; k++) {
+    if (imagingAllowed(k * everyM, lengthM)) at.push(k * everyM)
+  }
+  return at
+}
+
 /** Imaging stops along a path of `lengthM`, one every `everyM` where {@link imagingAllowed}. */
 export function imagingStopCount(lengthM: number, everyM: number): number {
-  let count = 0
-  for (let at = everyM; at < lengthM; at += everyM) if (imagingAllowed(at, lengthM)) count++
-  return count
+  return imagingStopsAt(lengthM, everyM).length
 }
 
 /**
@@ -192,19 +279,28 @@ export function minArcRadiusM(geometry: ResolvedRoverGeometry = DEFAULT_ROVER_GE
   return Math.max(f.y + Math.abs(f.x) / tan, r.y + Math.abs(r.x) / tan)
 }
 
+/** The largest change any corner wheel makes from `from` to `to`, radians. */
+export function steerTravelRad(
+  from: Readonly<SteeringAngles>,
+  to: Readonly<SteeringAngles>,
+): number {
+  let most = 0
+  for (let k = 0; k < 4; k++) most = Math.max(most, Math.abs(to[k]! - from[k]!))
+  return most
+}
+
 /**
- * Seconds the corner wheels take to steer from `from` to `to` standing still, all four at once at
- * `rateRadPerS`; 0 when every wheel is already within {@link STEER_THRESHOLD_RAD}, when the
- * rover drives on without steering.
+ * Seconds the corner wheels take to steer from `from` to `to` standing still, all four at once
+ * on one profile whose largest change moves from rest to rest under `limits`; 0 when every wheel
+ * is already within {@link STEER_THRESHOLD_RAD}, when the rover drives on without steering.
  */
 export function steerDurationS(
   from: Readonly<SteeringAngles>,
   to: Readonly<SteeringAngles>,
-  rateRadPerS: number = DEFAULT_SPEED_MODEL.steerRateRadPerS,
+  limits: ProfileLimits = steerLimits(),
 ): number {
-  let most = 0
-  for (let k = 0; k < 4; k++) most = Math.max(most, Math.abs(to[k]! - from[k]!))
-  return most > STEER_THRESHOLD_RAD ? most / rateRadPerS : 0
+  const most = steerTravelRad(from, to)
+  return most > STEER_THRESHOLD_RAD ? planMove(most, limits).durationS : 0
 }
 
 /**
@@ -213,18 +309,61 @@ export function steerDurationS(
  */
 export function steeringTimeS(
   motions: readonly Motion[],
-  options: { geometry?: ResolvedRoverGeometry; steerRateRadPerS?: number } = {},
+  options: { geometry?: ResolvedRoverGeometry; limits?: ProfileLimits } = {},
 ): number {
-  const { geometry, steerRateRadPerS } = options
+  const { geometry, limits } = options
   let wheels: Readonly<SteeringAngles> = STRAIGHT_WHEELS
   let total = 0
   for (const motion of motions) {
     const { angles } = steeringFor(motion, geometry)
-    const seconds = steerDurationS(wheels, angles, steerRateRadPerS)
+    const seconds = steerDurationS(wheels, angles, limits)
     if (seconds > 0) {
       total += seconds
       wheels = angles
     }
+  }
+  return total
+}
+
+/**
+ * Seconds that starting and stopping add to driving `motions` at `limits.rate` throughout: the
+ * drive comes to rest before each steering and turn in place, at each of `stopsAtM` (metres of
+ * arc driven, as imaging stops fall) and at the end, and each run between two rests ramps up and
+ * down on {@link planMove}. Drives and the planner's time estimate ramp alike.
+ */
+export function rampTimeS(
+  motions: readonly Motion[],
+  options: {
+    geometry?: ResolvedRoverGeometry
+    limits?: ProfileLimits
+    stopsAtM?: readonly number[]
+  } = {},
+): number {
+  const {
+    geometry,
+    limits = driveLimits(DEFAULT_SPEED_MODEL.cruiseSpeedMps),
+    stopsAtM = [],
+  } = options
+  const rests = [...stopsAtM]
+  let wheels: Readonly<SteeringAngles> = STRAIGHT_WHEELS
+  let driven = 0
+  for (const motion of motions) {
+    const { angles } = steeringFor(motion, geometry)
+    if (motion.type === 'turn' || steerTravelRad(wheels, angles) > STEER_THRESHOLD_RAD) {
+      rests.push(driven)
+      wheels = angles
+    }
+    if (motion.type === 'arc') driven += motion.lengthM
+  }
+  rests.push(driven)
+  rests.sort((a, b) => a - b)
+  let total = 0
+  let from = 0
+  for (const at of rests) {
+    const run = Math.min(at, driven) - from
+    if (run <= 0) continue
+    total += planMove(run, limits).durationS - run / limits.rate
+    from = Math.min(at, driven)
   }
   return total
 }

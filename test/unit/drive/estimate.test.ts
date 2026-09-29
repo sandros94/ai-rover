@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
+  driveLimits,
   driveSegment,
   groundSpeedMps,
+  imagingStopsAt,
+  rampDurationS,
+  rampTimeS,
   steeringTimeS,
+  turnDurationS,
 } from '#shared/utils/drive'
 import { DEFAULT_COST_MAP, planSegment } from '#shared/utils/nav'
 import { AUTONAV_EFFECTIVE_MPS } from '#shared/utils/rover'
@@ -27,15 +31,20 @@ describe('the planned drive time', () => {
   const flat = navDisk({ size: 241, radius: 120 })
   const seen = new Uint8Array(241 * 241).fill(1)
 
-  it('is the path at its speed, an imaging stop every 25 m away from either end, the turns and the steering', () => {
+  it('is the path at its speed, an imaging stop every 25 m away from either end, the turns, the steering and the ramps', () => {
     const straight = planSegment(flat, {
       revealed: seen,
       start: { x: -50, y: 0 },
       goal: { x: 50, y: 0 },
       slopeLimitDeg,
     })
-    // 100 m at 0.033 m/s, three imaging stops (25, 50 and 75 m), no turn.
-    expect(straight.metrics.estimatedDriveS).toBeCloseTo(100 / AUTONAV_EFFECTIVE_MPS + 3 * 30, 6)
+    // 100 m at 0.033 m/s, three imaging stops (25, 50 and 75 m), no turn; the stops split the
+    // drive into four runs, each a ramp longer than cruising all the way.
+    const rampS = rampDurationS(0, AUTONAV_EFFECTIVE_MPS, driveLimits(AUTONAV_EFFECTIVE_MPS))
+    expect(straight.metrics.estimatedDriveS).toBeCloseTo(
+      100 / AUTONAV_EFFECTIVE_MPS + 3 * 30 + 4 * rampS,
+      6,
+    )
     const { imagingStopS } = DEFAULT_STOP_MODEL
     expect(imagingStopS).toBe(30)
     // A wall across the way forces a corner turned in place, timed at the turn rate.
@@ -52,8 +61,12 @@ describe('the planned drive time', () => {
       turnInPlaceAboveRad: 0.1,
     })
     let turned = 0
-    for (const motion of around.motions)
-      if (motion.type === 'turn') turned += Math.abs(motion.angleRad)
+    let turningS = 0
+    for (const motion of around.motions) {
+      if (motion.type !== 'turn') continue
+      turned += Math.abs(motion.angleRad)
+      turningS += turnDurationS(motion.angleRad)
+    }
     expect(turned).toBeGreaterThan(0)
     const { pathLengthM } = around.metrics
     // Stops at 25 m steps, none in the first or last 5 % of the path.
@@ -65,10 +78,12 @@ describe('the planned drive time', () => {
     expect(around.metrics.estimatedDriveS).toBeCloseTo(
       pathLengthM / AUTONAV_EFFECTIVE_MPS +
         imaging +
-        turned / DEFAULT_SPEED_MODEL.turnRateRadPerS +
-        steeringTimeS(around.motions),
+        turningS +
+        steeringTimeS(around.motions) +
+        rampTimeS(around.motions, { stopsAtM: imagingStopsAt(pathLengthM, 25) }),
       6,
     )
+    expect(imagingStopsAt(pathLengthM, 25)).toHaveLength(stops)
     // Into and out of each turn-in-place stance.
     expect(steeringTimeS(around.motions)).toBeGreaterThan(0)
   })
@@ -84,7 +99,11 @@ describe('the planned drive time', () => {
     // Seen ground costs 1 + 4 · ratio²; the penalty of 3 is the cost at ratio √0.5.
     const { slopeWeight, unrevealedPenalty } = DEFAULT_COST_MAP
     const ratio = Math.sqrt((unrevealedPenalty - 1) / slopeWeight)
-    expect(blind.metrics.estimatedDriveS).toBeCloseTo(100 / groundSpeedMps(ratio) + 3 * 30, 6)
+    const rampS = rampDurationS(0, AUTONAV_EFFECTIVE_MPS, driveLimits(AUTONAV_EFFECTIVE_MPS))
+    expect(blind.metrics.estimatedDriveS).toBeCloseTo(
+      100 / groundSpeedMps(ratio) + 3 * 30 + 4 * rampS,
+      6,
+    )
   })
 
   it('is 0 for a route not reached', () => {

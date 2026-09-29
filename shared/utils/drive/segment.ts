@@ -26,13 +26,19 @@ import type { SpeedModel, SteeringAngles, StopModel } from './models'
 import {
   DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
+  driveLimits,
   groundSpeedMps,
   imagingAllowed,
   minArcRadiusM,
-  steerDurationS,
+  STEER_THRESHOLD_RAD,
   steeringFor,
+  steerLimits,
+  steerTravelRad,
   STRAIGHT_WHEELS,
+  turnLimits,
 } from './models'
+import type { Move, ProfileLimits, ProfileSample } from './profile'
+import { moveAt, peakRate, planMove, rampAt, rampDistance, rampDurationS } from './profile'
 
 /**
  * Wheel slip `s = min(max, loose · gain · (tan slope / tan slopeLimit)²)`: commanded travel
@@ -178,6 +184,13 @@ const DISCOVERY_RADIUS_M = 3
 const SLOPE_HALF_SPAN_M = 0.5
 
 /**
+ * Commanded metres short of a rest point within which a drive that has come to rest covers the
+ * gap at once instead of starting again: the ramp down is planned on the slip where it starts,
+ * and slip changing under it can leave the rover this far short.
+ */
+const REST_SNAP_M = 1e-3
+
+/**
  * Drives a segment over the true terrain: plans on what the rover has seen, then executes the
  * motions step by step at `simHz`, standing the rover on the ground every step, and records
  * keyframes, events, reveals and the outcome. Equal inputs give deep-equal records.
@@ -190,6 +203,12 @@ const SLOPE_HALF_SPAN_M = 0.5
  * still before each motion whose wheel angles differ from the current ones (see `steeringFor`):
  * every turn in place, and each arc entered or left. A limit failure under the rover
  * itself, or sustained slip, fails the segment.
+ *
+ * Every motion is jerk-limited (see `planMove`): the wheels ramp from rest to the cruise speed
+ * and back to rest before each stop, and between cruise speeds as the slope changes; a turn in
+ * place and each steering ramp their angular rates alike. A stop for a reason comes to rest first
+ * and starts where the rover came to rest; a fault under the rover ends the drive at the
+ * emergency deceleration.
  */
 export function driveSegment(
   world: World,
@@ -214,8 +233,11 @@ interface Resolved {
   geometry: ResolvedRoverGeometry
   limits: RoverLimits | undefined
   ground: Pick<Required<SpeedModel>, 'cruiseSpeedMps' | 'slopeSlowdown'>
-  turnRate: number
-  steerRate: number
+  /** The drive's acceleration and jerk; its rate is the ground's speed under the rover. */
+  drive: Pick<Required<SpeedModel>, 'accelMps2' | 'jerkMps3'>
+  turn: ProfileLimits
+  steer: ProfileLimits
+  emergencyDecel: number
   imagingEveryM: number
   imagingSteps: number
   assessSteps: number
@@ -245,12 +267,23 @@ interface Cursor {
   steered: boolean
 }
 
-/** A steering in progress: the corner wheels turning from one set of angles to the next. */
+/**
+ * A steering in progress: the corner wheels turning from one set of angles to the next, all on
+ * the one move of the largest change.
+ */
 interface SteerPhase {
   from: SteeringAngles
   to: SteeringAngles
+  move: Move
+  elapsedS: number
+}
+
+/** A change of the commanded drive speed under way, its position counted from its start. */
+interface SpeedChange {
+  to: number
   durationS: number
   elapsedS: number
+  at: (t: number) => ProfileSample
 }
 
 type Probe = { ok: true } | { ok: false; x: number; y: number; reasons: string[] }
@@ -283,10 +316,23 @@ class Drive {
   private nextImaging: number
   private stuckRun = 0
   private slipMetre = -1
+  /** Ground speed at the end of the last step, as frames record it. */
   private speed = 0
+  /** Commanded drive speed, m/s: the wheels' rate along the motions, before slip. */
+  private rate = 0
+  private change: SpeedChange | undefined
+  /** The cruise speed commanded for the current step, from the slope where it first rolls. */
+  private cruise: number | undefined
+  /**
+   * While set, the rover comes to rest and nothing new starts: for a stop (`rest`) the drive
+   * ramps down and a turn or steering under way completes; after a fault (`fault`) the drive
+   * brakes at the emergency deceleration and everything else halts where it stands.
+   */
+  private halting: 'rest' | 'fault' | undefined
   private readonly spins = new Float64Array(6)
   private wheels: SteeringAngles = [...STRAIGHT_WHEELS]
   private steering: SteerPhase | undefined
+  private turning: { move: Move; elapsedS: number } | undefined
   private readonly frames: number[] = []
   private readonly events: DriveEvent[] = []
   private readonly reveals: SegmentRecord['reveals'] = []
@@ -354,36 +400,17 @@ class Drive {
     this.emit('start')
     const underfoot = this.standHere()
     this.frame()
-    if (underfoot) return this.finish('failed', underfoot, 'hazard')
-    if (!plan.metrics.reached) {
-      return this.finish('stopped-short', [plan.metrics.failureReason!], 'blocked')
-    }
+    if (underfoot) return this.fail(underfoot, 'hazard')
+    if (!plan.metrics.reached) return this.stopShort([plan.metrics.failureReason!])
     this.follow(plan)
     const decided = this.lookAhead()
     if (decided) return decided
 
     for (;;) {
       if (this.cursor.motion >= this.motions.length) return this.finish('arrived', [], 'arrived')
-      if (this.time() >= this.o.maxDurationS) {
-        return this.finish('stopped-short', ['max-duration'], 'blocked')
-      }
-      const before = { ...this.cursor }
-      this.advance()
-      this.step++
-      const hazard = this.standHere()
-      // With no contact there is no pose to show; the rover stays where it last stood.
-      if (hazard?.includes('no-contact')) this.cursor = before
-      if (hazard) {
-        this.frameIfDue()
-        return this.finish('failed', hazard, 'hazard')
-      }
-      if (this.stuckRun >= this.o.stuckAfterM) {
-        this.frameIfDue()
-        return this.finish('failed', ['stuck'], 'stuck', {
-          commandedM: this.stuckRun,
-        })
-      }
-      this.frameIfDue()
+      if (this.time() >= this.o.maxDurationS) return this.stopShort(['max-duration'])
+      const failed = this.tick()
+      if (failed) return failed
       if (this.odometer >= this.nextMetre && this.cursor.motion < this.motions.length) {
         this.nextMetre = Math.floor(this.odometer) + 1
         const decided = this.metre()
@@ -392,13 +419,60 @@ class Drive {
     }
   }
 
+  /** One sim step: move, stand the rover on the ground, fail on a fault, record a frame when due. */
+  private tick(): DriveOutcome | undefined {
+    const before = { ...this.cursor }
+    this.advance()
+    this.step++
+    const hazard = this.standHere()
+    if (hazard?.includes('no-contact')) {
+      // With no contact there is no pose to show and no ground to brake on; the rover stays
+      // where it last stood.
+      this.cursor = before
+      this.rate = 0
+      this.change = undefined
+      this.speed = 0
+    }
+    if (hazard) {
+      this.frameIfDue()
+      return this.fail(hazard, 'hazard')
+    }
+    if (this.stuckRun >= this.o.stuckAfterM) {
+      this.frameIfDue()
+      return this.fail(['stuck'], 'stuck', { commandedM: this.stuckRun })
+    }
+    this.frameIfDue()
+    return undefined
+  }
+
+  /**
+   * Brings the rover to rest where it is headed: the drive ramps down, a turn or a steering under
+   * way completes, nothing new starts. Returns the outcome when a fault ends the drive meanwhile.
+   */
+  private settle(): DriveOutcome | undefined {
+    this.halting = 'rest'
+    try {
+      while (this.rate > 0 || this.change || this.steering || this.turning) {
+        const failed = this.tick()
+        if (failed) return failed
+      }
+    } finally {
+      this.halting = undefined
+    }
+    return undefined
+  }
+
   /** The per-metre routine, on the move: look around, image when due, check the way ahead. */
   private metre(): DriveOutcome | undefined {
     this.reveal(this.revealViewshed())
     if (this.odometer >= this.nextImaging) {
       this.nextImaging =
         (Math.floor(this.odometer / this.o.imagingEveryM) + 1) * this.o.imagingEveryM
-      if (imagingAllowed(this.odometer, this.plannedM)) this.hold('imaging', this.o.imagingSteps)
+      if (imagingAllowed(this.odometer, this.plannedM)) {
+        const failed = this.settle()
+        if (failed) return failed
+        this.hold('imaging', this.o.imagingSteps)
+      }
     }
     const travelled = this.odometer - this.routeFrom
     for (const [k, at] of this.route) {
@@ -420,7 +494,7 @@ class Drive {
       this.reveal(this.discoveryDisk(probe))
       const hazard = this.vertexAt(probe)
       if (hazard === undefined || hazard === this.vertexAt(this.cursor)) {
-        return this.finish('stopped-short', ['hazard-ahead', ...probe.reasons], 'blocked', {
+        return this.stopShort(['hazard-ahead', ...probe.reasons], {
           hazard: [{ x: probe.x, y: probe.y }],
         })
       }
@@ -434,15 +508,13 @@ class Drive {
     cause: 'revealed' | 'lookahead',
     probe?: { x: number; y: number; reasons: string[] },
   ): DriveOutcome | undefined {
+    const failed = this.settle()
+    if (failed) return failed
     this.hold('assessing', this.o.assessSteps, { cause })
-    if (this.replans === this.o.maxReplans) {
-      return this.finish('stopped-short', ['replan-limit'], 'blocked')
-    }
+    if (this.replans === this.o.maxReplans) return this.stopShort(['replan-limit'])
     this.replans++
     const plan = this.plan()
-    if (!plan.metrics.reached) {
-      return this.finish('stopped-short', [plan.metrics.failureReason!], 'blocked', { cause })
-    }
+    if (!plan.metrics.reached) return this.stopShort([plan.metrics.failureReason!], { cause })
     this.follow(plan)
     this.emit('replan', {
       cause,
@@ -486,6 +558,7 @@ class Drive {
     })
     this.cursor = { x, y, heading, motion: 0, along: 0, steered: false }
     this.steering = undefined
+    this.turning = undefined
     const { width, cellSize } = this.options.disk.grid
     const { waypoints } = plan.route
     this.route = new Map()
@@ -509,68 +582,205 @@ class Drive {
   /** Moves the rover along its motions for one sim step. */
   private advance(): void {
     const { o, cursor: c } = this
-    let remaining = 1 / o.simHz
-    let moved = 0
     const stepS = 1 / o.simHz
+    let remaining = stepS
+    this.speed = 0
+    this.cruise = undefined
     while (remaining > 0 && c.motion < this.motions.length) {
       const motion = this.motions[c.motion]!
       if (!c.steered) {
+        if (this.halting && !this.steering) break
         remaining = this.steer(steeringFor(motion, o.geometry).angles, remaining, stepS)
         continue
       }
-      const { roll } = steeringFor(motion, o.geometry)
       if (motion.type === 'turn') {
-        if (c.along === 0) {
-          this.emit(
-            'turning',
-            {
-              angleDeg: motion.angleRad / DEG,
-              durationS: Math.abs(motion.angleRad) / o.turnRate,
-            },
-            stepS - remaining,
-          )
-        }
-        const left = Math.abs(motion.angleRad) - c.along
-        const turn = Math.min(left, o.turnRate * remaining)
-        c.heading += Math.sign(motion.angleRad) * turn
-        if (turn === left) remaining -= turn / o.turnRate
-        for (let w = 0; w < 6; w++) this.spins[w]! += (roll[w]! * turn) / o.geometry.wheelRadius
-        if (turn === left) {
-          this.nextMotion()
-        } else {
-          c.along += turn
-          remaining = 0
-        }
+        if (this.halting && !this.turning) break
+        remaining = this.turn(motion, remaining, stepS)
         continue
       }
-      const tanSlope = this.tanSlopeAt(c.x, c.y)
-      const ratio = tanSlope / this.tanLimit
-      const v = groundSpeedMps(ratio, o.ground)
-      const slip = Math.min(o.slipMax, this.world.looseAt(c.x, c.y) * o.slipGain * ratio * ratio)
-      const left = motion.lengthM - c.along
-      let commanded = v * remaining
-      let actual = commanded * (1 - slip)
-      const ends = actual >= left
-      if (ends) {
-        actual = left
-        commanded = left / (1 - slip)
-      }
-      remaining = ends ? remaining - commanded / v : 0
-      this.moveAlong(motion.curvature, actual)
-      moved += actual
-      this.odometer += actual
-      for (let w = 0; w < 6; w++) this.spins[w]! += (commanded * roll[w]!) / o.geometry.wheelRadius
-      this.stuckRun = slip >= o.stuckAbove ? this.stuckRun + commanded : 0
-      const metre = Math.floor(this.odometer)
-      if (slip > o.slipEventAbove && metre !== this.slipMetre) {
-        this.slipMetre = metre
-        this.emit('slip', { slip })
-      }
-      if (ends) this.nextMotion()
-      else c.along += actual
-      if (this.stuckRun >= o.stuckAfterM) break
+      if (this.halting && this.rate === 0 && !this.change) break
+      remaining = this.roll(motion, remaining)
+      if (this.stuckRun >= o.stuckAfterM && this.halting !== 'fault') break
+      // A metre passed on the way to a rest is looked at from that rest, before anything new
+      // starts: an imaging stop or an assessment due there happens where the rover stands.
+      if (this.atRest() && c.along === 0 && this.odometer >= this.nextMetre) break
     }
-    this.speed = moved * o.simHz
+  }
+
+  private atRest(): boolean {
+    return this.rate === 0 && !this.change && !this.steering && !this.turning
+  }
+
+  /**
+   * Drives the arc `motion` for up to `remaining` seconds; returns the seconds left. With no
+   * speed change under way it picks the next: down to rest when the rest point ahead (see
+   * {@link restAhead}) is within the stopping distance, else up or down toward the cruise speed
+   * the slope allows, capped so that stopping still fits; at that speed it cruises until the
+   * stopping distance is reached.
+   */
+  private roll(motion: Extract<Motion, { type: 'arc' }>, remaining: number): number {
+    const { o, cursor: c } = this
+    const ratio = this.tanSlopeAt(c.x, c.y) / this.tanLimit
+    // The cruise speed is commanded once a step: chasing the slope continuously would chain
+    // ever shorter ramps toward a target that moves as the rover does.
+    const cruise = (this.cruise ??= groundSpeedMps(ratio, o.ground))
+    const slip = Math.min(o.slipMax, this.world.looseAt(c.x, c.y) * o.slipGain * ratio * ratio)
+    const keep = 1 - slip
+    const { roll } = steeringFor(motion, o.geometry)
+    const left = motion.lengthM - c.along
+    const limits = driveLimits(cruise, o.drive)
+
+    let cruiseS = Infinity
+    if (!this.change) {
+      const ahead = this.halting ? 0 : (left + this.restAhead()) / keep
+      if (this.rate === 0 && !this.halting && ahead <= REST_SNAP_M) {
+        this.travel(motion, roll, left, left / keep, slip)
+        this.speed = 0
+        this.nextMotion()
+        return remaining
+      }
+      const stopping = rampDistance(this.rate, 0, limits)
+      let target: number
+      if (ahead <= stopping + 1e-12) target = 0
+      else if (this.rate >= cruise) {
+        target =
+          rampDistance(this.rate, cruise, limits) + rampDistance(cruise, 0, limits) <= ahead
+            ? cruise
+            : 0
+      } else target = peakRate(this.rate, ahead, limits)
+      if (Math.abs(target - this.rate) > 1e-12) this.startChange(target, limits)
+      else cruiseS = (ahead - stopping) / this.rate
+    }
+
+    const change = this.change
+    const dt = change
+      ? Math.min(remaining, change.durationS - change.elapsedS)
+      : Math.min(remaining, cruiseS)
+    const from = change?.at(change.elapsedS).position ?? 0
+    let commanded = change ? change.at(change.elapsedS + dt).position - from : this.rate * dt
+    let spent = dt
+    const ends = commanded * keep >= left
+    if (ends) {
+      commanded = left / keep
+      spent = change ? this.timeInto(change, from, commanded, dt) : commanded / this.rate
+    }
+    if (change) {
+      change.elapsedS += spent
+      if (change.elapsedS >= change.durationS) {
+        this.rate = change.to
+        this.change = undefined
+      } else this.rate = change.at(change.elapsedS).rate
+    }
+    this.travel(motion, roll, ends ? left : commanded * keep, commanded, slip)
+    this.speed = this.rate * keep
+    if (ends) {
+      this.nextMotion()
+      if (this.restsHere() && (this.rate > 0 || this.change)) {
+        // The ramp down ends a hair past the rest point, or slip grew under it and carried the
+        // rover there still moving: the wheels stop there, as the next motion starts from rest.
+        this.rate = 0
+        this.change = undefined
+        this.speed = 0
+      }
+    }
+    return remaining - spent
+  }
+
+  /** Moves `actual` metres along the arc for `commanded` metres of wheel travel at `slip`. */
+  private travel(
+    motion: Extract<Motion, { type: 'arc' }>,
+    roll: readonly number[],
+    actual: number,
+    commanded: number,
+    slip: number,
+  ): void {
+    const { o, cursor: c } = this
+    this.moveAlong(motion.curvature, actual)
+    c.along += actual
+    this.odometer += actual
+    for (let w = 0; w < 6; w++) this.spins[w]! += (commanded * roll[w]!) / o.geometry.wheelRadius
+    this.stuckRun = slip >= o.stuckAbove ? this.stuckRun + commanded : 0
+    const metre = Math.floor(this.odometer)
+    if (slip > o.slipEventAbove && metre !== this.slipMetre) {
+      this.slipMetre = metre
+      this.emit('slip', { slip })
+    }
+  }
+
+  private startChange(to: number, limits: ProfileLimits): void {
+    const from = this.rate
+    const durationS = to === from ? 0 : rampDurationS(from, to, limits)
+    this.change = { to, durationS, elapsedS: 0, at: (t) => rampAt(from, to, limits, t) }
+  }
+
+  /** Seconds into `change` past its elapsed time at which it has covered `commanded` more metres. */
+  private timeInto(change: SpeedChange, from: number, commanded: number, upTo: number): number {
+    let lo = 0
+    let hi = upTo
+    for (let k = 0; k < 60; k++) {
+      const mid = (lo + hi) / 2
+      if (change.at(change.elapsedS + mid).position - from < commanded) lo = mid
+      else hi = mid
+    }
+    return hi
+  }
+
+  /** Metres of arc after the current motion that the rover drives on without coming to rest. */
+  private restAhead(): number {
+    const { o } = this
+    let total = 0
+    for (let k = this.cursor.motion + 1; k < this.motions.length; k++) {
+      const motion = this.motions[k]!
+      if (motion.type === 'turn') break
+      if (steerTravelRad(this.wheels, steeringFor(motion, o.geometry).angles) > STEER_THRESHOLD_RAD)
+        break
+      total += motion.lengthM
+    }
+    return total
+  }
+
+  /** Whether the motion the cursor has reached starts from rest: the end, a turn, or a steering. */
+  private restsHere(): boolean {
+    const motion = this.motions[this.cursor.motion]
+    return (
+      !motion ||
+      motion.type === 'turn' ||
+      steerTravelRad(this.wheels, steeringFor(motion, this.o.geometry).angles) > STEER_THRESHOLD_RAD
+    )
+  }
+
+  /** Turns in place for up to `remaining` seconds of the step `stepS` long; returns the rest. */
+  private turn(
+    motion: Extract<Motion, { type: 'turn' }>,
+    remaining: number,
+    stepS: number,
+  ): number {
+    const { o, cursor: c } = this
+    this.speed = 0
+    if (!this.turning) {
+      const move = planMove(Math.abs(motion.angleRad), o.turn)
+      this.turning = { move, elapsedS: 0 }
+      this.emit(
+        'turning',
+        { angleDeg: motion.angleRad / DEG, durationS: move.durationS },
+        stepS - remaining,
+      )
+    }
+    const turning = this.turning
+    const spent = Math.min(remaining, turning.move.durationS - turning.elapsedS)
+    turning.elapsedS += spent
+    const done = turning.elapsedS >= turning.move.durationS
+    const at = done ? turning.move.distance : moveAt(turning.move, turning.elapsedS).position
+    const turn = at - c.along
+    const { roll } = steeringFor(motion, o.geometry)
+    c.heading += Math.sign(motion.angleRad) * turn
+    for (let w = 0; w < 6; w++) this.spins[w]! += (roll[w]! * turn) / o.geometry.wheelRadius
+    c.along = at
+    if (done) {
+      this.turning = undefined
+      this.nextMotion()
+    }
+    return remaining - spent
   }
 
   /**
@@ -580,27 +790,29 @@ class Drive {
    * at once.
    */
   private steer(target: SteeringAngles, remaining: number, stepS: number): number {
+    this.speed = 0
     if (!this.steering) {
-      const durationS = steerDurationS(this.wheels, target, this.o.steerRate)
-      if (durationS === 0) {
+      const travel = steerTravelRad(this.wheels, target)
+      if (travel <= STEER_THRESHOLD_RAD) {
         this.cursor.steered = true
         return remaining
       }
-      this.steering = { from: this.wheels, to: target, durationS, elapsedS: 0 }
-      this.emit('steering', { durationS }, stepS - remaining)
+      const move = planMove(travel, this.o.steer)
+      this.steering = { from: this.wheels, to: target, move, elapsedS: 0 }
+      this.emit('steering', { durationS: move.durationS }, stepS - remaining)
     }
     const s = this.steering
-    const spent = Math.min(remaining, s.durationS - s.elapsedS)
+    const spent = Math.min(remaining, s.move.durationS - s.elapsedS)
     s.elapsedS += spent
-    const u = s.elapsedS / s.durationS
-    this.wheels = s.from.map((a, k) => a + (s.to[k]! - a) * u) as SteeringAngles
-    if (s.elapsedS >= s.durationS) {
+    if (s.elapsedS >= s.move.durationS) {
       this.wheels = s.to
       this.steering = undefined
       this.cursor.steered = true
       return remaining - spent
     }
-    return 0
+    const u = moveAt(s.move, s.elapsedS).position / s.move.distance
+    this.wheels = s.from.map((a, k) => a + (s.to[k]! - a) * u) as SteeringAngles
+    return remaining - spent
   }
 
   private nextMotion(): void {
@@ -784,17 +996,81 @@ class Drive {
     )
   }
 
-  /**
-   * Ends the drive: a last short-range reveal where the rover stopped, then standstill up to the
-   * next keyframe so the block ends on the final pose.
-   */
+  /** Ends the drive where the rover stands: it has arrived, at rest at the end of its motions. */
   private finish(
     kind: DriveOutcome['kind'],
     reasons: string[],
     event: DriveEventType,
+  ): DriveOutcome {
+    this.emit(event, reasons.length > 0 ? { reasons } : undefined)
+    return this.conclude(kind, reasons)
+  }
+
+  /** Stops short for `reasons`: comes to rest, then ends the drive with a `blocked` event. */
+  private stopShort(reasons: string[], details?: Record<string, DriveEventDetail>): DriveOutcome {
+    const failed = this.settle()
+    if (failed) return failed
+    this.emit('blocked', { reasons, ...details })
+    return this.conclude('stopped-short', reasons)
+  }
+
+  /**
+   * Fails the drive on a fault found where the rover stands, recorded there, then brakes at the
+   * emergency deceleration.
+   */
+  private fail(
+    reasons: string[],
+    event: 'hazard' | 'stuck',
     details?: Record<string, DriveEventDetail>,
   ): DriveOutcome {
-    this.emit(event, { ...(reasons.length > 0 && { reasons }), ...details })
+    this.emit(event, { reasons, ...details })
+    this.brake()
+    return this.conclude('failed', reasons)
+  }
+
+  /**
+   * Brings the drive to rest at the emergency deceleration, constant and without a jerk limit;
+   * a turn or steering under way halts where it stands. The poses on the way are not checked
+   * against the limits: the drive has already failed.
+   */
+  private brake(): void {
+    this.turning = undefined
+    this.steering = undefined
+    if (this.rate > 0) {
+      const from = this.rate
+      const decel = this.o.emergencyDecel
+      const durationS = from / decel
+      this.change = {
+        to: 0,
+        durationS,
+        elapsedS: 0,
+        at: (t) => {
+          const u = Math.min(Math.max(t, 0), durationS)
+          return { position: from * u - (decel * u * u) / 2, rate: from - decel * u, accel: -decel }
+        },
+      }
+    }
+    this.halting = 'fault'
+    while (this.rate > 0 || this.change) {
+      const before = { ...this.cursor }
+      this.advance()
+      this.step++
+      if (this.standHere()?.includes('no-contact')) {
+        this.cursor = before
+        break
+      }
+      this.frameIfDue()
+    }
+    this.halting = undefined
+    this.rate = 0
+    this.change = undefined
+  }
+
+  /**
+   * The drive's end: a last short-range reveal where the rover stopped, then standstill up to the
+   * next keyframe so the block ends on the final pose.
+   */
+  private conclude(kind: DriveOutcome['kind'], reasons: string[]): DriveOutcome {
     this.reveal(this.revealViewshed())
     this.speed = 0
     while (this.step % this.o.frameEvery !== 0) {
@@ -860,6 +1136,13 @@ function resolve(options: DriveOptions): Resolved {
     slopeSlowdown = S.slopeSlowdown,
     turnRateRadPerS = S.turnRateRadPerS,
     steerRateRadPerS = S.steerRateRadPerS,
+    accelMps2 = S.accelMps2,
+    jerkMps3 = S.jerkMps3,
+    emergencyDecelMps2 = S.emergencyDecelMps2,
+    turnAccelRadPerS2 = S.turnAccelRadPerS2,
+    turnJerkRadPerS3 = S.turnJerkRadPerS3,
+    steerAccelRadPerS2 = S.steerAccelRadPerS2,
+    steerJerkRadPerS3 = S.steerJerkRadPerS3,
   } = speed
   const P = DEFAULT_STOP_MODEL
   const {
@@ -909,6 +1192,13 @@ function resolve(options: DriveOptions): Resolved {
   unit('speed.slopeSlowdown', slopeSlowdown, '<')
   positive('speed.turnRateRadPerS', turnRateRadPerS)
   positive('speed.steerRateRadPerS', steerRateRadPerS)
+  positive('speed.accelMps2', accelMps2)
+  positive('speed.jerkMps3', jerkMps3)
+  positive('speed.emergencyDecelMps2', emergencyDecelMps2)
+  positive('speed.turnAccelRadPerS2', turnAccelRadPerS2)
+  positive('speed.turnJerkRadPerS3', turnJerkRadPerS3)
+  positive('speed.steerAccelRadPerS2', steerAccelRadPerS2)
+  positive('speed.steerJerkRadPerS3', steerJerkRadPerS3)
   const blendRadiusM = options.plan?.blendRadiusM
   const tightest = minArcRadiusM(geometry)
   if (blendRadiusM !== undefined && blendRadiusM < tightest) {
@@ -932,8 +1222,10 @@ function resolve(options: DriveOptions): Resolved {
     geometry,
     limits,
     ground: { cruiseSpeedMps, slopeSlowdown },
-    turnRate: turnRateRadPerS,
-    steerRate: steerRateRadPerS,
+    drive: { accelMps2, jerkMps3 },
+    turn: turnLimits({ turnRateRadPerS, turnAccelRadPerS2, turnJerkRadPerS3 }),
+    steer: steerLimits({ steerRateRadPerS, steerAccelRadPerS2, steerJerkRadPerS3 }),
+    emergencyDecel: emergencyDecelMps2,
     imagingEveryM,
     imagingSteps: Math.round(imagingStopS * simHz),
     assessSteps: Math.round(assessStopS * simHz),

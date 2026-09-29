@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SPEED_MODEL,
   minArcRadiusM,
+  planMove,
   STEER_LIMIT_RAD,
   STEER_THRESHOLD_RAD,
   steerDurationS,
   steeringFor,
   steeringTimeS,
+  steerLimits,
   STRAIGHT_WHEELS,
 } from '#shared/utils/drive'
 import { DEFAULT_ROVER_GEOMETRY, ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
@@ -119,13 +121,28 @@ describe('steering time', () => {
     expect(turnRateRadPerS / DEG).toBeCloseTo(1.51, 2)
   })
 
-  it('takes the largest wheel change at the steering rate, nothing within the threshold', () => {
+  it('ramps the steering joints as a drive wheel ramps: 0.095 rad/s², 0.152 rad/s³', () => {
+    const { steerAccelRadPerS2, steerJerkRadPerS3 } = DEFAULT_SPEED_MODEL
+    expect(steerAccelRadPerS2).toBeCloseTo(DEFAULT_SPEED_MODEL.accelMps2 / 0.263, 12)
+    expect(steerJerkRadPerS3).toBeCloseTo(DEFAULT_SPEED_MODEL.jerkMps3 / 0.263, 12)
+    expect(steerLimits()).toEqual({
+      rate: steerRateRadPerS,
+      accel: steerAccelRadPerS2,
+      jerk: steerJerkRadPerS3,
+    })
+  })
+
+  it('moves the largest wheel change from rest to rest on the joint profile, nothing within the threshold', () => {
     const stance = steeringFor({ type: 'turn', angleRad: 1 }).angles
-    expect(steerDurationS(STRAIGHT_WHEELS, stance)).toBeCloseTo(
-      Math.atan2(f.x, f.y) / steerRateRadPerS,
-      12,
-    )
-    expect(steerDurationS(stance, STRAIGHT_WHEELS, 0.1)).toBeCloseTo(Math.atan2(f.x, f.y) / 0.1, 12)
+    const travel = Math.atan2(f.x, f.y)
+    const move = planMove(travel, steerLimits())
+    expect(steerDurationS(STRAIGHT_WHEELS, stance)).toBe(move.durationS)
+    // The stance reaches the top rate: the travel at it plus one ramp, about 7.4 s.
+    expect(move.peak).toBe(steerRateRadPerS)
+    expect(move.durationS).toBeCloseTo(travel / steerRateRadPerS + move.rampS, 12)
+    expect(move.durationS).toBeCloseTo(7.38, 2)
+    const slow = { rate: 0.1, accel: 0.05, jerk: 0.1 }
+    expect(steerDurationS(stance, STRAIGHT_WHEELS, slow)).toBe(planMove(travel, slow).durationS)
     const nudged = STRAIGHT_WHEELS.map((a) => a + STEER_THRESHOLD_RAD * 0.9) as typeof stance
     expect(steerDurationS(STRAIGHT_WHEELS, nudged)).toBe(0)
   })

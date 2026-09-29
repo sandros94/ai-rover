@@ -5,12 +5,19 @@ import {
   ROVER_MAX_SPEED_MPS,
 } from '#shared/utils/rover'
 import {
-  DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
+  driveLimits,
   driveSegment,
+  moveAt,
+  planMove,
+  rampDurationS,
   statusAt,
   statusRuns,
+  steerDurationS,
   steeringFor,
+  steerLimits,
+  STRAIGHT_WHEELS,
+  turnDurationS,
 } from '#shared/utils/drive'
 import type { DriveEvent } from '#shared/utils/drive'
 import { driveErrorOf, F, frame, revealedAfterStop, syntheticDisk, syntheticWorld } from './helpers'
@@ -37,15 +44,18 @@ describe('driveSegment on flat ground', () => {
     expect(DEFAULT_STOP_MODEL).toEqual({ imagingEveryM: 25, imagingStopS: 30, assessStopS: 20 })
   })
 
-  it('arrives after 100 m in ≈ 3,030 s: the AutoNav rate plus imaging stops', () => {
+  it('arrives after 100 m in ≈ 3,030 s: the AutoNav rate, imaging stops and the ramps', () => {
     expect(outcome.kind).toBe('arrived')
     expect(outcome.reasons).toEqual([])
     expect(outcome.distanceM).toBeCloseTo(100, 6)
     expect(outcome.endPose.x).toBeCloseTo(50, 6)
     expect(outcome.endPose.y).toBeCloseTo(0, 6)
     expect(Math.abs(outcome.durationS - 3030) / 3030).toBeLessThan(0.05)
-    // Driving time alone is distance over the AutoNav rate; the rest is the three imaging stops.
-    expect(outcome.durationS).toBeCloseTo(100 / 0.033 + 3 * 30, -1)
+    // Distance over the AutoNav rate, the three imaging stops, and a ramp for each of the four
+    // runs they split the drive into: each start and stop costs half a ramp against cruising.
+    const rampS = rampDurationS(0, AUTONAV_EFFECTIVE_MPS, driveLimits(AUTONAV_EFFECTIVE_MPS))
+    expect(rampS).toBeCloseTo(1.945, 3)
+    expect(outcome.durationS).toBeCloseTo(100 / 0.033 + 3 * 30 + 4 * rampS, -1)
     // The plan's estimate is the same sum, so on flat, seen ground it is the drive's time.
     expect(record.plan.metrics.estimatedDriveS).toBeCloseTo(outcome.durationS, -1)
     expect(stats.simSteps).toBeGreaterThan(0)
@@ -68,8 +78,9 @@ describe('driveSegment on flat ground', () => {
     const stop = record.events.find((event) => event.type === 'imaging')!
     const from = Math.ceil(stop.t * keyframes.hz)
     const to = Math.floor((stop.t + 30) * keyframes.hz)
-    // The frame at the stop's start still carries the last step's speed.
+    // The rover has come to rest when the stop starts.
     const first = frame(keyframes, from)
+    expect(first[F.speed]).toBe(0)
     for (let k = from + 1; k <= to; k++) {
       const f = frame(keyframes, k)
       expect(f[F.speed]).toBe(0)
@@ -242,11 +253,12 @@ describe('driveSegment with a turn in place', () => {
   })
   const { keyframes } = record
 
-  const { turnRateRadPerS, steerRateRadPerS } = DEFAULT_SPEED_MODEL
   const { frontWheel } = DEFAULT_ROVER_GEOMETRY
+  const stance = steeringFor({ type: 'turn', angleRad: -Math.PI / 2 }).angles
   // Straight to the turn-in-place stance: the front wheels steer farthest, atan(1.185 / 1.065).
-  const steerS = Math.atan2(frontWheel.x, frontWheel.y) / steerRateRadPerS
-  const turnS = Math.PI / 2 / turnRateRadPerS
+  const steerMove = planMove(Math.atan2(frontWheel.x, frontWheel.y), steerLimits())
+  const steerS = steerMove.durationS
+  const turnS = turnDurationS(Math.PI / 2)
 
   it('steers into the turn-in-place stance, turns 90° right, steers straight, then drives', () => {
     expect(record.outcome.kind).toBe('arrived')
@@ -255,6 +267,7 @@ describe('driveSegment with a turn in place', () => {
     const [into, turning, out] = stops as [DriveEvent, DriveEvent, DriveEvent]
     expect(into.t).toBe(0)
     expect(into.details!.durationS).toBeCloseTo(steerS, 9)
+    expect(steerS).toBe(steerDurationS(STRAIGHT_WHEELS, stance))
     expect(turning.t).toBeCloseTo(steerS, 9)
     expect(turning.details!.angleDeg).toBeCloseTo(-90, 6)
     expect(turning.details!.durationS).toBeCloseTo(turnS, 9)
@@ -263,16 +276,16 @@ describe('driveSegment with a turn in place', () => {
     expect(statusAt(record.events, 1)).toMatchObject({ status: 'steering' })
     expect(statusAt(record.events, steerS + 10)).toMatchObject({ status: 'turning', angleDeg: -90 })
     expect(statusAt(record.events, 2 * steerS + turnS + 1).status).toBe('driving')
-    // Steering twice, about 60 s turning at 1.5°/s, and 20 m at the AutoNav rate; no imaging
-    // stop short of 25 m.
-    expect(record.outcome.durationS).toBeCloseTo(2 * steerS + turnS + 20 / 0.033, -1)
+    // Steering twice, about 62 s turning at up to 1.5°/s, and 20 m at the AutoNav rate with a
+    // ramp up and down; no imaging stop short of 25 m.
+    const drive = planMove(20, driveLimits(0.033)).durationS
+    expect(record.outcome.durationS).toBeCloseTo(2 * steerS + turnS + drive, -1)
   })
 
   it('holds the wheels toward the centre mid-turn, the two sides rolling opposite ways', () => {
     const mid = frame(keyframes, Math.round((steerS + turnS / 2) * keyframes.hz))
-    const { angles } = steeringFor({ type: 'turn', angleRad: -Math.PI / 2 })
     expect([mid[F.steerFL], mid[F.steerFR], mid[F.steerRL], mid[F.steerRR]]).toEqual(
-      angles.map(Math.fround),
+      stance.map(Math.fround),
     )
     const before = frame(keyframes, Math.round((steerS + 1) * keyframes.hz))
     // A right turn: the left wheels roll forward, the right ones back.
@@ -282,18 +295,16 @@ describe('driveSegment with a turn in place', () => {
     expect(mid[F.spinFL]! - before[F.spinFL]!).toBeGreaterThan(mid[F.spinML]! - before[F.spinML]!)
   })
 
-  it('turns the wheels at the steering rate while standing still, the spins held', () => {
+  it('steers the wheels on their profile while standing still, the spins held', () => {
     const halfway = frame(keyframes, Math.round((steerS / 2) * keyframes.hz))
     const t = halfway[F.t]!
     const first = frame(keyframes, 0)
     expect(halfway[F.speed]).toBe(0)
     expect(halfway[F.x]).toBe(first[F.x])
     for (const w of SPINS) expect(halfway[w]).toBe(first[w])
-    const { angles } = steeringFor({ type: 'turn', angleRad: -Math.PI / 2 })
     const got = [halfway[F.steerFL], halfway[F.steerFR], halfway[F.steerRL], halfway[F.steerRR]]
-    for (const [k, angle] of angles.entries()) {
-      expect(got[k]).toBeCloseTo((angle * t) / steerS, 5)
-    }
+    const share = moveAt(steerMove, t).position / steerMove.distance
+    for (const [k, angle] of stance.entries()) expect(got[k]).toBeCloseTo(angle * share, 5)
     // Straight again once driving.
     const driving = frame(keyframes, keyframes.count - 1)
     expect([
@@ -339,7 +350,7 @@ describe('imaging stops near either end of the path', () => {
     expect(imagedAt(record)).toEqual([])
     // The plan's estimate applies the same rule.
     expect(record.plan.metrics.estimatedDriveS).toBeCloseTo(record.outcome.durationS, -1)
-    expect(record.outcome.durationS).toBeCloseTo(26 / 0.033, -1)
+    expect(record.outcome.durationS).toBeCloseTo(planMove(26, driveLimits(0.033)).durationS, -1)
   })
 })
 
