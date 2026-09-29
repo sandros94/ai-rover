@@ -153,7 +153,6 @@ const fog = useStopFog({
 const stage = computed((): StageProps => ({
   terrain: terrain.value,
   ground: ground.value,
-  seen: revealed.value,
   fog: fog.value,
   chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
   heightAt,

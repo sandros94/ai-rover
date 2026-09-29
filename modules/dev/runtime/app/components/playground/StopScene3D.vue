@@ -186,9 +186,7 @@ const deaths = computed(() => {
         <DiskScene
           class="aspect-square"
           :terrain="terrain"
-          :seen="disk.visible"
-          :fade="fog.fade"
-          :sight="fog.sight"
+          :fog="fog"
           :chunk-vertices="CHUNK_VERTICES"
           :height-at="heightAt"
           :frame="frame"

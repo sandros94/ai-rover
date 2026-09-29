@@ -58,8 +58,7 @@ describe('DiskScene over ground still arriving', () => {
           return () =>
             h(DiskScene, {
               terrain: view.value,
-              seen: seen.value,
-              fade: fade.value,
+              fog: { stopSeen: seen.value, fade: fade.value, sight: undefined },
               chunkVertices: 65,
               heightAt: () => 0,
               rest: { x: 0, y: 0, headingRad: 0 },
@@ -112,9 +111,7 @@ describe("DiskScene as the rover's sight changes", () => {
           return () =>
             h(DiskScene, {
               terrain: view,
-              seen,
-              fade: fade.value,
-              sight: sight.value,
+              fog: { stopSeen: seen, fade: fade.value, sight: sight.value },
               chunkVertices: 65,
               heightAt: () => 0,
               rest: { x: 0, y: 0, headingRad: 0 },

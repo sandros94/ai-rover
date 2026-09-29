@@ -30,11 +30,11 @@ const props = withDefaults(
     terrain?: { grid: HeightGrid; origin: GridCell }
     /** The disk as it arrives, which both views draw chunk by chunk; by default `terrain`. */
     ground?: GroundView
-    /** The stop's own seen flags, one byte per disk vertex. */
+    /** The stop's own seen flags, one byte per disk vertex; read only without `fog`. */
     seen?: Uint8Array
     /** What the playing drive has seen so far, as disk-grid indices; read only without `fog`. */
     reveals?: readonly { vertices: ArrayLike<number> }[]
-    /** The fog over `seen` with the reveals lifted, sight included, from an owner sharing it. */
+    /** The stop's fog, sight included, from an owner that shares it across views. */
     fog?: StopFog
     /** Vertices per chunk side; the 3D view needs it with the ground. */
     chunkVertices?: number
@@ -42,7 +42,10 @@ const props = withDefaults(
     loading: { loaded: number; total: number; error: unknown }
     center: MapPoint
     radius: number
-    /** The rover's eye height above the ground, metres; without it no ground is in sight. */
+    /**
+     * The rover's eye height above the ground, metres; without it no ground is in sight. Read
+     * only without `fog`.
+     */
     mastHeight?: number
     rover: { x: number; y: number; headingRad: number }
     /** The stops shown, the one the rover stands at or left from `current`. */
@@ -129,9 +132,7 @@ const fog = computed(() => props.fog ?? own.value)
     <StopMap
       v-if="view === '2d'"
       :terrain="ground ?? terrain"
-      :seen="fog.seen"
-      :fade="fog.fade"
-      :sight="fog.sight"
+      :fog="fog"
       :center="center"
       :radius="radius"
       :rover="rover"
@@ -154,9 +155,7 @@ const fog = computed(() => props.fog ?? own.value)
     <DiskScene
       v-else-if="(ground ?? terrain) && chunkVertices"
       :terrain="(ground ?? terrain)!"
-      :seen="seen"
-      :fade="fog.fade"
-      :sight="fog.sight"
+      :fog="fog"
       :survey="survey"
       :chunk-vertices="chunkVertices"
       :height-at="heightAt"

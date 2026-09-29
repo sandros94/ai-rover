@@ -9,6 +9,7 @@ import { KEYFRAME_STRIDE } from '#shared/utils/drive'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { useSegmentPlayback } from '~/composables/useSegmentPlayback'
+import type { StopFog } from '~/composables/useStopFog'
 import { SIGHT_INTERVAL_MS } from '~/composables/useCurrentSight'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
@@ -31,9 +32,9 @@ vi.mock('~/components/map/StopMap.vue', async () => {
   return {
     default: vue.defineComponent({
       name: 'StopMap',
-      props: { sight: { type: Uint8Array, default: undefined } },
+      props: { fog: { type: Object, default: undefined } },
       setup: (props) => () => {
-        handed.map.push(props.sight)
+        handed.map.push((props.fog as StopFog | undefined)?.sight)
         return vue.h('div', { 'data-test': 'map' })
       },
     }),
@@ -44,9 +45,9 @@ vi.mock('~/components/scene/DiskScene.vue', async () => {
   return {
     default: vue.defineComponent({
       name: 'DiskScene',
-      props: { sight: { type: Uint8Array, default: undefined } },
+      props: { fog: { type: Object, default: undefined } },
       setup: (props) => () => {
-        handed.scene.push(props.sight)
+        handed.scene.push((props.fog as StopFog | undefined)?.sight)
         return vue.h('div', { 'data-test': 'scene' })
       },
     }),
@@ -234,7 +235,9 @@ describe('StopStage on its own', () => {
 
   it('draws the fog it is handed and computes none', async () => {
     const sight = new Uint8Array(65 * 65)
-    await mountSuspended(StopStage, { props: { ...props, fog: { seen: props.seen, sight } } })
+    await mountSuspended(StopStage, {
+      props: { ...props, fog: { stopSeen: props.seen, seen: props.seen, fade: undefined, sight } },
+    })
     await flushPromises()
     await nextTick()
     expect(currentSight).not.toHaveBeenCalled()

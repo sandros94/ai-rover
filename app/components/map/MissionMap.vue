@@ -184,7 +184,6 @@ const stage = computed((): StageProps => {
   return {
     terrain: terrain.value,
     ground: arriving.value,
-    seen: revealed.value,
     fog: fog.value,
     chunkVertices: manifest.value && chunkVerticesOf(manifest.value),
     heightAt,

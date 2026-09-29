@@ -7,7 +7,7 @@ import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/s
 import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
-import type { RevealFrame } from '~/composables/useRevealFade'
+import type { StopFog } from '~/composables/useStopFog'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 import type { Pickable } from './ScenePicker.vue'
 import StopScene from './StopScene.vue'
@@ -25,18 +25,12 @@ const props = withDefaults(
   defineProps<{
     /** The disk, whole or still arriving. */
     terrain: GroundView
-    /** The stop's own seen flags, one byte per disk vertex: where unseen ground sits. */
-    seen?: Uint8Array
     /**
-     * The fog drawn, newly seen ground fading in, by `useRevealFade` over `seen` with what the
-     * playing drive has seen lifted; without it no fog is drawn.
+     * The fog: unseen ground sits at the height of what the stop itself has seen (`stopSeen`),
+     * fading in as it is revealed (`fade`); revealed ground out of `sight`, or all of it while
+     * there is none, is drawn as seen before. Without a fog, or a `fade`, no fog is drawn.
      */
-    fade?: RevealFrame
-    /**
-     * One byte per disk vertex, 1 where the rover has the ground in sight now; revealed ground
-     * out of it, or all of it while there is none, is drawn as seen before.
-     */
-    sight?: Uint8Array
+    fog?: Pick<StopFog, 'stopSeen' | 'fade' | 'sight'>
     /** Vertices per chunk side, as the chunk cache reports them. */
     chunkVertices: number
     /** The stop's survey: ground beyond it is not drawn, a ring marks its edge. */
@@ -68,9 +62,7 @@ const props = withDefaults(
     lighting?: { solFraction?: number; exposureBias?: number; toneMapping?: ToneMapping }
   }>(),
   {
-    seen: undefined,
-    fade: undefined,
-    sight: undefined,
+    fog: undefined,
     survey: undefined,
     frame: undefined,
     keyframes: undefined,
@@ -109,11 +101,13 @@ function syncChunks(terrain: GroundView): void {
   chunks.value = [...chunks.value, ...added]
 }
 
-const fade = toRef(() => props.fade)
+const fade = toRef(() => props.fog?.fade)
 
+/** Its own ref: the fog object changes with every sight, the stop's flags only with the stop. */
+const stopSeen = computed(() => props.fog?.stopSeen)
 /** Mean height of the ground the stop itself has seen, over the ground in so far. */
 const stopMean = computed(() => {
-  const seen = props.seen
+  const seen = stopSeen.value
   let sum = 0
   let count = 0
   const heights = props.terrain.grid.heights
@@ -134,7 +128,7 @@ const stopMean = computed(() => {
  * drift with reveals; while ground arrives it sits at the mean of what is in, and settles once
  * the last chunk is.
  */
-const fog = shallowRef<ChunkFog & { rects?: GridRect[] }>()
+const chunkFog = shallowRef<ChunkFog & { rects?: GridRect[] }>()
 let surface: FogSurface | undefined
 /** The mean the surface was computed with, and how many placed rectangles it covers. */
 let surfaced = { mean: 0, placed: 0 }
@@ -144,7 +138,7 @@ watch(
     const placed = terrain.placed ?? []
     if (!frame) {
       surface = undefined
-      fog.value = undefined
+      chunkFog.value = undefined
       syncChunks(terrain)
       return
     }
@@ -171,8 +165,8 @@ watch(
       surfaced.placed = placed.length
     }
     syncChunks(terrain)
-    if (rects?.length === 0 && fog.value?.surface === surface) return
-    fog.value = {
+    if (rects?.length === 0 && chunkFog.value?.surface === surface) return
+    chunkFog.value = {
       surface: surface!,
       layout: layout.value,
       rects,
@@ -183,7 +177,7 @@ watch(
 
 /** Height of the ground as drawn: overlays crossing unseen ground follow the fog, not what it hides. */
 const drawnHeightAt = computed(() => {
-  const current = fog.value
+  const current = chunkFog.value
   if (!current) return props.heightAt
   const place = { ...props.terrain.grid, origin: props.terrain.origin }
   return (x: number, y: number) =>
@@ -288,8 +282,8 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :route="route"
       :deaths="ghosts"
       :death-radius-m="deathRadiusM"
-      :fog="fog"
-      :sight="sight"
+      :fog="chunkFog"
+      :sight="props.fog?.sight"
       :survey="survey"
       :drawn-height-at="drawnHeightAt"
       :goals="goals"

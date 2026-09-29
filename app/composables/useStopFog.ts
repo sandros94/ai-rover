@@ -5,14 +5,19 @@ import type { RevealFrame } from '~/composables/useRevealFade'
 /** Fog updates per second: reveals arrive every metre, not every frame. */
 export const REVEAL_HZ = 10
 
-/** A stop's fog as its views draw it; each part undefined while its inputs are missing. */
+/**
+ * A stop's fog as its views draw it, its parts together as {@link useStopFog} gives them: each
+ * undefined while its inputs are missing, `fade` also while `seen` does not fit the grid.
+ */
 export interface StopFog {
-  /** The stop's own seen flags with the playing drive's reveals lifted, one byte per disk vertex. */
-  seen?: Uint8Array
+  /** The stop's own seen flags, one byte per disk vertex, before the drive's reveals. */
+  stopSeen: Uint8Array | undefined
+  /** `stopSeen` with the playing drive's reveals lifted. */
+  seen: Uint8Array | undefined
   /** `seen` as drawn now, newly seen ground fading in, by {@link useRevealFade}. */
-  fade?: RevealFrame
+  fade: RevealFrame | undefined
   /** What the rover has in line of sight now over `seen`, by {@link useCurrentSight}. */
-  sight?: Uint8Array
+  sight: Uint8Array | undefined
 }
 
 /**
@@ -38,5 +43,10 @@ export function useStopFog(source: {
     () => source.ground()?.grid,
   )
   const sight = useCurrentSight(() => seen.value, source.ground, source.eye, source.sight)
-  return computed<StopFog>(() => ({ seen: seen.value, fade: fade.value, sight: sight.value }))
+  return computed<StopFog>(() => ({
+    stopSeen: source.seen(),
+    seen: seen.value,
+    fade: fade.value,
+    sight: sight.value,
+  }))
 }

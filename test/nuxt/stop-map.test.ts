@@ -215,8 +215,7 @@ describe('StopMap over ground still arriving', () => {
     const wrapper = await mountSuspended(StopMap, {
       props: {
         terrain: { grid: flat, origin: { i: -30, j: -30 } },
-        seen,
-        fade: settled(seen),
+        fog: { seen, fade: settled(seen), sight: undefined },
         center: { x: 0, y: 0 },
         radius: 20,
       },
@@ -262,9 +261,7 @@ describe('StopMap over ground still arriving', () => {
         setup: () => () =>
           h(StopMap, {
             terrain,
-            seen,
-            fade,
-            sight: sight.value,
+            fog: { seen, fade, sight: sight.value },
             center: { x: 0, y: 0 },
             // Past the grid's corners: the whole grid lies within the survey.
             radius: 43,

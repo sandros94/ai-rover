@@ -93,9 +93,7 @@ function onHover(point: MapPoint | null): void {
     <StopMap
       class="aspect-square rounded-lg"
       :terrain="terrain"
-      :seen="fog.seen"
-      :fade="fog.fade"
-      :sight="fog.sight"
+      :fog="fog"
       :center="disk.center"
       :radius="DEFAULT_STOP_RADIUS"
       :rover="rover"
