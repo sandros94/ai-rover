@@ -141,9 +141,8 @@ describe('the night arm pose', () => {
 describe('the arm unstow', () => {
   it(`clears the mast, the deck and the wheels at full suspension travel by ${PATH_CLEARANCE * 100} cm once each link is off its rest`, () => {
     // Along the timed unstow every tenth of a second, at most 0.2° of any joint. A link resting
-    // on the rover at the start touches until it lifts off, and once off never touches again
-    // before it first clears; its gap may waver by a few millimetres meanwhile, below what boxes
-    // of 5 cm resolve.
+    // on the rover at the start may touch while it lifts off, its gap only growing, until it
+    // first clears.
     const lifted = new Set<string>()
     const lifting: Record<string, number> = {}
     const faults: string[] = []
@@ -157,8 +156,7 @@ describe('the arm unstow', () => {
           if (g < PATH_CLEARANCE) faults.push(where)
           least = Math.min(least, g)
         } else {
-          if (g === 0 && (lifting[arm] ?? 0) > 0)
-            faults.push(`${where}, back on the rover while lifting off`)
+          if (g < (lifting[arm] ?? 0)) faults.push(`${where}, closer while lifting off`)
           lifting[arm] = g
           if (g >= PATH_CLEARANCE) lifted.add(arm)
         }

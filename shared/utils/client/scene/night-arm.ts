@@ -23,19 +23,26 @@ export const ARM_NIGHT: ArmPose = {
 /**
  * The unstow, stowed to {@link ARM_NIGHT}, as keyframes in joint space the arm moves between in
  * straight lines:
- * 1. lift-off: the shoulder turns 40° and the elbow opens 30°, the wrist and turret tilting the
- *    turret up off its rest and the forearm off the deck;
- * 2. swing: the shoulder turns and raises into its night angles while the elbow opens most of
+ * 1. lift: the elbow opens 15° and the wrist folds 18°, the shoulder still, lifting the turret
+ *    and the wrist straight up off their rests;
+ * 2. clear: the elbow opens to 24° and the wrist unfolds to 10°, carrying the wrist 3 cm clear
+ *    before the shoulder moves (turning the shoulder any earlier swings it back towards its rest);
+ * 3. turn: the shoulder turns 40° and the elbow opens to 30°, the wrist and turret tilting the
+ *    turret up and the forearm off the deck;
+ * 4. swing: the shoulder turns and raises into its night angles while the elbow opens most of
  *    the way and the wrist folds 20° more, which keeps the turret off the mast as it passes;
- * 3. elbow: the elbow opens to its night angle;
- * 4. aim: the wrist raises the turret and the turret turns WATSON onto the ground ahead.
+ * 5. elbow: the elbow opens to its night angle;
+ * 6. aim: the wrist raises the turret and the turret turns WATSON onto the ground ahead.
  * A strict order (the shoulder alone, then the elbow alone) is not possible on this model: with
  * the elbow folded, the turret sweeps through the mast whichever way the shoulder swings. The
  * model's tests hold every link at least 3 cm clear of the mast, the deck and the wheels over
- * the suspension's travel along the whole path, once each is off its rest.
+ * the suspension's travel along the whole path once each is off its rest, and each one's gap
+ * only growing while it lifts off.
  */
 export const ARM_UNSTOW: readonly ArmPose[] = [
   ARM_STOWED,
+  { ...ARM_STOWED, arm_3: -2.5591, arm_4: 2.7957 },
+  { ...ARM_STOWED, arm_3: -2.402, arm_4: 2.9353 },
   { arm_1: 0.8742, arm_2: ARM_STOWED.arm_2, arm_3: -2.2973, arm_4: 2.7607, arm_5: 5.2099 },
   { arm_1: ARM_NIGHT.arm_1, arm_2: ARM_NIGHT.arm_2, arm_3: -1.3373, arm_4: 2.4117, arm_5: 5.2099 },
   { ...ARM_NIGHT, arm_4: 2.4117, arm_5: 5.2099 },
