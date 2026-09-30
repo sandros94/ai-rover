@@ -89,6 +89,35 @@ describe('StopMap', () => {
     expect(picks[1]![0].y).toBeCloseTo(20, 9)
   })
 
+  it("draws the 3D camera's footprint under everything else, and none without one", async () => {
+    const wrapper = await mountMap()
+    expect(wrapper.find('[data-test=view-cone]').exists()).toBe(false)
+    // 3.2 px per metre about the middle of the 400 px box, north up.
+    await wrapper.setProps({
+      viewCone: {
+        polygon: [
+          { x: 5, y: -5 },
+          { x: 5, y: 5 },
+          { x: 50, y: 20 },
+          { x: 50, y: -20 },
+        ],
+        apex: { x: -10, y: 0 },
+        headingRad: 0,
+      },
+    })
+    const cone = wrapper.find('[data-test=view-cone]')
+    expect(cone.find('polygon').attributes('points')).toBe(
+      '216.0,216.0 216.0,184.0 360.0,136.0 360.0,264.0',
+    )
+    expect(cone.find('[data-test=view-cone-apex]').attributes()).toMatchObject({
+      cx: '168',
+      cy: '200',
+    })
+    // Drawn first: under the ring, the markers and the rover; the overlay takes no pointer.
+    expect(wrapper.find('svg').element.firstElementChild).toBe(cone.element)
+    expect(wrapper.find('svg').classes()).toContain('pointer-events-none')
+  })
+
   it('pans on a drag instead of picking', async () => {
     const wrapper = await mountMap()
     const map = wrapper.find('[data-test=map]').element

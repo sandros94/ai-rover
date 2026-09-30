@@ -531,6 +531,73 @@ describe('NotMovingFlag', () => {
 })
 
 describe('the full-viewport layout', () => {
+  it("draws the scene camera's footprint on the floating 2D map, and none once the map is the view", async () => {
+    /** Renders of the scene's stage and of the floating map's, and the scene's camera to move. */
+    const renders = { '3d': 0, '2d': 0 }
+    const CameraStage = defineComponent({
+      name: 'StopStage',
+      props: {
+        view: { type: String, required: true },
+        reportCamera: { type: Boolean, default: false },
+        viewCone: { type: Object, default: undefined },
+      },
+      emits: ['camera'],
+      setup: (props) => () => {
+        renders[props.view as '3d' | '2d']++
+        return h('div', {
+          'data-test': 'stage',
+          'data-view': props.view,
+          'data-report': String(props.reportCamera),
+          'data-cone': props.viewCone
+            ? JSON.stringify((props.viewCone as { polygon: unknown[] }).polygon.length)
+            : 'none',
+        })
+      },
+    })
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(MissionDashboard, { state: state(), error: null, serverOffsetMs: 0 }),
+          }),
+      }),
+      {
+        global: { stubs: { MissionMap: MapStub, StopStage: CameraStage } },
+        attachTo: document.body,
+      },
+    )
+    attached.push(wrapper)
+    await flushPromises()
+    const scene = () => wrapper.find('[data-test=scene-layer] [data-test=stage]')
+    const floating = () => wrapper.find('[data-panel=map2d] [data-test=stage]')
+    expect(scene().attributes('data-report')).toBe('true')
+    expect(floating().attributes('data-cone')).toBe('none')
+
+    const before = renders['3d']
+    const camera = wrapper
+      .findAllComponents(CameraStage)
+      .find((stage) => stage.props('view') === '3d')!
+    camera.vm.$emit('camera', {
+      position: { x: -9, y: -9, z: 6 },
+      target: { x: 0, y: 0, z: 0 },
+      fovDeg: 50,
+      aspect: 1.5,
+      up: { x: 0.3, y: 0.3, z: 0.9 },
+    })
+    await flushPromises()
+    expect(floating().attributes('data-cone')).toBe('4')
+    expect(floating().attributes('data-report')).toBe('false')
+    // Reporting the camera redraws the floating map only, never the scene's stage.
+    expect(renders['3d']).toBe(before)
+
+    await wrapper.find('[data-test=view-2d]').trigger('click')
+    await flushPromises()
+    expect(baseView(wrapper)).toBe('2d')
+    expect(scene().attributes('data-report')).toBe('false')
+    expect(scene().attributes('data-cone')).toBe('none')
+    expect(wrapper.find('[data-panel=map2d]').exists()).toBe(false)
+  })
+
   it('opens on the 3D scene and switches to the 2D map from the top bar', async () => {
     const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
     expect(baseView(wrapper)).toBe('3d')

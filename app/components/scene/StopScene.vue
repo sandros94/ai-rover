@@ -11,12 +11,13 @@ import { TresCanvas } from '@tresjs/core'
 import type { Texture, ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { DrivenPoint, GridRect } from '#shared/utils/client'
-import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
+import type { CameraPose, ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
   armPoseAt,
   framePacer,
   framePlacement,
   fullModelLedger,
+  HAZE_FAR_M,
   LOD_FAR_M,
   routeApproach,
   routeDestination,
@@ -89,6 +90,8 @@ const props = withDefaults(
     exposureBias?: number
     /** three's tone mapping; another than the scene's AgX look only to compare against it. */
     toneMapping?: ToneMapping
+    /** Whether the camera's pose is reported (`camera`), as a view drawing its footprint needs. */
+    reportCamera?: boolean
   }>(),
   {
     chunks: () => [],
@@ -113,6 +116,7 @@ const props = withDefaults(
     solFraction: 0.4,
     exposureBias: 0,
     toneMapping: CustomToneMapping,
+    reportCamera: false,
   },
 )
 
@@ -123,6 +127,8 @@ const emit = defineEmits<{
   hover: [id: string | null, client: { x: number; y: number }]
   /** A tap or click on an object, or on none. */
   tap: [id: string | null, pointerType: string, client: { x: number; y: number }]
+  /** The camera moved, while `reportCamera`: at most once a displayed frame. */
+  camera: [pose: CameraPose]
 }>()
 
 /** The rover and a focused ghost: never more full rover models than that in the scene. */
@@ -171,7 +177,7 @@ const armJoints = computed(() => armPoseAt(props.solFraction))
  * seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
  */
 const atmosphere = computed(() => lighting.value.horizon)
-const HAZE = { near: LOD_FAR_M, far: 4 * LOD_FAR_M }
+const HAZE = { near: LOD_FAR_M, far: HAZE_FAR_M }
 /** three dropped `PCFSoftShadowMap`; PCF blurs by each light's `shadow.radius` instead. */
 const SHADOW_MAP = PCFShadowMap
 
@@ -266,6 +272,8 @@ onBeforeUnmount(() => {
       :target="target"
       :target-key="focusKey"
       :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]"
+      :report="reportCamera"
+      @pose="emit('camera', $event)"
     />
     <TerrainChunks
       v-if="chunks.length > 0"

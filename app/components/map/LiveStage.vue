@@ -11,8 +11,9 @@ import type { MapViewMode } from '~/composables/useMapView'
 /**
  * A stage whose props are read here, where it is drawn: they change every animation frame while
  * a drive plays, and reading them in a page would redraw the page, its panels and its slots.
- * Listeners (`pick`, `hover`) pass through to the stage. `progress: false` leaves the terrain's
- * loading progress to another stage of the same stop.
+ * Listeners (`pick`, `hover`, `camera`) and the camera's view (`reportCamera`, `viewCone`) pass
+ * through to the stage. `progress: false` leaves the terrain's loading progress to another stage
+ * of the same stop.
  */
 withDefaults(defineProps<{ stage: () => StageProps; view: MapViewMode; progress?: boolean }>(), {
   progress: true,

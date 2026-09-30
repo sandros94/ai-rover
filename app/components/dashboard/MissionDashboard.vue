@@ -199,6 +199,9 @@ const panels = computed<PanelId[]>(() => [
 /* Planning: destinations are picked on the 2D map; a pick from the scene returns to it. */
 
 const view = useMapView()
+/** The ground the scene's camera shows, drawn on the floating 2D map. */
+const cone = useViewCone(view)
+const { report: reportCamera, footprint: viewCone } = cone
 const planFrom = ref<MapViewMode | null>(null)
 function planOnMap(): void {
   planFrom.value = view.value
@@ -290,8 +293,10 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
           <LiveStage
             :stage="stage"
             :view="view"
+            :report-camera="reportCamera"
             @hover="planning.onHover"
             @pick="planning.onPick"
+            @camera="cone.onCamera"
           />
         </template>
         <template #top>
@@ -357,7 +362,14 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
           />
         </template>
         <template #panel-map2d>
-          <LiveStage :stage="stage" view="2d" :progress="false" />
+          <LiveStage
+            :stage="stage"
+            view="2d"
+            :progress="false"
+            :view-cone="viewCone"
+            @vue:mounted="cone.shown"
+            @vue:unmounted="cone.hidden"
+          />
         </template>
         <template #panel-vote>
           <div class="space-y-3 p-3">

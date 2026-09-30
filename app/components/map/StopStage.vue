@@ -7,6 +7,7 @@ import type {
   RoverObject,
 } from '#shared/utils/client'
 import { groundAround } from '#shared/utils/client'
+import type { CameraPose, ViewFootprint } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
@@ -88,6 +89,10 @@ const props = withDefaults(
     roverObject?: RoverObject
     /** Time of the sol shown, 0.5 noon, for the 3D sun; the scene's own default without it. */
     solFraction?: number
+    /** Whether the 3D camera's pose is reported (`camera`), for a 2D view drawing its footprint. */
+    reportCamera?: boolean
+    /** The ground another stage's 3D camera shows, drawn on the 2D view. */
+    viewCone?: ViewFootprint
   }>(),
   {
     terrain: undefined,
@@ -113,10 +118,16 @@ const props = withDefaults(
     objects: () => [],
     roverObject: undefined,
     solFraction: undefined,
+    reportCamera: false,
+    viewCone: undefined,
   },
 )
 
-const emit = defineEmits<{ pick: [point: MapPoint]; hover: [point: MapPoint | null] }>()
+const emit = defineEmits<{
+  pick: [point: MapPoint]
+  hover: [point: MapPoint | null]
+  camera: [pose: CameraPose]
+}>()
 
 /** The survey for the 3D view, one object while it stays, so the scene does not redraw its ring. */
 const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
@@ -204,6 +215,7 @@ const sceneWait = computed(() => terrainWait.value ?? unmet.value)
       :picked="picked"
       :objects="objects"
       :rover-object="roverObject"
+      :view-cone="viewCone"
       @hover="emit('hover', $event)"
       @pick="emit('pick', $event)"
     >
@@ -228,6 +240,8 @@ const sceneWait = computed(() => terrainWait.value ?? unmet.value)
       :objects="objects"
       :rover-object="roverObject"
       :lighting="{ solFraction }"
+      :report-camera="reportCamera"
+      @camera="emit('camera', $event)"
     />
     <div v-else :class="['relative', BLANK]">
       <TerrainProgress v-if="progress" :waiting="chunks" :error="loading.error" />

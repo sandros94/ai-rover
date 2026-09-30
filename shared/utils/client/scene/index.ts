@@ -113,3 +113,5 @@ export {
   snapShadowCentre,
   SUN_HOLD_RAD,
 } from './shadow'
+export type { CameraPose, ViewFootprint } from './view-footprint'
+export { HAZE_FAR_M, viewFootprint } from './view-footprint'

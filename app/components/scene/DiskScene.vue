@@ -9,7 +9,7 @@ import type {
   RoverObject,
 } from '#shared/utils/client'
 import { drawnHeightAt, fogSurface, ROVER_ID } from '#shared/utils/client'
-import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
+import type { CameraPose, ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
@@ -73,6 +73,8 @@ const props = withDefaults(
     roverObject?: RoverObject
     /** The time of the sol, an exposure offset and a tone mapping to compare, as `StopScene` takes them. */
     lighting?: { solFraction?: number; exposureBias?: number; toneMapping?: ToneMapping }
+    /** Whether the camera's pose is reported (`camera`), as a view drawing its footprint needs. */
+    reportCamera?: boolean
   }>(),
   {
     fog: undefined,
@@ -88,8 +90,11 @@ const props = withDefaults(
     objects: () => [],
     roverObject: undefined,
     lighting: () => ({}),
+    reportCamera: false,
   },
 )
+
+const emit = defineEmits<{ camera: [pose: CameraPose] }>()
 
 const layout = computed(() => ({ width: props.terrain.grid.width, origin: props.terrain.origin }))
 
@@ -312,7 +317,9 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :focus-key="mapFocus.seq.value"
       @hover="onHover"
       @tap="onTap"
+      :report-camera="reportCamera"
       @rover-status="roverStatus = $event"
+      @camera="emit('camera', $event)"
     />
     <p
       v-if="roverStatus === 'unavailable'"
