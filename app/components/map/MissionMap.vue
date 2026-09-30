@@ -2,6 +2,7 @@
 import type { Ref } from 'vue'
 import type { DrivenPoint } from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
+import type { FogReveal } from '~/composables/useStopFog'
 
 /**
  * What playback shows on the map, as refs read where they are drawn: the rover and the frame
@@ -18,7 +19,14 @@ export interface MapTrack {
    * Vertices the playing drive has seen so far, as disk-grid indices of this stop's disk: shown
    * lifted from the fog, never given to the planner, which knows only the stop's mask.
    */
-  reveals: Ref<readonly { vertices: ArrayLike<number> }[]>
+  reveals: Ref<readonly FogReveal[]>
+  /** Sim time up to which the reveals happened before playback got there; see `useStopFog`. */
+  settledUntil: Ref<number>
+  /**
+   * Whether a drive plays: the rover stands where its frame puts it, and the 3D view draws none
+   * while that frame is on its way. Without one the rover rests at the current stop.
+   */
+  playing: Ref<boolean>
   /** For the 3D view: the playback frame and the sim time. */
   frame: Ref<Float32Array | undefined>
   t: Ref<number>
@@ -163,6 +171,7 @@ const rover = computed(
 const fog = useStopFog({
   seen: () => revealed.value,
   reveals: () => props.track.reveals.value,
+  settledUntil: () => props.track.settledUntil.value,
   ground: () => arriving.value ?? terrain.value,
   eye: () => rover.value,
   sight: () => {
@@ -193,6 +202,7 @@ const stage = computed((): StageProps => {
     radius: manifest.value?.radius ?? 500,
     mastHeight: manifest.value?.world.mastHeight,
     rover: rover.value,
+    resting: !track.playing.value,
     trail: trail.value,
     plan: track.plan.value,
     driven: track.driven.value,

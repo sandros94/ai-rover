@@ -49,6 +49,20 @@ describe('revealTimes', () => {
     expect(updateRevealTimes(times, next, 900, width)).toBeUndefined()
     expect(times[1 * width + 3]).toBe(500)
   })
+
+  it('settles at once the newly revealed vertices flagged settled', () => {
+    const width = 6
+    const times = revealTimes(mask(width, 4, () => false))
+    const next = mask(width, 4, (i, j) => j === 1 && (i === 2 || i === 3))
+    const settled = mask(width, 4, (i, j) => j === 1 && i === 2)
+    const rect = updateRevealTimes(times, next, 500, width, settled)
+    expect(times[width + 2]).toBe(-Infinity)
+    expect(times[width + 3]).toBe(500)
+    expect(rect).toEqual({ i0: 2, j0: 1, i1: 4, j1: 2 })
+    expect(() => updateRevealTimes(times, next, 900, width, new Uint8Array(3))).toThrow(
+      /settled flags/,
+    )
+  })
 })
 
 describe('fogCover', () => {

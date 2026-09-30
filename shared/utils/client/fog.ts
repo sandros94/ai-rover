@@ -41,27 +41,29 @@ export function revealTimes(seen: Uint8Array): Float64Array {
 }
 
 /**
- * Brings `times` in line with `seen`, in place: vertices newly revealed are stamped `now`,
- * vertices no longer seen (a seek back) are fogged again at once. Returns the rectangle holding
- * every change, or undefined when nothing changed.
+ * Brings `times` in line with `seen`, in place: vertices newly revealed are stamped `now`, or
+ * -Infinity (settled at once) where `settled` flags them, vertices no longer seen (a seek back)
+ * are fogged again at once. Returns the rectangle holding every change, or undefined when nothing
+ * changed.
  */
 export function updateRevealTimes(
   times: Float64Array,
   seen: Uint8Array,
   now: number,
   width: number,
+  settled?: Uint8Array,
 ): GridRect | undefined {
-  if (times.length !== seen.length) {
+  if (times.length !== seen.length || (settled && settled.length !== seen.length)) {
     throw new ClientError(
       'INVALID_INPUT',
-      `updateRevealTimes: ${times.length} times for ${seen.length} seen flags; pass one per vertex.`,
+      `updateRevealTimes: ${times.length} times and ${settled?.length ?? 'no'} settled flags for ${seen.length} seen flags; pass one per vertex.`,
     )
   }
   let rect: GridRect | undefined
   for (let k = 0; k < seen.length; k++) {
     const shown = !Number.isNaN(times[k]!)
     if (shown === !!seen[k]) continue
-    times[k] = shown ? Number.NaN : now
+    times[k] = shown ? Number.NaN : settled?.[k] ? -Infinity : now
     const i = k % width
     const j = (k - i) / width
     if (!rect) rect = { i0: i, j0: j, i1: i + 1, j1: j + 1 }

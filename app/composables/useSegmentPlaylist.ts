@@ -63,6 +63,13 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
   const outcome = shallowRef<DriveOutcome>()
   /** Sim time within the playing segment. */
   const simTime = ref(0)
+  /**
+   * Sim time within the playing segment that playback last jumped to: the start, a seek's target,
+   * the segment entered. What the drive revealed up to it happened before playback got there.
+   */
+  const jumpedTo = ref(0)
+  /** Set by a jump; the next step records where it landed. */
+  let jumped = true
   /** A settled segment is released whole: its end. */
   const liveTime = ref(0)
   /** Sim time of the playing segment's last held keyframe. */
@@ -149,6 +156,11 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
       })
     }
 
+    // Before the reveals, which the fog reads against it.
+    if (jumped || k !== shown) {
+      jumpedTo.value = sim
+      jumped = false
+    }
     if (k !== shown) {
       const before = shown
       shown = k
@@ -197,6 +209,7 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
 
   function seek(playlistSeconds: number): void {
     clock.seek(playlistSeconds)
+    jumped = true
     step()
   }
 
@@ -223,6 +236,7 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
     heldReveals,
     outcome,
     simTime,
+    jumpedTo,
     liveTime,
     heldUntil,
     mode,
@@ -244,6 +258,8 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
     },
     /** Pauses, or plays on from the pause; from the start once the end was reached. */
     togglePlay(): void {
+      // Played again from the start once the end was reached.
+      if (clock.ended) jumped = true
       if (clock.paused || clock.ended) clock.play()
       else clock.pause()
       step()

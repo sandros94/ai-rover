@@ -126,6 +126,34 @@ export interface GroundView {
   complete?: boolean
 }
 
+/**
+ * Whether `ground` holds the chunk under `point` (world metres) and the eight around it: those of
+ * them that meet the survey, which the disk lists. Chunks are `chunkVertices` a side.
+ */
+export function groundAround(
+  ground: GroundView,
+  point: { x: number; y: number },
+  options: { chunkVertices: number; survey: { center: { x: number; y: number }; radius: number } },
+): boolean {
+  const { placed } = ground
+  if (!placed || ground.complete) return true
+  const cells = options.chunkVertices - 1
+  const sizeM = cells * ground.grid.cellSize
+  const { center, radius } = options.survey
+  const held = new Set(placed.map((rect) => `${rect.i0},${rect.j0}`))
+  const cx = Math.floor(point.x / sizeM)
+  const cy = Math.floor(point.y / sizeM)
+  for (let y = cy - 1; y <= cy + 1; y++) {
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      const dx = Math.max(x * sizeM - center.x, 0, center.x - (x + 1) * sizeM)
+      const dy = Math.max(y * sizeM - center.y, 0, center.y - (y + 1) * sizeM)
+      if (Math.hypot(dx, dy) >= radius) continue
+      if (!held.has(`${x * cells - ground.origin.i},${y * cells - ground.origin.j}`)) return false
+    }
+  }
+  return true
+}
+
 /** A snapshot of `ground` to hand a view, `placed` copied so the view it gives never changes. */
 export function groundView(
   ground: DiskGround,

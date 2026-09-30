@@ -141,7 +141,9 @@ const roverAt = computed(() => rover.value ?? { ...drive.value.from, headingRad:
 /** Once for every stage drawn: the fog, sight included, is the same in each view. */
 const fog = useStopFog({
   seen: () => revealed.value,
-  reveals: () => snapshot.value.reveals,
+  // With the frame, not at the instruments' rate.
+  reveals: () => playback.reveals.value,
+  settledUntil: () => playback.jumpedTo.value,
   ground: () => ground.value ?? terrain.value,
   eye: () => roverAt.value,
   sight: () => {
@@ -162,6 +164,7 @@ const stage = computed((): StageProps => ({
   radius: manifest.value?.radius ?? 500,
   mastHeight: manifest.value?.world.mastHeight,
   rover: roverAt.value,
+  resting: false,
   trail: shownTrail.value,
   plan: plan.value,
   driven: driven.value,

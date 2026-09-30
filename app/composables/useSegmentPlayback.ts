@@ -61,6 +61,11 @@ export function useSegmentPlayback(
   const heldReveals = shallowRef<SliceTrace['reveals']>([])
   const outcome = shallowRef<DriveOutcome>()
   const simTime = ref(0)
+  /**
+   * Sim time playback last jumped to: where it opened, a seek's target, the live edge it went back
+   * to. What the drive revealed up to it happened before playback got there.
+   */
+  const jumpedTo = ref(0)
   /** The live edge: the latest sim time playback may show. */
   const liveTime = ref(0)
   /** Sim time of the last held keyframe; seeking past it shows nothing new. */
@@ -77,12 +82,19 @@ export function useSegmentPlayback(
   let handle: number | undefined
   /** Bumped per segment, so a manifest arriving after a switch is dropped. */
   let generation = 0
+  /** Set by a jump; the next frame records where it landed. */
+  let jumped = false
 
   function frameLoop(): void {
     handle = requestAnimationFrame(frameLoop)
     if (!clock || !stream) return
     const wall = display.now()
     const sim = clock.tick(wall)
+    // Before the reveals, which the fog reads against it.
+    if (jumped) {
+      jumpedTo.value = sim
+      jumped = false
+    }
     stream.poll(serverNow(), sim).catch((caught: unknown) => {
       error.value = caught
     })
@@ -120,6 +132,7 @@ export function useSegmentPlayback(
     heldReveals.value = []
     outcome.value = undefined
     simTime.value = 0
+    jumpedTo.value = 0
     liveTime.value = 0
     heldUntil.value = 0
     mode.value = 'live'
@@ -147,6 +160,7 @@ export function useSegmentPlayback(
         startedAt,
         endsAt: played.endsAt ? new Date(played.endsAt).getTime() : undefined,
       })
+      jumped = true
       frameLoop()
     } catch (caught) {
       if (current === generation) error.value = caught
@@ -181,6 +195,7 @@ export function useSegmentPlayback(
     heldReveals,
     outcome,
     simTime,
+    jumpedTo,
     liveTime,
     heldUntil,
     mode,
@@ -190,6 +205,7 @@ export function useSegmentPlayback(
     seek(simSeconds: number): void {
       display.snap()
       clock?.seek(simSeconds)
+      jumped = true
       mode.value = clock?.mode ?? mode.value
     },
     setRate(next: PlaybackRate): void {
@@ -198,6 +214,7 @@ export function useSegmentPlayback(
     },
     goLive(): void {
       clock?.goLive()
+      jumped = true
       mode.value = 'live'
       paused.value = false
     },

@@ -10,6 +10,7 @@ import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { useSegmentPlayback } from '~/composables/useSegmentPlayback'
 import type { StopFog } from '~/composables/useStopFog'
+import { useStopFog } from '~/composables/useStopFog'
 import { SIGHT_INTERVAL_MS } from '~/composables/useCurrentSight'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
@@ -75,6 +76,7 @@ function playback() {
     heldReveals: shallowRef([]),
     outcome: shallowRef(),
     simTime: ref(0),
+    jumpedTo: ref(0),
     liveTime: ref(0),
     heldUntil: ref(0),
     mode: ref('live'),
@@ -245,6 +247,56 @@ describe('the terrain loading on the dashboard', () => {
     const shown = wrapper.findAll('[data-test=terrain-progress]')
     expect(shown).toHaveLength(1)
     expect(wrapper.find('[data-panel=map2d] [data-test=terrain-progress]').exists()).toBe(false)
+  })
+})
+
+describe('useStopFog as playback jumps', () => {
+  const size = 9
+  const grid = { heights: new Float32Array(size * size), width: size, height: size, cellSize: 1 }
+  const origin = { i: 0, j: 0 }
+
+  it('draws the reveals up to a jump settled at once, and fades those played into', async () => {
+    const reveals = shallowRef<{ t: number; vertices: Uint32Array }[]>([])
+    const settledUntil = ref(0)
+    let fog!: ReturnType<typeof useStopFog>
+    await mountSuspended(
+      defineComponent({
+        setup() {
+          fog = useStopFog({
+            seen: () => new Uint8Array(size * size),
+            reveals: () => reveals.value,
+            settledUntil: () => settledUntil.value,
+            ground: () => ({ grid, origin }),
+            eye: () => undefined,
+            sight: () => undefined,
+          })
+          return () => h('div')
+        },
+      }),
+    )
+    const times = () => fog.value.fade!.fog.revealedAt
+    // A seek to 60 s: what the drive revealed up to there is lifted and settled in the same tick.
+    settledUntil.value = 60
+    reveals.value = [
+      { t: 10, vertices: Uint32Array.of(1) },
+      { t: 50, vertices: Uint32Array.of(2) },
+    ]
+    await nextTick()
+    expect(fog.value.seen![1]).toBe(1)
+    expect(fog.value.seen![2]).toBe(1)
+    expect(times()[1]).toBe(-Infinity)
+    expect(times()[2]).toBe(-Infinity)
+
+    // Played on into a reveal at 61 s: it fades in.
+    reveals.value = [...reveals.value, { t: 61, vertices: Uint32Array.of(3) }]
+    await vi.waitFor(() => expect(fog.value.seen![3]).toBe(1))
+    expect(Number.isFinite(times()[3])).toBe(true)
+
+    // A seek back to 20 s drops the later reveals at once.
+    settledUntil.value = 20
+    reveals.value = reveals.value.slice(0, 1)
+    await nextTick()
+    expect(Array.from(fog.value.seen!.subarray(1, 4))).toEqual([1, 0, 0])
   })
 })
 

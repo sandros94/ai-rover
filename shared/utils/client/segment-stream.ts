@@ -70,7 +70,9 @@ export interface SegmentStream {
   readonly nextFetchAt: number | undefined
   /**
    * The keyframe at `simSeconds` interpolated over the window with the shared
-   * `interpolatePose`, clamped to its frames; undefined before the first window.
+   * `interpolatePose`, clamped to its frames; undefined before the first window. A window holds
+   * every reveal from the drive's start to its end, so {@link revealsUntil} is complete for any
+   * frame this gives.
    */
   frameAt(simSeconds: number): Float32Array | undefined
   /**

@@ -73,12 +73,13 @@ const playback = useSegmentPlayback(playing, {
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 
 /**
- * A drive in progress from the current stop lifts its reveals from the fog as it plays. Once
- * settled the stop's own mask decides: it holds an arrival's reveals and never a failure's.
+ * A drive in progress from the current stop lifts its reveals from the fog as it plays, read with
+ * its frame rather than at the instruments' rate. Once settled the stop's own mask decides: it
+ * holds an arrival's reveals and never a failure's.
  */
 const fogReveals = computed(() => {
   const p = playing.value
-  return p?.driving && p.fromStopId === props.state?.currentStop.id ? snapshot.value.reveals : []
+  return p?.driving && p.fromStopId === props.state?.currentStop.id ? playback.reveals.value : []
 })
 
 const ground = shallowRef<{
@@ -154,6 +155,8 @@ const track: MapTrack = {
   plan,
   driven,
   reveals: fogReveals,
+  settledUntil: playback.jumpedTo,
+  playing: computed(() => playing.value !== null),
   frame: playback.frame,
   t: computed(() => snapshot.value.t),
   motion,

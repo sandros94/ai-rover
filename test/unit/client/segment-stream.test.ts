@@ -106,6 +106,32 @@ describe('createSegmentStream over the recorded drive', () => {
     )
   })
 
+  it('gives no frame from a live slice in before its traces: frames come with every reveal up to them', async () => {
+    const wall = releaseAt(20) + 6000
+    const records = recordsFetch({ now: () => wall })
+    const traced = Promise.withResolvers<void>()
+    const slice = Promise.withResolvers<void>()
+    const client = createJourneyClient({
+      fetch: async (input: string) => {
+        if (input.includes('/traces/')) await traced.promise
+        const response = await records.fetch(input)
+        if (input.includes('/slices/')) slice.resolve()
+        return response
+      },
+    })
+    const stream = createSegmentStream({ client, manifest, startedAt })
+    const sim = liveAt(wall)
+    const polled = stream.poll(wall, sim)
+    await slice.promise
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(stream.frameAt(sim)).toBeUndefined()
+    expect(stream.revealsUntil(Infinity)).toEqual([])
+    traced.resolve()
+    await polled
+    expect(stream.frameAt(sim)).toEqual(interpolatePose(record.keyframes, sim))
+    expect(stream.revealsUntil(sim)).toEqual(record.reveals.filter((group) => group.t <= sim))
+  })
+
   it('opens a settled drive at its last slice alone, the outcome with it', async () => {
     const { stream, calls, poll } = setup({ endsAt: releaseAt(last) })
     await poll(releaseAt(last) + 3_600_000)
