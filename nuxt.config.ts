@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url'
+import { IMMUTABLE_CACHE } from './shared/utils/cache.ts'
 
 /**
  * Nuxt scans only the top-level files of `shared/utils`; a module folder with an index file is
@@ -17,6 +18,9 @@ export default defineNuxtConfig({
   modules: ['@nuxt/ui', '@netlify/nuxt', '@tresjs/nuxt', './modules/dev', './modules/auth'],
 
   css: ['~/assets/css/main.css'],
+
+  /** The rover's model files are named by their content (`scripts/rover-model.ts`). */
+  routeRules: { '/models/**': { headers: { 'cache-control': IMMUTABLE_CACHE } } },
 
   /** Brand marks Lucide does not carry, as `i-brand-<file>`. */
   icon: { customCollections: [{ prefix: 'brand', dir: './app/assets/icons' }] },

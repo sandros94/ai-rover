@@ -11,11 +11,12 @@ import {
   SILHOUETTE_VIEWS,
   silhouetteIoU,
 } from '~~/scripts/rover-model/silhouette'
+import MODEL_FILES from '~~/app/utils/rover-model-files.json'
 
 /** Tests run from the repository root. */
 const MODELS = {
-  full: 'public/models/rover/rover.glb',
-  ghost: 'public/models/rover/rover-ghost.glb',
+  full: `public/${MODEL_FILES.full}`,
+  ghost: `public/${MODEL_FILES['low-poly']}`,
 }
 
 let full: Document

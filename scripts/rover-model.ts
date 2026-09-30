@@ -2,10 +2,13 @@
  * Builds the articulated rover models under `public/models/rover/` from two NASA/JPL sources that
  * describe the same vehicle: NASA's Perseverance glTF (`NASA-3D-Resources`, pinned commit) gives
  * every part the rover shows, with its materials, textures and glass; JPL's `m2020-urdf-models`
- * (pinned commit) gives the joints the mobility system turns about. `rover.glb` is the rover at
- * full resolution; `rover-ghost.glb` the same parts on the same nodes in at most 2 000 triangles,
- * each part a few primitives fitted to its geometry (`rover-model/ghost-fit.ts`), untextured.
- * Deterministic for the pinned sources; re-running overwrites both.
+ * (pinned commit) gives the joints the mobility system turns about. `rover.<hash>.glb` is the rover
+ * at full resolution; `rover-low.<hash>.glb` the same parts on the same nodes in at most 2 000
+ * triangles, each part a few primitives fitted to its geometry (`rover-model/ghost-fit.ts`),
+ * untextured, drawn in a look (the stand-in, or a ghost). Each file is named by the first 8 hex
+ * of its content's SHA-256, and `app/utils/rover-model-files.json` lists them for the app.
+ * Deterministic for the pinned sources: re-running replaces both, and says whether each is
+ * byte-identical to the build it replaces.
  *
  * Why both. The URDF's meshes carry one plain material over a baked texture atlas, no glass, no
  * normals, and no link for the differential's cross-links; NASA's model has 47 physically based
@@ -34,7 +37,17 @@
  * five pivots lying on the URDF's joint axes, so each pivot's geometry is that joint's link.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -87,6 +100,10 @@ const NASA = {
   path: '3D Models/Mars 2020 Perseverance Rover/Mars 2020 Perseverance Rover.glb',
 }
 const OUT_DIR = fileURLToPath(new URL('../public/models/rover/', import.meta.url))
+/** Where `OUT_DIR` is served, relative to the app's base URL. */
+const MODELS_URL = 'models/rover/'
+/** The app's list of the model files, by `RoverModelFile`; written by this script. */
+const FILES_LIST = fileURLToPath(new URL('../app/utils/rover-model-files.json', import.meta.url))
 
 /**
  * Meshopt quantization bits. Positions are quantized over each mesh's bounds: 14 bits over the
@@ -99,9 +116,13 @@ const QUANTIZE = { position: 14, texcoord: 14, flatNormal: 8 }
 /** Opacity of NASA's transmissive glass (the camera lenses, the name plate's cover). */
 const GLASS_OPACITY = 0.3
 
+/**
+ * A model built: `name` is its file's stem, `file` its key in the app's list of model files
+ * (`RoverModelFile`).
+ */
 type Variant =
-  | { file: string; kind: 'full' }
-  | { file: string; kind: 'ghost'; fit: GhostFitOptions }
+  | { name: string; file: 'full'; kind: 'full' }
+  | { name: string; file: 'low-poly'; kind: 'ghost'; fit: GhostFitOptions }
 
 /** A URDF link kept as an app node, and the joint it turns about. */
 interface KeptLink {
@@ -197,8 +218,8 @@ const GHOST: GhostFitOptions = {
 const GHOST_WHEEL = { segments: 10, hubSegments: 6 }
 
 const VARIANTS: Variant[] = [
-  { file: 'rover.glb', kind: 'full' },
-  { file: 'rover-ghost.glb', kind: 'ghost', fit: GHOST },
+  { name: 'rover', file: 'full', kind: 'full' },
+  { name: 'rover-low', file: 'low-poly', kind: 'ghost', fit: GHOST },
 ]
 
 // ---------------------------------------------------------------------------------------------
@@ -437,6 +458,8 @@ interface Built {
   residuals: number[]
   /** File sizes in bytes: the shipped file, and the same before meshopt compression. */
   bytes: { meshopt: number; plain: number }
+  /** The shipped file, in the work directory. */
+  out: string
 }
 
 async function build(src: string, work: string, variant: Variant): Promise<Built> {
@@ -734,7 +757,7 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     primitives += count
     const call = calls.get(name)
     console.log(
-      `  ${variant.file} ${name}: ${count} primitives` +
+      `  ${variant.name} ${name}: ${count} primitives` +
         (call ? ` (${call.before} materials before baking)` : '') +
         `, ${meshTriangles} triangles`,
     )
@@ -775,10 +798,9 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     ],
   }
 
-  const plain = join(work, `assembled-${variant.file}`)
+  const plain = join(work, `assembled-${variant.name}.glb`)
   await io.write(plain, doc)
-  mkdirSync(OUT_DIR, { recursive: true })
-  const out = join(OUT_DIR, variant.file)
+  const out = join(work, `${variant.name}.glb`)
   cli(
     'meshopt',
     plain,
@@ -798,6 +820,7 @@ async function build(src: string, work: string, variant: Variant): Promise<Built
     baked,
     residuals: fit.residuals,
     bytes: { meshopt: statSync(out).size, plain: statSync(plain).size },
+    out,
   }
 }
 
@@ -1005,8 +1028,10 @@ mkdirSync(src, { recursive: true })
 const work = mkdtempSync(join(src, 'build-'))
 await ensureSources(src)
 
+const built: { variant: Variant; out: string }[] = []
 for (const variant of VARIANTS) {
-  const { triangles, primitives, baked, residuals, bytes } = await build(src, work, variant)
+  const { triangles, primitives, baked, residuals, bytes, out } = await build(src, work, variant)
+  built.push({ variant, out })
   if (variant.kind === 'full') {
     for (const [joint, value] of baked) {
       const degrees = ((value * 180) / Math.PI).toFixed(3)
@@ -1019,7 +1044,34 @@ for (const variant of VARIANTS) {
     )
   }
   console.log(
-    `${variant.file}: ${triangles} triangles, ${primitives} primitives, ` +
+    `${variant.name}: ${triangles} triangles, ${primitives} primitives, ` +
       `${bytes.meshopt} bytes (${bytes.plain} before meshopt)`,
   )
 }
+
+// The files are named by their content, so a browser and the CDN keep each one for good; the
+// app reads the names from `FILES_LIST`. The previous build's files go.
+const previous = existsSync(FILES_LIST)
+  ? (JSON.parse(readFileSync(FILES_LIST, 'utf8')) as Record<string, string>)
+  : {}
+mkdirSync(OUT_DIR, { recursive: true })
+for (const file of readdirSync(OUT_DIR)) if (file.endsWith('.glb')) rmSync(join(OUT_DIR, file))
+const files: Record<string, string> = {}
+for (const { variant, out } of built) {
+  const bytes = readFileSync(out)
+  const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 8)
+  const name = `${variant.name}.${hash}.glb`
+  writeFileSync(join(OUT_DIR, name), bytes)
+  files[variant.file] = `${MODELS_URL}${name}`
+  // The build is deterministic for the pinned sources: a rebuild must give the same bytes.
+  const before = previous[variant.file]
+  console.log(
+    `${name}: ` +
+      (before === files[variant.file]
+        ? 'byte-identical to the previous build'
+        : before
+          ? `differs from the previous build (${before.slice(MODELS_URL.length)})`
+          : 'no previous build to compare'),
+  )
+}
+writeFileSync(FILES_LIST, `${JSON.stringify(files, null, 2)}\n`)
