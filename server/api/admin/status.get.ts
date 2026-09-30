@@ -1,3 +1,3 @@
-import { defineAdminStatusHandler } from '../../utils/admin/seed'
+import { defineAdminStatusHandler } from '../../utils/admin/access'
 
 export default defineAdminStatusHandler()

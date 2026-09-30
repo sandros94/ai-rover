@@ -9,9 +9,10 @@ import { ARM_JOINTS, ARM_STOWED } from '#shared/utils/rover'
 import { loadRoverModel } from '~/utils/rover-model'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import RoverJoints3D from '~~/modules/dev/runtime/app/components/playground/RoverJoints3D.vue'
+import MODEL_FILES from '~~/app/utils/rover-model-files.json'
 
 /** Tests run from the repository root. */
-const MODEL = join(process.cwd(), 'public/models/rover/rover.glb')
+const MODEL = join(process.cwd(), 'public', MODEL_FILES.full)
 
 // The page's scene needs WebGL; the page itself only needs the model's joints.
 vi.mock('~~/modules/dev/runtime/app/components/playground/RoverJointsScene.vue', async () => {
@@ -22,7 +23,7 @@ vi.mock('~~/modules/dev/runtime/app/components/playground/RoverJointsScene.vue',
   }
 })
 
-/** `rover.glb` from the public folder, as the page's fetch would get it. */
+/** The full model from the public folder, as the page's fetch would get it. */
 function serveModel(): void {
   const bytes = readFileSync(MODEL)
   vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes)))

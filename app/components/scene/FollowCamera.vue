@@ -4,6 +4,7 @@ import type { PerspectiveCamera } from 'three'
 import { Vector3 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { easeFocus } from '#shared/utils/client'
+import type { CameraPose } from '#shared/utils/client/scene'
 
 const props = withDefaults(
   defineProps<{
@@ -18,9 +19,16 @@ const props = withDefaults(
     offset?: [number, number, number]
     minDistance?: number
     maxDistance?: number
+    /** Whether the camera's pose is reported (`pose`). */
+    report?: boolean
   }>(),
-  { targetKey: 0, offset: () => [-9, -9, 6], minDistance: 3, maxDistance: 160 },
+  { targetKey: 0, offset: () => [-9, -9, 6], minDistance: 3, maxDistance: 160, report: false },
 )
+
+const emit = defineEmits<{
+  /** The camera's pose, once when reporting starts and then whenever a frame moved it. */
+  pose: [pose: CameraPose]
+}>()
 
 /** The scene is z-up like the terrain data, so no axis swap anywhere. */
 const UP = new Vector3(0, 0, 1)
@@ -77,7 +85,44 @@ onBeforeRender(() => {
   controls.target.copy(goal)
   // `update` reports a view that moved; damping left below its threshold is not drawn.
   if (controls.update() || carried) invalidate()
+  if (props.report) reportPose(camera.value)
 })
+
+/** The pose last reported, as the numbers compared; none until reporting starts. */
+let reported: number[] | undefined
+const viewUp = new Vector3()
+watch(
+  () => props.report,
+  () => {
+    reported = undefined
+  },
+)
+
+/**
+ * Reports the camera's pose when it differs from the one last reported: at most once a frame,
+ * and never asking for a frame itself, so an idle scene stays idle.
+ */
+function reportPose(cam: PerspectiveCamera): void {
+  viewUp.set(0, 1, 0).applyQuaternion(cam.quaternion)
+  const { position } = cam
+  const target = controls!.target
+  const numbers = [
+    ...position.toArray(),
+    ...target.toArray(),
+    ...viewUp.toArray(),
+    cam.fov,
+    cam.aspect,
+  ]
+  if (reported && numbers.every((n, k) => n === reported![k])) return
+  reported = numbers
+  emit('pose', {
+    position: { x: position.x, y: position.y, z: position.z },
+    target: { x: target.x, y: target.y, z: target.z },
+    fovDeg: cam.fov,
+    aspect: cam.aspect,
+    up: { x: viewUp.x, y: viewUp.y, z: viewUp.z },
+  })
+}
 
 onBeforeUnmount(() => controls?.dispose())
 </script>

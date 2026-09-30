@@ -24,6 +24,7 @@ import { forced, stopShortAt } from './forced'
 import {
   at,
   createTestDb,
+  endMissions,
   fakeJev,
   memoryStore,
   MINUTE,
@@ -46,6 +47,7 @@ afterAll(() => close())
 
 async function landed(judge?: Parameters<typeof fakeJev>[0]) {
   const { store, blobs } = memoryStore()
+  await endMissions(db)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',

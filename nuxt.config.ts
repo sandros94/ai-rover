@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url'
+import { IMMUTABLE_CACHE } from './shared/utils/cache.ts'
 
 /**
  * Nuxt scans only the top-level files of `shared/utils`; a module folder with an index file is
@@ -18,6 +19,9 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  /** The rover's model files are named by their content (`scripts/rover-model.ts`). */
+  routeRules: { '/models/**': { headers: { 'cache-control': IMMUTABLE_CACHE } } },
+
   /** Brand marks Lucide does not carry, as `i-brand-<file>`. */
   icon: { customCollections: [{ prefix: 'brand', dir: './app/assets/icons' }] },
 
@@ -29,8 +33,11 @@ export default defineNuxtConfig({
      * or a random secret of at least 32 characters the key is derived from.
      */
     sessionKey: '',
-    /** Unlocks `/admin` and `POST /api/admin/seed`, from `NUXT_ADMIN_TOKEN`; empty disables them. */
-    adminToken: '',
+    /**
+     * The identities that may use `/admin`, from `NUXT_ADMIN_IDENTITIES`: a comma list of
+     * `provider:subject` keys; empty allows nobody.
+     */
+    adminIdentities: '',
     oauth: {
       /** Comma list of origins sign-in may redirect to, from `NUXT_OAUTH_ORIGINS`. */
       origins: '',

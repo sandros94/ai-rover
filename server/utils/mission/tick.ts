@@ -394,8 +394,8 @@ async function prepareSettlement(
  * anchor moves there too and its open submissions take the assessments prepared from there.
  * Failed: the death is recorded, the round beside the drive is voided and a fresh one opens at the
  * stop the rover retries from. Without a preparation for this drive over the mask its from-stop
- * holds now (a repair may have replaced it since) nothing is settled; the next tick prepares
- * again. The stop takes its index here, under the lock.
+ * holds now nothing is settled; the next tick prepares again. The stop takes its index here,
+ * under the lock.
  */
 async function settle(
   tx: DB,

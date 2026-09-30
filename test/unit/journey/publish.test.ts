@@ -45,11 +45,13 @@ describe('putAll', () => {
   const entries = (n: number) =>
     Array.from({ length: n }, (_, k) => ({ key: `k/${k}`, bytes, contentType: 'x/y' }))
 
-  it(`never exceeds ${PUT_CONCURRENCY} writes in flight, overlaps them, and writes every entry`, async () => {
+  it(`keeps exactly ${PUT_CONCURRENCY} writes in flight while it can, and writes every entry`, async () => {
     const blobs = new CountingBlobs()
-    const result = await putAll(createJourneyStore({ store: blobs }), entries(50))
-    expect(blobs.maxInFlight).toBeLessThanOrEqual(PUT_CONCURRENCY)
-    expect(blobs.maxInFlight).toBeGreaterThan(1)
+    const result = await blobs.drive(
+      putAll(createJourneyStore({ store: blobs }), entries(50)),
+      PUT_CONCURRENCY,
+    )
+    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
     expect(result.written.map((w) => w.key)).toEqual(entries(50).map((e) => e.key))
     expect(new Set(blobs.writes).size).toBe(50)
   })
@@ -245,12 +247,18 @@ describe('publishSegment', () => {
     }
   })
 
-  it(`keeps at most ${PUT_CONCURRENCY} slices in flight`, async () => {
+  it(`keeps exactly ${PUT_CONCURRENCY} slices in flight while it can`, async () => {
     expect(slices.length).toBeGreaterThan(PUT_CONCURRENCY)
     const blobs = new CountingBlobs()
-    await publishSegment(createJourneyStore({ store: blobs }), { segment, segmentId: 'seg-1' })
-    expect(blobs.maxInFlight).toBeLessThanOrEqual(PUT_CONCURRENCY)
-    expect(blobs.maxInFlight).toBeGreaterThan(1)
+    await blobs.drive(
+      publishSegment(createJourneyStore({ store: blobs }), {
+        segment,
+        segmentId: 'seg-1',
+      }),
+      PUT_CONCURRENCY,
+    )
+    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
+    expect(new Set(blobs.writes).size).toBe(2 * slices.length + 1)
   })
 
   it('run again after being cut short, writes only the missing blobs, then the manifest', async () => {

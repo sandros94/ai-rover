@@ -2,6 +2,7 @@
  * Machine-readable reason attached to every {@link LifecycleError}.
  *
  * - `NO_ACTIVE_MISSION`: no mission is active, so there is nothing to act on.
+ * - `MISSION_ACTIVE`: a mission is active, and another lands only once none is.
  * - `NO_OPEN_ROUND`: the mission has no open round to submit to (it has ended).
  * - `MISSION_PAUSED`: an operator paused the mission; the message is theirs. Submissions and
  *   likes wait until it resumes.
@@ -13,6 +14,7 @@
  */
 export type LifecycleErrorCode =
   | 'NO_ACTIVE_MISSION'
+  | 'MISSION_ACTIVE'
   | 'NO_OPEN_ROUND'
   | 'MISSION_PAUSED'
   | 'NOT_PUBLISHED'

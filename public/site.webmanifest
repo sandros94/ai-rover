@@ -1,0 +1,20 @@
+{
+  "name": "AI Rover",
+  "short_name": "AI Rover",
+  "description": "A community-steered autonomous rover on procedurally generated Martian terrain.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#171717",
+  "background_color": "#171717",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    {
+      "src": "/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

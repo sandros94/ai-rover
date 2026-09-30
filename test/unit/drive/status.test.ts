@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DriveEvent } from '#shared/utils/drive'
-import { statusAt, statusInForce, statusRuns } from '#shared/utils/drive'
+import { endingOf, statusAt, statusInForce, statusRuns } from '#shared/utils/drive'
 
 const ev = (t: number, type: DriveEvent['type'], details?: DriveEvent['details']): DriveEvent => ({
   t,
@@ -121,5 +121,15 @@ describe('statusInForce and a track begun mid-drive', () => {
         expect(statusAt(rest, t, since), `cut ${cut}, t ${t}`).toEqual(statusAt(events, t))
       }
     }
+  })
+})
+
+describe('endingOf', () => {
+  it('names the terminal event of a stopped run, and nothing for any other run', () => {
+    const events = [ev(0, 'start'), ev(40, 'slip', { slip: 0.7 }), ev(40, 'stuck')]
+    expect(endingOf(events, statusAt(events, 50))).toBe('stuck')
+    expect(endingOf(events, statusAt(events, 20))).toBeUndefined()
+    // The ending lies before the events given: the run in force says stopped, nothing says why.
+    expect(endingOf([], { t: 40, status: 'stopped' })).toBeUndefined()
   })
 })

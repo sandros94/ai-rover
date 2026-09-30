@@ -19,6 +19,7 @@ import {
 import {
   at,
   createTestDb,
+  endMissions,
   dbErrorOf,
   fakeJev,
   memoryStore,
@@ -37,6 +38,7 @@ afterAll(() => close())
 
 async function landed(judge?: Parameters<typeof fakeJev>[0]) {
   const { store } = memoryStore()
+  await endMissions(db)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',
@@ -108,6 +110,7 @@ describe('submitGoal', () => {
     // A low slope limit leaves blocked ground next to pathable ground near the stop.
     const world = { slopeLimitDeg: 6 }
     const { store } = memoryStore()
+    await endMissions(db)
     const created = await createMissionAtStop(db, {
       store,
       seed: 'steep',
@@ -172,6 +175,7 @@ describe('submitGoal', () => {
 
   it('takes a goal on ground the rover has not seen at the vertex picked, planned through the fog', async () => {
     const { store } = memoryStore()
+    await endMissions(db)
     const created = await createMissionAtStop(db, {
       store,
       seed: 'fogged-goal',

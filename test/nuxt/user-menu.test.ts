@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { useRouter, useState } from '#imports'
+import { clearNuxtData, useRouter, useState } from '#imports'
 import { UApp } from '#components'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import UserMenu from '~/components/UserMenu.vue'
@@ -15,6 +15,14 @@ registerEndpoint('/api/_auth/session', {
     signedOut++
     return { loggedOut: true }
   },
+})
+
+/** Whether the status says the signed-in user is an admin, and who asked. */
+let admin = false
+let asked = 0
+registerEndpoint('/api/admin/status', () => {
+  asked++
+  return admin ? { admin: true, missionActive: true } : { admin: false }
 })
 
 const mounted: { unmount(): void }[] = []
@@ -36,7 +44,10 @@ async function open(wrapper: Awaited<ReturnType<typeof mount>>) {
 
 afterEach(() => {
   useState('rover-user-session').value = {}
+  clearNuxtData('admin-status')
   signedOut = 0
+  admin = false
+  asked = 0
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
 })
 
@@ -45,6 +56,9 @@ describe('user menu', () => {
     const wrapper = await mount()
     expect(wrapper.find('[data-test=user-menu]').exists()).toBe(false)
     expect(wrapper.find('a[href="/login"]').exists()).toBe(true)
+    await flushPromises()
+    expect(asked).toBe(0)
+    expect(wrapper.find('[data-test=visitor-settings]').attributes('href')).toBe('/settings')
   })
 
   it('opens on the avatar with the profile, settings and sign-out', async () => {
@@ -62,6 +76,24 @@ describe('user menu', () => {
     ])
     expect(items[0]!.getAttribute('href')).toBe(`/u/${ID}`)
     expect(items[1]!.getAttribute('href')).toBe('/settings')
+  })
+
+  it('offers the admin page only to an admin', async () => {
+    useState('rover-user-session').value = {
+      user: { id: ID, displayName: 'Ada', providers: ['github'] },
+      loggedInAt: 1,
+    }
+    admin = true
+    const wrapper = await mount()
+    await flushPromises()
+    const items = await open(wrapper)
+    expect(items.map((item) => item.textContent?.trim())).toEqual([
+      'Profile',
+      'Settings',
+      'Admin',
+      'Sign out',
+    ])
+    expect(items[2]!.getAttribute('href')).toBe('/admin')
   })
 
   it('signs out and goes home', async () => {

@@ -19,9 +19,11 @@ const OPTIONS = [
       color="neutral"
       :variant="view === option.value ? 'solid' : 'outline'"
       :aria-pressed="view === option.value"
+      :aria-label="option.label"
       @click="view = option.value"
     >
-      {{ option.label }}
+      <!-- Icons alone on a phone, where the top bar also holds the rover's activity. -->
+      <span class="hidden sm:inline">{{ option.label }}</span>
     </UButton>
   </UFieldGroup>
 </template>

@@ -70,6 +70,8 @@ const props = withDefaults(
      * place of the full one, metres; `null` never. Not for a ghost.
      */
     lodDistanceM?: number | null
+    /** Whether the rover casts a shadow; without, neither of its models is a caster. */
+    shadows?: boolean
   }>(),
   {
     ghost: false,
@@ -79,6 +81,7 @@ const props = withDefaults(
     environment: null,
     joints: undefined,
     lodDistanceM: null,
+    shadows: true,
   },
 )
 
@@ -249,20 +252,22 @@ const LOD_MARGIN = 0.1
  * Draws the rover's full model once it is in and the camera is within `lodDistanceM`, else the
  * low-poly model in the stand-in look. While the full model is drawn the low-poly one stays as its
  * shadow caster, and the full model casts none; without a low-poly model the full one casts its
- * own shadow and is drawn at any distance. The lamp hangs from whichever is drawn: a light under
- * a hidden node is dark.
+ * own shadow and is drawn at any distance. Without `shadows` nothing casts, and the low-poly model
+ * is hidden while the full one is drawn. The lamp hangs from whichever is drawn: a light under a
+ * hidden node is dark.
  */
 function showRover(): void {
   const detailed = !!full && !(far && base)
   if (full) {
     full.object.visible = detailed
-    const casts = !base
+    const casts = !base && props.shadows
     full.object.traverse((child) => (child.castShadow = casts))
   }
   if (base) {
-    base.object.visible = true
+    base.object.visible = !detailed || props.shadows
     if (detailed) applyShadowCaster(base.object)
     else applyRoverLook(base.object, 'standin')
+    if (!props.shadows) base.object.traverse((child) => (child.castShadow = false))
   }
   const lit = detailed ? full : base
   if (lit) {
@@ -405,6 +410,14 @@ watch(
   (environment) => {
     if (full && !props.ghost) applyEnvironment(full.object, environment)
     invalidate()
+  },
+)
+watch(
+  () => props.shadows,
+  () => {
+    if (props.ghost || !(base || full)) return
+    stopFade()
+    showRover()
   },
 )
 pose(props.frame)

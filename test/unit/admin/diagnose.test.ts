@@ -3,18 +3,18 @@ import { H3 } from 'nitro/h3'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import type { AdminContext, AdminSettings } from '#server/utils/admin/access'
+import { parseAdminAllowlist } from '#server/utils/admin/access'
 import type { Diagnosis } from '#shared/utils/admin'
 import { defineAdminDiagnoseHandlerWith, diagnoseLocks } from '#server/utils/admin/diagnose'
 import { createJourneyStore } from '#server/utils/journey/store'
 import { MIGRATIONS_DIR } from '../db/helpers'
 import { MemoryBlobs } from '../journey/helpers'
-import { createTestDb, memoryStore, users } from '../mission/helpers'
+import { createTestDb, memoryStore } from '../mission/helpers'
+import { adminAndVisitor, adminContext, as, ORIGIN } from './helpers'
 import { readdir } from 'node:fs/promises'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
-const TOKEN = 'operator-token-for-tests-0123456789'
-const ORIGIN = 'https://rover.test'
 const SETTINGS: AdminSettings = {
   sessionKey: 'a-session-secret-of-at-least-32-characters',
   typesafeToken: '',
@@ -23,33 +23,37 @@ const SETTINGS: AdminSettings = {
 
 let db: DB
 let close: () => Promise<void>
-beforeAll(async () => ({ db, close } = await createTestDb()))
+let admin: string
+let visitor: string
+beforeAll(async () => {
+  ;({ db, close } = await createTestDb())
+  const accounts = await adminAndVisitor(db)
+  admin = accounts.admin.id
+  visitor = accounts.visitor.id
+})
 afterAll(() => close())
 
-function appWith(context: Partial<AdminContext> & { token?: () => string }) {
+function appWith(context: Partial<AdminContext> = {}) {
   const { store } = memoryStore()
   return new H3().post(
     '/api/admin/diagnose',
     defineAdminDiagnoseHandlerWith({
-      token: () => TOKEN,
-      db: () => db,
-      store: () => store,
+      ...adminContext(
+        () => db,
+        () => store,
+      ),
       settings: () => SETTINGS,
       ...context,
     }),
   )
 }
 
-function diagnose(app: H3, body: unknown) {
-  return app.request(`${ORIGIN}/api/admin/diagnose`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+function diagnose(app: H3, userId?: string) {
+  return app.request(`${ORIGIN}/api/admin/diagnose`, { method: 'POST', headers: as(userId) })
 }
 
 async function diagnosis(app: H3): Promise<Diagnosis> {
-  const answer = await diagnose(app, { token: TOKEN })
+  const answer = await diagnose(app, admin)
   expect(answer.status).toBe(200)
   expect(answer.headers.get('cache-control')).toContain('no-store')
   return answer.json()
@@ -71,21 +75,18 @@ function failingDb(): DB {
 }
 
 describe('POST /api/admin/diagnose', () => {
-  it('answers 404 when no admin token is configured, whatever the body', async () => {
-    for (const body of [{ token: '' }, { token: TOKEN }, {}]) {
-      expect((await diagnose(appWith({ token: () => '' }), body)).status).toBe(404)
+  it('answers 404 to a visitor signed out or not listed, and to everyone with no allowlist', async () => {
+    const app = appWith()
+    for (const userId of [undefined, visitor]) {
+      const answer = await diagnose(app, userId)
+      expect(answer.status).toBe(404)
+      expect(answer.headers.get('cache-control')).toContain('no-store')
     }
-  })
-
-  it('answers 403 when the token is missing or does not match', async () => {
-    const app = appWith({})
-    for (const body of [{}, { token: '' }, { token: `${TOKEN}x` }, { token: 42 }, null]) {
-      expect((await diagnose(app, body)).status).toBe(403)
-    }
+    const nobody = appWith({ allowlist: () => parseAdminAllowlist('') })
+    expect((await diagnose(nobody, admin)).status).toBe(404)
   })
 
   it('reports applied migrations, app table counts, blob keys and runtime settings', async () => {
-    await users(db, 'Ada', 'Grace')
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     await store.putJson('missions/m-1/stops/0.json', {})
@@ -101,7 +102,7 @@ describe('POST /api/admin/diagnose', () => {
       ok: true,
       ms: expect.any(Number),
       migrations,
-      tables: expect.objectContaining({ user_account: 2, mission: 0, ai_judgment: 0 }),
+      tables: expect.objectContaining({ user_account: 2, user_identity: 3, mission: 0 }),
     })
     expect(Object.keys(answer.database.tables)).toHaveLength(11)
     expect(answer.blobs).toEqual({ ok: true, ms: expect.any(Number), keys: 2 })

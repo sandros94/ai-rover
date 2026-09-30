@@ -64,6 +64,9 @@ const time = useThrottled(() => playback.time.value, INSTRUMENT_HZ)
 const { manifest, mask, sampler, loaded, total, ground, terrain, revealed, error } =
   playback.terrain
 const view = useMapView()
+/** The ground the scene's camera shows, drawn on the floating 2D map. */
+const cone = useViewCone(view)
+const { report: reportCamera, footprint: viewCone } = cone
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 const cellSize = computed(() => terrain.value?.grid.cellSize ?? 1)
@@ -304,7 +307,12 @@ const instrumentProps = computed(() => ({
       </UButton>
     </template>
     <template #scene>
-      <LiveStage :stage="readStage" :view="view" />
+      <LiveStage
+        :stage="readStage"
+        :view="view"
+        :report-camera="reportCamera"
+        @camera="cone.onCamera"
+      />
     </template>
     <template #top>
       <Transition
@@ -338,7 +346,14 @@ const instrumentProps = computed(() => ({
       />
     </template>
     <template #panel-map2d>
-      <LiveStage :stage="readStage" view="2d" :progress="false" />
+      <LiveStage
+        :stage="readStage"
+        view="2d"
+        :progress="false"
+        :view-cone="viewCone"
+        @vue:mounted="cone.shown"
+        @vue:unmounted="cone.hidden"
+      />
     </template>
     <template #panel-segment>
       <section :key="drive.id" class="space-y-2 p-3" data-test="segment" aria-label="This segment">

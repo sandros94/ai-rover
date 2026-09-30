@@ -1,11 +1,36 @@
 <script setup lang="ts">
-import type { Diagnosis, StopRepairEntry, StopRepairReport } from '#shared/utils/admin'
+import type { AccountView } from '#shared/utils/account'
+import type { AdminStatus, Diagnosis } from '#shared/utils/admin'
 
-const { data: status } = await useFetch('/api/admin/status', {
-  default: () => ({ configured: false }),
+const route = useRoute()
+const { loggedIn } = useUserSession()
+/** The not-found an unknown page answers, so the page does not exist to anyone but an admin. */
+const notFound = () =>
+  createError({
+    status: 404,
+    statusText: `Page not found: ${route.fullPath}`,
+    data: { path: route.fullPath },
+    fatal: true,
+  })
+if (!loggedIn.value) throw notFound()
+
+const { data: status, refresh: refreshStatus } = await useFetch('/api/admin/status', {
+  default: (): AdminStatus => ({ admin: false }),
+})
+/** Whether a mission is active, while another cannot land. */
+const missionActive = computed(() => status.value.admin && status.value.missionActive)
+/** A signed-in visitor who is no admin: their own identity keys, to add to the allowlist. */
+const { data: account } = await useFetch<AccountView>('/api/_auth/account', {
+  immediate: !status.value.admin,
+})
+const identityKeys = computed(
+  () => account.value?.identities.map(({ provider, subject }) => `${provider}:${subject}`) ?? [],
+)
+watch(loggedIn, (signedIn) => {
+  if (!signedIn) showError(notFound())
 })
 
-const state = reactive({ token: '', seed: 'mars', x: 0, y: 0 })
+const state = reactive({ seed: 'mars', x: 0, y: 0 })
 const pending = ref(false)
 /** What a landing answers, named here: inferring it from the route exceeds the checker's depth. */
 interface Landed {
@@ -22,8 +47,9 @@ async function seed() {
   landed.value = null
   try {
     landed.value = await $fetch<Landed>('/api/admin/seed', { method: 'POST', body: state })
+    await refreshStatus()
   } catch (caught) {
-    error.value = { title: 'Not seeded', message: requestErrorOf(caught).message }
+    error.value = { title: 'Not landed', message: requestErrorOf(caught).message }
   } finally {
     pending.value = false
   }
@@ -37,58 +63,12 @@ async function diagnose() {
   error.value = null
   diagnosis.value = null
   try {
-    diagnosis.value = await $fetch<Diagnosis>('/api/admin/diagnose', {
-      method: 'POST',
-      body: { token: state.token },
-    })
+    diagnosis.value = await $fetch<Diagnosis>('/api/admin/diagnose', { method: 'POST' })
   } catch (caught) {
     error.value = { title: 'No diagnostics', message: requestErrorOf(caught).message }
   } finally {
     diagnosing.value = false
   }
-}
-
-/** The stops as the last check or repair found them, with whether it applied. */
-const repair = ref<{ apply: boolean; stops: StopRepairEntry[] } | null>(null)
-const repairing = ref<'check' | 'apply' | null>(null)
-const staleStops = computed(() => repair.value?.stops.filter((stop) => stop.stale) ?? [])
-
-/**
- * Walks every stop through `POST /api/admin/repair-stops`, one bounded call after another until
- * the answer carries no cursor. A dry run first, so the report is read before anything changes.
- */
-async function repairStops(apply: boolean) {
-  repairing.value = apply ? 'apply' : 'check'
-  error.value = null
-  repair.value = null
-  const stops: StopRepairEntry[] = []
-  try {
-    let cursor: StopRepairReport['cursor'] | undefined
-    do {
-      const report: StopRepairReport = await $fetch<StopRepairReport>('/api/admin/repair-stops', {
-        method: 'POST',
-        body: { token: state.token, apply, ...(cursor && { cursor }) },
-      })
-      stops.push(...report.stops)
-      cursor = report.cursor
-    } while (cursor)
-    repair.value = { apply, stops }
-  } catch (caught) {
-    error.value = {
-      title: apply ? 'Not repaired' : 'Not checked',
-      message: requestErrorOf(caught).message,
-    }
-    if (stops.length) repair.value = { apply, stops }
-  } finally {
-    repairing.value = null
-  }
-}
-
-/** One line per stop: its mask as stored against the one computed again, and its disk pack. */
-function stopLine(stop: StopRepairEntry): string {
-  const pack =
-    stop.packMatches === null ? 'no pack' : stop.packMatches ? 'pack matches' : 'pack differs'
-  return `${stop.stored} vertices stored, ${stop.recomputed} computed, ${stop.missing} missing, ${stop.extra} extra; ${pack}`
 }
 
 const yesNo = (value: boolean) => (value ? 'yes' : 'no')
@@ -175,51 +155,56 @@ const sections = computed(() => {
 </script>
 
 <template>
-  <UContainer class="max-w-sm py-16">
+  <UContainer v-if="!status.admin" class="max-w-sm py-16 text-center" data-test="admin-not-found">
+    <p class="text-6xl font-semibold">404</p>
+    <p class="mt-2 text-muted">Page not found: {{ route.fullPath }}</p>
+    <div v-if="identityKeys.length" class="mt-10 space-y-2 text-left" data-test="admin-keys">
+      <p class="text-sm text-muted">Your identity keys:</p>
+      <ul class="space-y-1">
+        <li v-for="key in identityKeys" :key="key">
+          <code class="text-sm break-all select-all">{{ key }}</code>
+        </li>
+      </ul>
+    </div>
+  </UContainer>
+  <UContainer v-else class="max-w-sm py-16">
     <UCard>
       <template #header>
         <h1 class="text-lg font-semibold">Mission control</h1>
       </template>
 
-      <p v-if="!status.configured" data-test="admin-unconfigured" class="text-sm text-muted">
-        Administration is not configured on this server.
-      </p>
+      <div class="flex flex-col gap-4">
+        <UButton
+          type="button"
+          data-test="admin-diagnose"
+          color="neutral"
+          variant="outline"
+          :loading="diagnosing"
+          block
+          @click="diagnose"
+        >
+          Run diagnostics
+        </UButton>
 
-      <UForm v-else :state="state" class="flex flex-col gap-4" @submit="seed">
-        <UFormField label="Admin token" name="token" required data-test="admin-token">
-          <UInput
-            v-model="state.token"
-            type="password"
-            autocomplete="current-password"
-            class="w-full"
-          />
-        </UFormField>
-        <UFormField label="World seed" name="seed" data-test="admin-seed">
-          <UInput v-model="state.seed" autocapitalize="off" class="w-full" />
-        </UFormField>
-        <UFormField label="Landing x (m)" name="x" data-test="admin-x">
-          <UInputNumber v-model="state.x" class="w-full" />
-        </UFormField>
-        <UFormField label="Landing y (m)" name="y" data-test="admin-y">
-          <UInputNumber v-model="state.y" class="w-full" />
-        </UFormField>
-
-        <div class="flex gap-2">
-          <UButton type="submit" :loading="pending" :disabled="!state.token" class="flex-1" block>
-            Seed the mission
-          </UButton>
-          <UButton
-            type="button"
-            data-test="admin-diagnose"
-            color="neutral"
-            variant="outline"
-            :loading="diagnosing"
-            :disabled="!state.token"
-            @click="diagnose"
-          >
-            Run diagnostics
-          </UButton>
-        </div>
+        <UForm
+          v-if="!missionActive"
+          :state="state"
+          class="flex flex-col gap-4"
+          data-test="admin-seed-form"
+          @submit="seed"
+        >
+          <p class="text-sm text-muted">No mission is active: land one.</p>
+          <UFormField label="World seed" name="seed" data-test="admin-seed">
+            <UInput v-model="state.seed" autocapitalize="off" class="w-full" />
+          </UFormField>
+          <UFormField label="Landing x (m)" name="x" data-test="admin-x">
+            <UInputNumber v-model="state.x" class="w-full" />
+          </UFormField>
+          <UFormField label="Landing y (m)" name="y" data-test="admin-y">
+            <UInputNumber v-model="state.y" class="w-full" />
+          </UFormField>
+          <UButton type="submit" :loading="pending" block>Land the mission</UButton>
+        </UForm>
 
         <UAlert
           v-if="landed"
@@ -237,81 +222,6 @@ const sections = computed(() => {
           :title="error.title"
           :description="error.message"
         />
-
-        <div class="flex flex-col gap-2" data-test="admin-stops">
-          <p class="text-sm text-muted">
-            Checks every stop's revealed mask against the one computed again from the landing and
-            its disk pack against its manifest, and points the wrong ones at corrected objects.
-          </p>
-          <div class="flex gap-2">
-            <UButton
-              type="button"
-              data-test="admin-check-stops"
-              color="neutral"
-              variant="outline"
-              :loading="repairing === 'check'"
-              :disabled="!state.token || repairing !== null"
-              class="flex-1"
-              block
-              @click="repairStops(false)"
-            >
-              Check stops
-            </UButton>
-            <UButton
-              type="button"
-              data-test="admin-repair-stops"
-              color="warning"
-              :loading="repairing === 'apply'"
-              :disabled="
-                !state.token ||
-                repairing !== null ||
-                !repair ||
-                repair.apply ||
-                staleStops.length === 0
-              "
-              class="flex-1"
-              block
-              @click="repairStops(true)"
-            >
-              Repair {{ staleStops.length }} {{ staleStops.length === 1 ? 'stop' : 'stops' }}
-            </UButton>
-          </div>
-          <template v-if="repair">
-            <p class="text-sm" data-test="admin-stops-summary">
-              <template v-if="repair.apply">
-                Repaired {{ repair.stops.filter((stop) => stop.applied).length }} of
-                {{ repair.stops.length }} stops.
-              </template>
-              <template v-else>
-                {{ staleStops.length }} of {{ repair.stops.length }} stops need repair.
-              </template>
-              Rounds already planned over a stale mask are left as they are.
-            </p>
-            <ul class="flex flex-col gap-2 text-sm">
-              <li
-                v-for="stop in repair.stops"
-                :key="stop.stopId"
-                :data-test="`admin-stop-${stop.index}`"
-                :data-stale="String(stop.stale)"
-                class="flex gap-2"
-              >
-                <UIcon
-                  :name="stop.stale ? 'i-lucide-circle-alert' : 'i-lucide-circle-check'"
-                  :class="stop.stale ? 'text-warning' : 'text-success'"
-                  class="mt-0.5 size-4 shrink-0"
-                />
-                <div class="min-w-0">
-                  <p class="font-medium">
-                    Stop {{ stop.index }}
-                    <span v-if="stop.applied" class="font-normal text-success">· repaired</span>
-                    <span v-else-if="stop.stale" class="font-normal text-warning">· stale</span>
-                  </p>
-                  <p class="break-words text-muted tabular-nums">{{ stopLine(stop) }}</p>
-                </div>
-              </li>
-            </ul>
-          </template>
-        </div>
 
         <ul v-if="sections.length" class="flex flex-col gap-3 text-sm">
           <li
@@ -339,7 +249,7 @@ const sections = computed(() => {
             </div>
           </li>
         </ul>
-      </UForm>
+      </div>
     </UCard>
   </UContainer>
 </template>

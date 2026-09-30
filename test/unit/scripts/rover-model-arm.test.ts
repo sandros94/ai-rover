@@ -23,9 +23,10 @@ import {
   posedBoxes,
   poseModel,
 } from '~~/scripts/rover-model/clearance'
+import MODEL_FILES from '~~/app/utils/rover-model-files.json'
 
 /** Tests run from the repository root. */
-const MODEL = 'public/models/rover/rover.glb'
+const MODEL = `public/${MODEL_FILES.full}`
 /** The gap the night pose keeps from the rest of the rover, metres, on the bounding boxes. */
 const CLEARANCE = 0.05
 /** The gap every link keeps along the unstow once off its rest, metres. */

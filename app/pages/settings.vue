@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import type { AccountView } from '#shared/utils/account'
 import { signInErrorSentence } from '#shared/utils/sign-in'
+import GraphicsSettings from '~/components/settings/GraphicsSettings.vue'
 import LinkedPlatforms from '~/components/settings/LinkedPlatforms.vue'
 import SettingsSection from '~/components/settings/SettingsSection.vue'
 
-definePageMeta({ middleware: 'authenticated' })
-
+/** Graphics for anyone; the account's sections once signed in. */
 const route = useRoute()
 const session = useUserSession()
+const { loggedIn } = session
 // During SSR the request fetch does not carry the visitor's cookies on its own.
 const { data: account, error } = await useFetch<AccountView>('/api/_auth/account', {
   headers: useRequestHeaders(['cookie']),
+  immediate: loggedIn.value,
+  watch: false,
 })
 const offered = await useAuthProviders()
 
@@ -41,13 +44,21 @@ useSeoMeta({ title: 'Settings · AI Rover' })
       title="Not linked"
       :description="failure"
     />
-    <UAlert v-if="error" color="neutral" variant="subtle" title="Your account did not load." />
     <SettingsSection
-      v-else-if="account"
-      title="Linked platforms"
-      description="Sign in with any of them. Linking one that already has an account here brings that account's submissions and LGTMs into this one."
+      title="Graphics"
+      description="How finely this browser draws the 3D scene. Kept on this device only."
     >
-      <LinkedPlatforms :account="account" :offered="offered" @changed="changed" />
+      <GraphicsSettings />
     </SettingsSection>
+    <template v-if="loggedIn">
+      <UAlert v-if="error" color="neutral" variant="subtle" title="Your account did not load." />
+      <SettingsSection
+        v-else-if="account"
+        title="Linked platforms"
+        description="Sign in with any of them. Linking one that already has an account here brings that account's submissions and LGTMs into this one."
+      >
+        <LinkedPlatforms :account="account" :offered="offered" @changed="changed" />
+      </SettingsSection>
+    </template>
   </UContainer>
 </template>

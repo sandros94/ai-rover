@@ -81,8 +81,25 @@ export {
   sunCrossings,
   sunPosition,
 } from './sun'
-export type { SceneDevice, SceneQuality, SceneTier } from './quality'
-export { defaultTier, isSceneTier, qualityFor, SCENE_TIERS } from './quality'
+export type {
+  FrameCapSetting,
+  QualityChoice,
+  SceneDevice,
+  SceneQuality,
+  SceneTier,
+} from './quality'
+export {
+  DEFAULT_QUALITY_CHOICE,
+  defaultTier,
+  FRAME_CAP_SETTINGS,
+  isSceneTier,
+  parseQualityChoice,
+  qualityFor,
+  resolveQuality,
+  SCENE_TIERS,
+  serializeQualityChoice,
+  SHADOW_SETTINGS,
+} from './quality'
 export type { FramePacer } from './pacing'
 export { framePacer, INTERACTION_TAIL_MS } from './pacing'
 export {
@@ -96,3 +113,5 @@ export {
   snapShadowCentre,
   SUN_HOLD_RAD,
 } from './shadow'
+export type { CameraPose, ViewFootprint } from './view-footprint'
+export { HAZE_FAR_M, viewFootprint } from './view-footprint'

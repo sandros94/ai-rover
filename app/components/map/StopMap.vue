@@ -33,6 +33,7 @@ import {
   worldToScreen,
   zoomAbout,
 } from '#shared/utils/client'
+import type { ViewFootprint } from '#shared/utils/client/scene'
 import { RELIEF_STOPS, rgbHex, routeDestination, SEEN_STOPS } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
@@ -75,6 +76,8 @@ const props = withDefaults(
      */
     objects?: readonly MapObject[]
     roverObject?: RoverObject
+    /** The ground the 3D camera shows, drawn under everything else. */
+    viewCone?: ViewFootprint
   }>(),
   {
     terrain: undefined,
@@ -91,6 +94,7 @@ const props = withDefaults(
     picked: null,
     objects: () => [],
     roverObject: undefined,
+    viewCone: undefined,
   },
 )
 
@@ -762,6 +766,21 @@ const focusRing = computed(() => {
       :viewBox="`0 0 ${view.width} ${view.height}`"
       aria-hidden="true"
     >
+      <g v-if="viewCone" data-test="view-cone">
+        <polygon
+          :points="points(viewCone.polygon)"
+          class="fill-(--ui-primary)/15 stroke-(--ui-primary)/50"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+        />
+        <circle
+          data-test="view-cone-apex"
+          :cx="toScreen(viewCone.apex).x"
+          :cy="toScreen(viewCone.apex).y"
+          r="3"
+          class="fill-(--ui-primary)/70"
+        />
+      </g>
       <circle
         data-test="survey-ring"
         :cx="toScreen(center).x"

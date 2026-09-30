@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
-import { destinationObject, mapObjects, ROVER_ID } from '#shared/utils/client'
+import { destinationObject, mapObjects, ROVER_ID, roverActivity } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile, solTime } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
@@ -20,6 +20,7 @@ import Instrument from './Instrument.vue'
 import NotMovingFlag from './NotMovingFlag.vue'
 import PlaybackControls from './PlaybackControls.vue'
 import RoundPanel from './RoundPanel.vue'
+import RoverActivityBadge from './RoverActivityBadge.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -143,6 +144,10 @@ function onRate(rate: PlaybackRate): void {
   playback.setRate(rate)
 }
 
+const activity = computed(() =>
+  props.state ? roverActivity(props.state, playback.liveStatus.value) : null,
+)
+
 const hudPlayback = computed(() => {
   if (!playing.value || !playback.manifest.value) return null
   const { mode, t, rate, paused } = snapshot.value
@@ -194,6 +199,9 @@ const panels = computed<PanelId[]>(() => [
 /* Planning: destinations are picked on the 2D map; a pick from the scene returns to it. */
 
 const view = useMapView()
+/** The ground the scene's camera shows, drawn on the floating 2D map. */
+const cone = useViewCone(view)
+const { report: reportCamera, footprint: viewCone } = cone
 const planFrom = ref<MapViewMode | null>(null)
 function planOnMap(): void {
   planFrom.value = view.value
@@ -278,12 +286,17 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
         @live="playback.goLive"
         @close-detail="mapFocus.clear"
       >
+        <template #status>
+          <RoverActivityBadge v-if="activity" :activity="activity" />
+        </template>
         <template #scene>
           <LiveStage
             :stage="stage"
             :view="view"
+            :report-camera="reportCamera"
             @hover="planning.onHover"
             @pick="planning.onPick"
+            @camera="cone.onCamera"
           />
         </template>
         <template #top>
@@ -349,7 +362,14 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
           />
         </template>
         <template #panel-map2d>
-          <LiveStage :stage="stage" view="2d" :progress="false" />
+          <LiveStage
+            :stage="stage"
+            view="2d"
+            :progress="false"
+            :view-cone="viewCone"
+            @vue:mounted="cone.shown"
+            @vue:unmounted="cone.hidden"
+          />
         </template>
         <template #panel-vote>
           <div class="space-y-3 p-3">

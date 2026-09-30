@@ -32,9 +32,16 @@ const props = withDefaults(
     driven?: DrivenPoint[]
     /** Sim seconds. */
     t?: number
+    /**
+     * Height of the ground under the path, else the path's own. The path lies on ground its
+     * drive revealed, where the ground as drawn is the ground, and is not draped again as the
+     * rest of the disk arrives.
+     */
     heightAt?: (x: number, y: number) => number | undefined
+    /** Height of the ground as drawn, which the posts stand on; a new function places them again. */
+    groundAt?: (x: number, y: number) => number | undefined
   }>(),
-  { stops: () => [], driven: () => [], t: 0, heightAt: undefined },
+  { stops: () => [], driven: () => [], t: 0, heightAt: undefined, groundAt: undefined },
 )
 
 /** Path points closer than this to the last kept one are skipped. */
@@ -105,7 +112,7 @@ function drawPosts(): void {
     mesh.dispose()
   }
   markers = []
-  const instances = stopMarkerInstances(props.stops, props.heightAt ?? (() => undefined))
+  const instances = stopMarkerInstances(props.stops, props.groundAt ?? (() => undefined))
   if (instances.length === 0) return
   const posts = new InstancedMesh(postGeometry, postMaterial, instances.length)
   const heads = new InstancedMesh(headGeometry, headMaterial, instances.length)
@@ -174,7 +181,7 @@ function reveal(): void {
   path.geometry.setDrawRange(0, Math.max(0, reached - 1) * 6)
 }
 
-watch(() => [props.stops, props.heightAt], drawPosts, { immediate: true })
+watch(() => [props.stops, props.groundAt], drawPosts, { immediate: true })
 watch(() => [props.driven, props.heightAt], drawPath, { immediate: true })
 watch(() => props.t, reveal)
 

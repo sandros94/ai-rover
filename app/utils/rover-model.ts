@@ -2,6 +2,7 @@ import type { Group, Material, Mesh, MeshStandardMaterial, Object3D, Texture } f
 import { ShaderChunk } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+import FILES from './rover-model-files.json'
 
 export interface LoadedRoverModel {
   /** The model's scene, shared: place a `clone()` of it. */
@@ -18,7 +19,7 @@ export interface LoadedRoverModel {
  * textures; `low-poly`, the same nodes and joints at about 2 000 untextured triangles, drawn in a look
  * (`RoverLook`): the death markers' ghosts, and the stand-in while the full model loads.
  */
-export type RoverModelFile = 'full' | 'low-poly'
+export type RoverModelFile = keyof typeof FILES
 
 /**
  * What the rover is drawn as: `loading` before either model is in; `standin`, the low-poly model
@@ -28,15 +29,11 @@ export type RoverModelFile = 'full' | 'low-poly'
  */
 export type RoverModelStatus = 'loading' | 'standin' | 'full' | 'unavailable'
 
-const FILES: Record<RoverModelFile, string> = {
-  'full': 'models/rover/rover.glb',
-  'low-poly': 'models/rover/rover-ghost.glb',
-}
-
 const loads = new Map<RoverModelFile, Promise<LoadedRoverModel>>()
 
 /**
- * A rover model under `public/models/rover/`, fetched once per page, drawn with the materials it
+ * A rover model under `public/models/rover/`, named by its content (`scripts/rover-model.ts`
+ * lists the names in `rover-model-files.json`), fetched once per page, drawn with the materials it
  * carries (three's standard and physical materials: metals, glass, normal maps), which reflect
  * the scene's environment.
  */

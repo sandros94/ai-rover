@@ -6,10 +6,10 @@ import {
   segmentTraceKey,
   sliceGate,
 } from '#shared/utils/drive'
+import { IMMUTABLE_CACHE } from '#shared/utils/cache'
 import { acceptsDeflate } from './encoding'
 import type { JourneyStore } from './store'
 
-const IMMUTABLE = 'public, max-age=31536000, immutable'
 const BINARY = 'application/octet-stream'
 
 /**
@@ -80,8 +80,8 @@ function found(body: BodyInit, options: { contentType: string; deflated: boolean
       'content-type': options.contentType,
       ...(options.deflated && { 'content-encoding': 'deflate' }),
       'vary': 'accept-encoding',
-      'cache-control': IMMUTABLE,
-      'netlify-cdn-cache-control': `${IMMUTABLE}, durable`,
+      'cache-control': IMMUTABLE_CACHE,
+      'netlify-cdn-cache-control': `${IMMUTABLE_CACHE}, durable`,
       'netlify-cache-tag': 'journey',
     },
   })

@@ -4,6 +4,17 @@ import { KHRMaterialsIOR, KHRMaterialsSpecular } from '@gltf-transform/extension
 import sharp from 'sharp'
 
 /**
+ * Pins what the texture encoding may vary with: libvips runs on one thread, so no image is split
+ * across threads whose scheduling could differ from run to run, and the versions of sharp, libvips
+ * and libwebp come back for the build log, since another libwebp may encode other bytes.
+ */
+export function pinEncoder(): string {
+  sharp.concurrency(1)
+  const { sharp: own, vips, webp } = sharp.versions
+  return `sharp ${own}, libvips ${vips}, libwebp ${webp ?? 'unknown'}, one thread`
+}
+
+/**
  * Bakes a group of nodes' materials into as few as the renderer must draw separately: every
  * opaque material into atlas pages (one material per page), the blended glass into one material
  * of its own, since blending needs its own draw. A node then draws one primitive per page it
@@ -954,10 +965,16 @@ function halve(data: Uint8Array, width: number, height: number): Uint8Array {
 }
 
 /**
+ * libwebp's effort, pinned rather than left to sharp's default: the encoder's search depends on
+ * it, and the model's file name is the hash of its bytes.
+ */
+const WEBP_EFFORT = 4
+
+/**
  * A page image as WebP. NASA's textures are lossy WebP already; colour is re-encoded at quality 92,
  * within 1 % of the decoded source (53 dB). Normals go near-lossless, within 2 levels of 255 per
  * channel: lossy coding speckles the highlights of smooth metal. Roughness, metalness and the
- * glass palettes are flat blocks and go lossless.
+ * glass palettes are flat blocks and go lossless. Encoded on one thread (see `pinEncoder`).
  */
 async function encode(
   doc: Document,
@@ -971,9 +988,9 @@ async function encode(
   let image = sharp(data, { raw: { width, height, channels: 4 } })
   if (opaque) image = image.removeAlpha()
   const options = {
-    colour: { quality: 92, smartSubsample: true },
-    normal: { nearLossless: true, quality: 60 },
-    data: { lossless: true },
+    colour: { quality: 92, smartSubsample: true, effort: WEBP_EFFORT },
+    normal: { nearLossless: true, quality: 60, effort: WEBP_EFFORT },
+    data: { lossless: true, effort: WEBP_EFFORT },
   }[kind]
   const webp = await image.webp(options).toBuffer()
   return doc.createTexture(name).setImage(new Uint8Array(webp)).setMimeType('image/webp')

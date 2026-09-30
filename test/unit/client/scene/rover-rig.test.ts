@@ -8,9 +8,10 @@ import type { Quat } from '#shared/utils/client/scene/placement'
 import { flatFrame } from '#shared/utils/client/scene/placement'
 import type { RigNode } from '#shared/utils/client/scene/rover-rig'
 import { RIG_JOINTS, rigTransforms, ROVER_RIG_NODES } from '#shared/utils/client/scene/rover-rig'
+import MODEL_FILES from '~~/app/utils/rover-model-files.json'
 
 const DEG = Math.PI / 180
-const MODEL_DIR = fileURLToPath(new URL('../../../../public/models/rover/', import.meta.url))
+const PUBLIC_DIR = fileURLToPath(new URL('../../../../public/', import.meta.url))
 
 interface GltfNode {
   name?: string
@@ -26,7 +27,7 @@ interface GltfNode {
 
 /** The glTF JSON chunk of a binary glTF: the node tree, without any three.js. */
 function readNodes(file: string): GltfNode[] {
-  const bytes = readFileSync(`${MODEL_DIR}${file}`)
+  const bytes = readFileSync(`${PUBLIC_DIR}${file}`)
   expect(bytes.readUInt32LE(0)).toBe(0x46546c67) // 'glTF'
   const length = bytes.readUInt32LE(12)
   expect(bytes.readUInt32LE(16)).toBe(0x4e4f534a) // 'JSON'
@@ -181,8 +182,8 @@ describe('rigTransforms', () => {
   })
 })
 
-describe('the rig on rover.glb', () => {
-  const nodes = tree(readNodes('rover.glb'))
+describe('the rig on the full model', () => {
+  const nodes = tree(readNodes(MODEL_FILES.full))
 
   it('names a node for every rig joint, turning about the URDF joint axis', () => {
     const fromModel = ROVER_RIG_NODES.map((name) => {

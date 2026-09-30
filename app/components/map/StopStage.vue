@@ -7,10 +7,12 @@ import type {
   RoverObject,
 } from '#shared/utils/client'
 import { groundAround } from '#shared/utils/client'
+import type { CameraPose, ViewFootprint } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import type { MapViewMode } from '~/composables/useMapView'
+import type { StageWait } from '~/utils/stage-wait'
 import type { StopFog } from '~/composables/useStopFog'
 import StopMap from './StopMap.vue'
 import TerrainProgress from './TerrainProgress.vue'
@@ -87,6 +89,10 @@ const props = withDefaults(
     roverObject?: RoverObject
     /** Time of the sol shown, 0.5 noon, for the 3D sun; the scene's own default without it. */
     solFraction?: number
+    /** Whether the 3D camera's pose is reported (`camera`), for a 2D view drawing its footprint. */
+    reportCamera?: boolean
+    /** The ground another stage's 3D camera shows, drawn on the 2D view. */
+    viewCone?: ViewFootprint
   }>(),
   {
     terrain: undefined,
@@ -112,10 +118,16 @@ const props = withDefaults(
     objects: () => [],
     roverObject: undefined,
     solFraction: undefined,
+    reportCamera: false,
+    viewCone: undefined,
   },
 )
 
-const emit = defineEmits<{ pick: [point: MapPoint]; hover: [point: MapPoint | null] }>()
+const emit = defineEmits<{
+  pick: [point: MapPoint]
+  hover: [point: MapPoint | null]
+  camera: [pose: CameraPose]
+}>()
 
 /** The survey for the 3D view, one object while it stays, so the scene does not redraw its ring. */
 const survey = computed<{ center: MapPoint; radius: number }>((previous) => {
@@ -152,20 +164,35 @@ const standing = computed(() => {
   if (frame) return { x: frame[X]!, y: frame[Y]! }
   return props.resting ? props.rover : undefined
 })
+/** The terrain's chunks, counted. */
+const chunks = computed<StageWait>(() => ({
+  what: 'terrain',
+  loaded: props.loading.loaded,
+  total: props.loading.total,
+}))
+/** The terrain's chunks while they arrive; undefined once every one is in. */
+const terrainWait = computed(() => (props.terrain ? undefined : chunks.value))
 /**
- * Whether the ground the 3D rover stands on is known and drawn true, so the rover and the path it
- * drove may be drawn on it: the stop's mask in (a playback frame comes only with the drive's
- * reveals up to it, which the fog lifts settled with it), and the chunks under and around it.
- * Until then the terrain's loading progress stays up.
+ * What keeps the ground the 3D rover stands on from being known and drawn true, so the rover and
+ * the path it drove may be drawn on it: the stop's mask (a playback frame comes only with the
+ * drive's reveals up to it, which the fog lifts settled with it), the drive's first frame while
+ * one plays, and the chunks under and around the rover. Undefined once it is.
  */
-const grounded = computed(() => {
-  const at = standing.value
+const unmet = computed<StageWait | undefined>(() => {
   const view = props.ground ?? props.terrain
+  if (!view || !props.chunkVertices) return chunks.value
   const masked = props.fog ? !!props.fog.fade : props.seen === undefined || !!own.value.fade
-  if (!at || !view || !props.chunkVertices || !masked) return false
+  if (!masked) return { what: 'mask' }
+  const at = standing.value
+  if (!at) return { what: 'drive' }
   const survey = { center: props.center, radius: props.radius }
   return groundAround(view, at, { chunkVertices: props.chunkVertices, survey })
+    ? undefined
+    : chunks.value
 })
+const grounded = computed(() => !unmet.value)
+/** What the 3D view waits for: every chunk, then the ground under the rover known. */
+const sceneWait = computed(() => terrainWait.value ?? unmet.value)
 </script>
 
 <template>
@@ -188,10 +215,11 @@ const grounded = computed(() => {
       :picked="picked"
       :objects="objects"
       :rover-object="roverObject"
+      :view-cone="viewCone"
       @hover="emit('hover', $event)"
       @pick="emit('pick', $event)"
     >
-      <TerrainProgress v-if="progress" :ready="!!terrain" v-bind="loading" />
+      <TerrainProgress v-if="progress" :waiting="terrainWait" :error="loading.error" />
     </StopMap>
     <DiskScene
       v-else-if="(ground ?? terrain) && chunkVertices"
@@ -212,14 +240,16 @@ const grounded = computed(() => {
       :objects="objects"
       :rover-object="roverObject"
       :lighting="{ solFraction }"
+      :report-camera="reportCamera"
+      @camera="emit('camera', $event)"
     />
     <div v-else :class="['relative', BLANK]">
-      <TerrainProgress v-if="progress" :ready="false" v-bind="loading" />
+      <TerrainProgress v-if="progress" :waiting="chunks" :error="loading.error" />
     </div>
     <TerrainProgress
       v-if="progress && view !== '2d' && ground && chunkVertices"
-      :ready="!!terrain && grounded"
-      v-bind="loading"
+      :waiting="sceneWait"
+      :error="loading.error"
     />
   </div>
 </template>

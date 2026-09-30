@@ -3,6 +3,7 @@ import type { GridCell, HeightGrid } from '../terrain/grid'
 import type { StopManifest } from '../terrain/manifest'
 import { ClientError } from './errors'
 import type { GridRect } from './fog'
+import { gridHeightAt } from './fog'
 
 /**
  * A stop disk's grid filled in as its chunks arrive, laid out as `assembleDiskGrid` lays out the
@@ -152,6 +153,22 @@ export function groundAround(
     }
   }
   return true
+}
+
+/**
+ * Height of `ground` as it is drawn at `x`, `y` (world metres): the fog's `surface` (laid out as
+ * the grid) where it holds one, which over unseen ground is not the ground it hides, else the
+ * heights in so far; undefined where neither holds one yet. Both are read when it is called, and
+ * both fill in place: what stands on the ground is placed again with each new view or surface.
+ */
+export function drawnHeightAt(
+  ground: GroundView,
+  surface?: Float32Array,
+): (x: number, y: number) => number | undefined {
+  const place = { ...ground.grid, origin: ground.origin }
+  const heights = ground.grid.heights
+  return (x, y) =>
+    (surface ? gridHeightAt(surface, place, x, y) : undefined) ?? gridHeightAt(heights, place, x, y)
 }
 
 /** A snapshot of `ground` to hand a view, `placed` copied so the view it gives never changes. */

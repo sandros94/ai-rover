@@ -174,6 +174,53 @@ describe('StopStage', () => {
     expect(shown()[64 * size + size - 1]).toBe(0)
   })
 
+  it('says what the scene waits for: the chunks counted, then the mask, then the drive', async () => {
+    const terrain = { grid: grid(129), origin: { i: -64, j: -64 } }
+    const base = {
+      view: '3d' as const,
+      seen: new Uint8Array(129 * 129),
+      chunkVertices: 65,
+      heightAt: () => 0,
+      center: { x: 0, y: 0 },
+      radius: 64,
+      rover: { x: 0, y: 0, headingRad: 0 },
+    }
+    const shown = async (props: Record<string, unknown>) => {
+      const wrapper = await mountSuspended(StopStage, { props: { ...base, ...props } as never })
+      await flushPromises()
+      const indicator = wrapper.findAll('[data-test=terrain-progress]')
+      expect(indicator).toHaveLength(1)
+      return [indicator[0]!.attributes('data-waiting'), indicator[0]!.text()]
+    }
+
+    // One chunk of four in: the chunks, counted.
+    const partial = { ...terrain, placed: [{ i0: 0, j0: 0, i1: 64, j1: 64 }], complete: false }
+    expect(await shown({ ground: partial, loading: { loaded: 1, total: 4, error: null } })).toEqual(
+      ['terrain', 'Loading terrain 1 / 4'],
+    )
+
+    // Every chunk in, the stop's mask not: the fog's owner has no fade yet.
+    const all = { loaded: 4, total: 4, error: null }
+    const unmasked = { stopSeen: undefined, seen: undefined, fade: undefined, sight: undefined }
+    expect(await shown({ terrain, ground: terrain, loading: all, fog: unmasked })).toEqual([
+      'mask',
+      'Loading the ground the rover has seen',
+    ])
+
+    // Chunks and mask in, a drive playing whose first frame is not.
+    expect(await shown({ terrain, ground: terrain, loading: all, resting: false })).toEqual([
+      'drive',
+      "Loading the drive's record",
+    ])
+
+    // Its frame in: nothing left to wait for.
+    const played = await mountSuspended(StopStage, {
+      props: { ...base, terrain, ground: terrain, loading: all, frame: new Float32Array(19) },
+    })
+    await flushPromises()
+    expect(played.find('[data-test=terrain-progress]').exists()).toBe(false)
+  })
+
   it('leaves the view switch to the page', async () => {
     const stage = await mountStage('3d')
     expect(stage.find('[data-test=view-2d]').exists()).toBe(false)

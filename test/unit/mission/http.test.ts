@@ -15,7 +15,17 @@ import {
 } from '#server/utils/mission/http'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, SMALL_RULES, T0, users } from './helpers'
+import {
+  at,
+  createTestDb,
+  endMissions,
+  fakeJev,
+  memoryStore,
+  MINUTE,
+  SMALL_RULES,
+  T0,
+  users,
+} from './helpers'
 
 vi.mock('#server/utils/mission/tick', async (original) => {
   const actual = await original<typeof import('#server/utils/mission/tick')>()
@@ -34,6 +44,7 @@ afterEach(() => {
 
 async function landed() {
   const { store } = memoryStore()
+  await endMissions(db)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',

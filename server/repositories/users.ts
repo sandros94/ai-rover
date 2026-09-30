@@ -32,7 +32,13 @@ export interface ProvenIdentity extends Identity {
 /** An account with no identity, named as given. Sign-in creates accounts through {@link createUserWithIdentity}. */
 export async function createUser(
   db: DB,
-  input: { displayName: string; avatarUrl?: string | null; handle?: string | null },
+  input: {
+    displayName: string
+    avatarUrl?: string | null
+    handle?: string | null
+    /** Development logins only; see `userAccount.devLogin`. */
+    devLogin?: string | null
+  },
 ): Promise<UserAccount> {
   const [row] = await db.insert(userAccount).values(input).returning()
   return row!
@@ -147,7 +153,8 @@ export async function linkIdentity(
  * submissions, likes and not-moving flags, and pauses it recorded. A like or flag both gave
  * becomes one (the later flag stands). An open submission of `from` in a round where `into` has
  * one is withdrawn first, as its author would, since a user holds one per round. `into` keeps its
- * primary identity, or takes `from`'s when it had none. Refused (`INVALID_STATE`) when both hold
+ * primary identity, or takes `from`'s when it had none, and likewise its development login.
+ * Refused (`INVALID_STATE`) when both hold
  * an identity of the same provider.
  */
 export async function mergeUsers(
@@ -250,6 +257,13 @@ export async function mergeUsers(
     await tx.update(missionPause).set({ pausedBy: into }).where(eq(missionPause.pausedBy, from))
     await tx.update(userIdentity).set({ userId: into }).where(eq(userIdentity.userId, from))
     await tx.delete(userAccount).where(eq(userAccount.id, from))
+    if (source.devLogin && !target.devLogin) {
+      await tx
+        .update(userAccount)
+        .set({ devLogin: source.devLogin })
+        .where(eq(userAccount.id, into))
+      target.devLogin = source.devLogin
+    }
 
     if (!target.primaryProvider && source.primaryProvider) {
       return showIdentity(tx, into, source.primaryProvider)

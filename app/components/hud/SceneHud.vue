@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DropdownMenuItem } from '@nuxt/ui'
 import type { PlaybackMode, PlaybackRate } from '#shared/utils/client'
 import type { PanelId, PanelSize } from '#shared/utils/client/hud'
 import { formatDuration } from '#shared/utils/client/instruments'
@@ -12,13 +13,15 @@ import PhoneSheet from './PhoneSheet.vue'
  * A page that is its scene: the scene fills the viewport under a slim top bar, the HUD floats
  * over it. On a wide viewport the offered `panels` are windows the visitor opens, drags, resizes
  * and closes, their layout kept per browser; on a phone the instruments and the vote are bottom
- * sheets, hidden until their toggle. Keys: `1` and `2` switch views, `h` shows or hides the
- * instruments, space plays or pauses and `l` goes live when there is playback; a page adds its
- * own through `shortcuts`, listed with the rest.
+ * sheets, hidden until their toggle. One menu lists the windows: all of them at once, each on
+ * its own, and the layout's reset. Keys: `1` and `2` switch views, `h` shows or hides every
+ * window (the instruments' sheet on a phone), space plays or pauses and `l` goes live when there
+ * is playback; a page adds its own through `shortcuts`, listed with the rest.
  *
- * Slots: `title` (the top bar's left end), `scene`, `top` and `bottom` (widgets centred on those
- * edges), and `panel-<id>` for each offered panel's content. With a `detail`, `panel-details`
- * shows as its own window (a sheet on a phone) until closed, which emits `closeDetail`.
+ * Slots: `title` (the top bar's left end), `status` (beside the view switch), `scene`, `top` and
+ * `bottom` (widgets centred on those edges), and `panel-<id>` for each offered panel's content.
+ * With a `detail`, `panel-details` shows as its own window (a sheet on a phone) until closed,
+ * which emits `closeDetail`.
  */
 const props = withDefaults(
   defineProps<{
@@ -109,11 +112,11 @@ onBeforeUnmount(() => observer?.disconnect())
 const sceneLayer = useTemplateRef<HTMLElement>('sceneLayer')
 useCreditsLift(sceneLayer, area)
 
+/** Every window at once on a wide viewport; the instruments' sheet on a phone. */
 function toggleInstruments(): void {
   if (wide.value) hud.value.visible = !hud.value.visible
   else hud.value.instruments = !hud.value.instruments
 }
-const instrumentsShown = computed(() => (wide.value ? hud.value.visible : hud.value.instruments))
 
 function togglePanel(id: PanelId): void {
   if (layout.value?.panels[id].open) panelLayout.close(id)
@@ -122,6 +125,39 @@ function togglePanel(id: PanelId): void {
     hud.value.visible = true
   }
 }
+
+/** Checkable items keep the menu open, so several windows can be toggled in one visit. */
+const keepOpen = (event: Event) => event.preventDefault()
+const windowsMenu = computed<DropdownMenuItem[][]>(() => [
+  [
+    {
+      type: 'checkbox',
+      label: hud.value.visible ? 'All windows shown' : 'All windows hidden',
+      icon: 'i-lucide-layers',
+      checked: hud.value.visible,
+      kbds: ['h'],
+      onSelect: keepOpen,
+      onUpdateChecked: toggleInstruments,
+    },
+  ],
+  props.panels.map((id) => ({
+    type: 'checkbox' as const,
+    label: PANEL_SPECS[id].title,
+    icon: PANEL_SPECS[id].icon,
+    checked: layout.value?.panels[id].open ?? false,
+    disabled: !offered.value.includes(id),
+    onSelect: keepOpen,
+    onUpdateChecked: () => togglePanel(id),
+  })),
+  [
+    {
+      'label': 'Reset the layout',
+      'icon': 'i-lucide-rotate-ccw',
+      'data-test': 'panels-reset',
+      'onSelect': () => panelLayout.reset(bounds.value),
+    },
+  ],
+])
 
 const status = computed(() => {
   const p = props.playback
@@ -139,7 +175,7 @@ const status = computed(() => {
 const SHORTCUTS = computed(() => [
   { keys: ['1'], label: '2D map' },
   { keys: ['2'], label: '3D scene' },
-  { keys: ['h'], label: 'Show or hide the instruments' },
+  { keys: ['h'], label: 'Show or hide all windows' },
   { keys: ['space'], label: 'Play or pause' },
   ...(props.playback?.live === false ? [] : [{ keys: ['l'], label: 'Go live' }]),
   ...props.shortcuts.map(({ key, label }) => ({ keys: [key], label })),
@@ -166,6 +202,7 @@ defineShortcuts(
         </slot>
       </template>
       <ViewToggle v-model="view" />
+      <slot name="status" />
       <UBadge
         v-if="status"
         data-test="playback-status"
@@ -180,17 +217,16 @@ defineShortcuts(
       </UBadge>
       <div class="ml-auto flex items-center gap-0.5">
         <UButton
+          v-if="!wide"
           data-test="hud-toggle"
           icon="i-lucide-gauge"
           size="sm"
           color="neutral"
-          :variant="instrumentsShown ? 'soft' : 'ghost'"
-          :aria-pressed="instrumentsShown"
+          :variant="hud.instruments ? 'soft' : 'ghost'"
+          :aria-pressed="hud.instruments"
           aria-label="Instruments"
           @click="toggleInstruments"
-        >
-          <span class="hidden xl:inline">Instruments</span>
-        </UButton>
+        />
         <UButton
           v-if="hasVote && !wide"
           data-test="vote-toggle"
@@ -202,48 +238,18 @@ defineShortcuts(
           aria-label="Vote"
           @click="hud.vote = !hud.vote"
         />
-        <UPopover v-if="wide">
+        <UDropdownMenu v-if="wide" :items="windowsMenu" :content="{ align: 'end' }">
           <UButton
-            data-test="panels-menu"
+            data-test="windows-menu"
             icon="i-lucide-app-window"
             size="sm"
             color="neutral"
-            variant="ghost"
-            aria-label="Panels"
-          />
-          <template #content>
-            <div class="flex w-56 flex-col p-1" data-test="panels-list">
-              <UButton
-                v-for="id in panels"
-                :key="id"
-                :data-test="`panel-toggle-${id}`"
-                :icon="PANEL_SPECS[id].icon"
-                :trailing-icon="layout?.panels[id].open ? 'i-lucide-check' : undefined"
-                :disabled="!offered.includes(id)"
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                class="justify-start"
-                :ui="{ trailingIcon: 'ms-auto' }"
-                @click="togglePanel(id)"
-              >
-                {{ PANEL_SPECS[id].title }}
-              </UButton>
-              <USeparator class="my-1" />
-              <UButton
-                data-test="panels-reset"
-                icon="i-lucide-rotate-ccw"
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                class="justify-start"
-                @click="panelLayout.reset(bounds)"
-              >
-                Reset the layout
-              </UButton>
-            </div>
-          </template>
-        </UPopover>
+            :variant="hud.visible ? 'soft' : 'ghost'"
+            aria-label="Windows"
+          >
+            <span class="hidden xl:inline">Windows</span>
+          </UButton>
+        </UDropdownMenu>
         <UPopover
           v-if="wide"
           :content="{ onOpenAutoFocus: (event: Event) => event.preventDefault() }"

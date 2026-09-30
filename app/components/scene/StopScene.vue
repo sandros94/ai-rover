@@ -11,12 +11,13 @@ import { TresCanvas } from '@tresjs/core'
 import type { Texture, ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { DrivenPoint, GridRect } from '#shared/utils/client'
-import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
+import type { CameraPose, ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
   armPoseAt,
   framePacer,
   framePlacement,
   fullModelLedger,
+  HAZE_FAR_M,
   LOD_FAR_M,
   routeApproach,
   routeDestination,
@@ -50,9 +51,14 @@ const props = withDefaults(
     chunks?: { chunk: TerrainChunk }[]
     /** Height span of the disk for the colour ramp; required with `chunks`. */
     heightRange?: { min: number; max: number }
+    /** Height of the ground, for the chunks' edges and the path driven. */
     heightAt?: (x: number, y: number) => number | undefined
-    /** Height of the ground as drawn, fog included, for the route; by default `heightAt`. */
-    drawnHeightAt?: (x: number, y: number) => number | undefined
+    /**
+     * Height of the ground as drawn, fog included, which the markers, flags, ghosts, route and
+     * survey's ring stand on; a new function whenever the drawn ground changes places them again.
+     * By default `heightAt`.
+     */
+    groundAt?: (x: number, y: number) => number | undefined
     /** The stops shown, the one the rover stands at or left from `current`. */
     stops?: { x: number; y: number; current?: boolean }[]
     /** The path driven, drawn up to `t`. */
@@ -84,13 +90,15 @@ const props = withDefaults(
     exposureBias?: number
     /** three's tone mapping; another than the scene's AgX look only to compare against it. */
     toneMapping?: ToneMapping
+    /** Whether the camera's pose is reported (`camera`), as a view drawing its footprint needs. */
+    reportCamera?: boolean
   }>(),
   {
     chunks: () => [],
     heightRange: () => ({ min: 0, max: 1 }),
     roverShown: true,
     heightAt: undefined,
-    drawnHeightAt: undefined,
+    groundAt: undefined,
     stops: () => [],
     driven: () => [],
     t: 0,
@@ -108,6 +116,7 @@ const props = withDefaults(
     solFraction: 0.4,
     exposureBias: 0,
     toneMapping: CustomToneMapping,
+    reportCamera: false,
   },
 )
 
@@ -118,6 +127,8 @@ const emit = defineEmits<{
   hover: [id: string | null, client: { x: number; y: number }]
   /** A tap or click on an object, or on none. */
   tap: [id: string | null, pointerType: string, client: { x: number; y: number }]
+  /** The camera moved, while `reportCamera`: at most once a displayed frame. */
+  camera: [pose: CameraPose]
 }>()
 
 /** The rover and a focused ghost: never more full rover models than that in the scene. */
@@ -140,11 +151,13 @@ const focus = computed(() => ({ x: rover.value.x, y: rover.value.y }))
 /** Camera target: the body's middle rather than its ground-level origin, or the focused object. */
 const target = computed(() => props.focusTarget ?? { ...rover.value, z: rover.value.z + 1 })
 
+/** What stands on the ground stands on it as drawn. */
+const standing = computed(() => props.groundAt ?? props.heightAt)
 /** The route's destination, flagged on the ground as drawn until a stop stands there. */
 const destination = computed(() => {
   const end = routeDestination(props.route, props.stops)
   if (!end) return null
-  const z = (props.drawnHeightAt ?? props.heightAt)?.(end.x, end.y) ?? 0
+  const z = standing.value?.(end.x, end.y) ?? 0
   return { ...end, z, approach: routeApproach(props.route) }
 })
 /** The open round's goals were picked around the current stop. */
@@ -164,7 +177,7 @@ const armJoints = computed(() => armPoseAt(props.solFraction))
  * seen look alike. Full detail reaches `LOD_FAR_M`; the fog closes in past it.
  */
 const atmosphere = computed(() => lighting.value.horizon)
-const HAZE = { near: LOD_FAR_M, far: 4 * LOD_FAR_M }
+const HAZE = { near: LOD_FAR_M, far: HAZE_FAR_M }
 /** three dropped `PCFSoftShadowMap`; PCF blurs by each light's `shadow.radius` instead. */
 const SHADOW_MAP = PCFShadowMap
 
@@ -259,6 +272,8 @@ onBeforeUnmount(() => {
       :target="target"
       :target-key="focusKey"
       :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]"
+      :report="reportCamera"
+      @pose="emit('camera', $event)"
     />
     <TerrainChunks
       v-if="chunks.length > 0"
@@ -275,15 +290,21 @@ onBeforeUnmount(() => {
     <RouteLine
       v-if="chunks.length > 0 && surveyRing.length > 0"
       :route="surveyRing"
-      :height-at="drawnHeightAt ?? heightAt"
+      :height-at="standing"
       :color="SCENE_COLORS.survey"
     />
-    <RouteLine v-if="route.length > 1" :route="route" :height-at="drawnHeightAt ?? heightAt" />
-    <TrailLayer :stops="stops" :driven="driven" :t="t" :height-at="heightAt" />
+    <RouteLine v-if="route.length > 1" :route="route" :height-at="standing" />
+    <TrailLayer
+      :stops="stops"
+      :driven="driven"
+      :t="t"
+      :height-at="heightAt"
+      :ground-at="standing"
+    />
     <DeathGhosts
       v-if="deaths.length > 0"
       :deaths="deaths"
-      :height-at="heightAt"
+      :height-at="standing"
       :radius-m="deathRadiusM"
       :focused-id="focusedId"
       :ledger="ledger"
@@ -303,6 +324,7 @@ onBeforeUnmount(() => {
         :joints="armJoints"
         :environment="environment"
         :lod-distance-m="quality.roverLodM"
+        :shadows="quality.shadows !== 'off'"
         @status="emit('roverStatus', $event)"
       />
     </TresGroup>

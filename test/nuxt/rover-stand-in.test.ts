@@ -23,6 +23,7 @@ import DeathGhosts from '~/components/scene/DeathGhosts.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import RoverModel from '~/components/scene/RoverModel.vue'
 import { motionAt } from '~~/modules/dev/runtime/app/playground/rover-motion'
+import MODEL_FILES from '~~/app/utils/rover-model-files.json'
 
 /**
  * There is no canvas: the camera is the test's, frames are asked for through a spy, and the
@@ -58,12 +59,8 @@ vi.mock('~/utils/rover-model', async (original) => ({
 const models = {} as Record<RoverModelFile, LoadedRoverModel>
 beforeAll(async () => {
   const actual = await vi.importActual<typeof import('~/utils/rover-model')>('~/utils/rover-model')
-  const files: Record<RoverModelFile, string> = {
-    'full': 'public/models/rover/rover.glb',
-    'low-poly': 'public/models/rover/rover-ghost.glb',
-  }
-  for (const [file, path] of Object.entries(files) as [RoverModelFile, string][]) {
-    const bytes = readFileSync(join(process.cwd(), path))
+  for (const [file, path] of Object.entries(MODEL_FILES) as [RoverModelFile, string][]) {
+    const bytes = readFileSync(join(process.cwd(), 'public', path))
     vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes)))
     models[file] = await actual.loadRoverModel('/', file)
   }

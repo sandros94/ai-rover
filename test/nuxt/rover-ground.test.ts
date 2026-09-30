@@ -56,11 +56,11 @@ vi.mock('~/components/scene/StopScene.vue', async () => {
       props: {
         frame: { type: Float32Array, required: true },
         roverShown: { type: Boolean, default: true },
-        drawnHeightAt: { type: Function, default: undefined },
+        groundAt: { type: Function, default: undefined },
       },
       setup: (props) => () => {
         const frame = props.frame
-        const at = props.drawnHeightAt as ((x: number, y: number) => number | undefined) | undefined
+        const at = props.groundAt as ((x: number, y: number) => number | undefined) | undefined
         drawn.push({ shown: props.roverShown, z: frame[Z]!, ground: at?.(frame[X]!, frame[Y]!) })
         return vue.h('div', { 'data-test': 'scene' })
       },

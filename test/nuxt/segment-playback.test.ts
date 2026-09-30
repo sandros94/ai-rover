@@ -150,6 +150,10 @@ describe('a first load of a drive in progress', () => {
     const status = wrapper.find('[data-test=drive-status]')
     expect(status.attributes('data-status')).toBe(statusAt(record.events, t).status)
     expect(status.attributes('data-status')).toBe(stop.status)
+    // The live edge's status, from the same totals: what the rover is doing now.
+    const edge = () => Math.min(playback!.liveTime.value, playback!.heldUntil.value)
+    expect(edge()).toBeLessThan(stop.endsAt!)
+    expect(playback!.liveStatus.value).toEqual({ status: stop.status })
     expect(wrapper.find('[data-test=odometer-segment]').text()).toContain(
       whole.at(t).actualM.toFixed(2),
     )
@@ -171,6 +175,10 @@ describe('a first load of a drive in progress', () => {
     expect(wrapper.find('[data-test=drive-status]').attributes('data-status')).toBe(
       statusAt(record.events, 40).status,
     )
+    // Playback went back; the live edge did not.
+    expect(statusAt(record.events, 40).status).not.toBe(stop.status)
+    expect(playback!.liveStatus.value).toEqual({ status: statusAt(record.events, edge()).status })
+    expect(playback!.liveStatus.value?.status).toBe(stop.status)
     wrapper.unmount()
   }, 30_000)
 })

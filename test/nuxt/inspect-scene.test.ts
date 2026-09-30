@@ -79,7 +79,12 @@ const ARRIVAL = new Date(Date.parse(STARTED) + 38 * 60_000).toLocaleTimeString(u
 const GROUND_Z = 3
 
 function grid(size: number) {
-  return { heights: new Float32Array(size * size), width: size, height: size, cellSize: 1 }
+  return {
+    heights: new Float32Array(size * size).fill(GROUND_Z),
+    width: size,
+    height: size,
+    cellSize: 1,
+  }
 }
 
 async function mountScene() {

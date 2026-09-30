@@ -19,13 +19,16 @@ export async function accountView(db: DB, account: UserAccount): Promise<Account
   return {
     id: account.id,
     primaryProvider: account.primaryProvider,
-    identities: identities.map(({ provider, displayName, avatarUrl, handle, createdAt }) => ({
-      provider,
-      displayName,
-      avatarUrl,
-      handle,
-      linkedAt: createdAt,
-    })),
+    identities: identities.map(
+      ({ provider, subject, displayName, avatarUrl, handle, createdAt }) => ({
+        provider,
+        subject,
+        displayName,
+        avatarUrl,
+        handle,
+        linkedAt: createdAt,
+      }),
+    ),
   }
 }
 

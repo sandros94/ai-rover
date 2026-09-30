@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, shallowRef } from 'vue'
 import { CustomToneMapping, PCFShadowMap, ShaderChunk, SRGBColorSpace } from 'three'
 import {
   ARM_NIGHT,
@@ -14,11 +14,20 @@ import {
   sunCrossings,
   sunPosition,
 } from '#shared/utils/client/scene'
+import type { GroundView, GridRect, MapObject } from '#shared/utils/client'
+import { gridHeightAt } from '#shared/utils/client'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
+import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import { ARM_STOWED } from '#shared/utils/rover'
 import { SCENE_QUALITY_KEY } from '~/composables/useSceneQuality'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopStage from '~/components/map/StopStage.vue'
+// @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+import DiskScene from '~/components/scene/DiskScene.vue'
+// @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+import DeathGhosts from '~/components/scene/DeathGhosts.vue'
+// @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+import GoalMarkers from '~/components/scene/GoalMarkers.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopScene from '~/components/scene/StopScene.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
@@ -33,7 +42,7 @@ import RoverModel from '~/components/scene/RoverModel.vue'
 const tres = vi.hoisted(() => ({
   canvas: [] as Record<string, unknown>[],
   beforeRender: [] as ((context: { delta: number }) => void)[],
-  renderer: { toneMappingExposure: 1 },
+  renderer: { toneMappingExposure: 1, domElement: document.createElement('canvas') },
 }))
 
 vi.mock('@tresjs/core', async () => {
@@ -180,6 +189,87 @@ describe('StopStage in 3D', () => {
   })
 })
 
+describe('DiskScene over ground still arriving', () => {
+  it('stands the flags, a ghost and the resting rover on the ground as drawn once their chunk is in', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // Two chunks a side of 65 vertices; the south-west one in first, the north-east one later.
+    const size = 129
+    const origin = { i: -64, j: -64 }
+    const ground = (x: number, y: number) => 3 + 0.05 * x + 0.02 * y
+    const heights = new Float32Array(size * size).fill(Number.NaN)
+    const place = (rect: GridRect) => {
+      for (let j = rect.j0; j < rect.j1; j++) {
+        for (let i = rect.i0; i < rect.i1; i++) {
+          heights[j * size + i] = ground(i + origin.i, j + origin.j)
+        }
+      }
+    }
+    const grid = { heights, width: size, height: size, cellSize: 1 }
+    const southWest = { i0: 0, j0: 0, i1: 65, j1: 65 }
+    const northEast = { i0: 64, j0: 64, i1: 129, j1: 129 }
+    place(southWest)
+    const view = shallowRef<GroundView>({ grid, origin, placed: [southWest], complete: false })
+    // As the chunk cache answers: whatever is in when asked, with nothing telling it changed.
+    const heightAt = (x: number, y: number) => gridHeightAt(heights, { ...grid, origin }, x, y)
+    const rest = { x: -10, y: -10, headingRad: 0 }
+    const goal = { kind: 'submission', id: 'submission:a', x: 30, y: 25 } as unknown as MapObject
+    const ghost = { x: 20, y: 40, id: 'death:a' }
+    const end = { x: 45, y: 10 }
+    const wrapper = await mountSuspended(
+      defineComponent({
+        setup: () => () =>
+          h(DiskScene, {
+            terrain: view.value,
+            chunkVertices: 65,
+            heightAt,
+            rest,
+            route: [rest, end],
+            stops: [{ ...rest, current: true }],
+            deaths: [ghost],
+            objects: [goal],
+          }),
+      }),
+    )
+    await flushPromises()
+    const standing = () => {
+      const markers = wrapper.findComponent(GoalMarkers).props()
+      return {
+        flag: markers.goals![0]!.z,
+        destination: markers.destination!.z,
+        ghost: wrapper.findComponent(DeathGhosts).props('deaths')[0]!.z,
+        rover: wrapper
+          .findAllComponents(RoverModel)
+          .find((model) => !model.props('ghost'))!
+          .props('frame')[KEYFRAME_FIELDS.indexOf('z')] as number,
+      }
+    }
+    const expected = {
+      flag: ground(goal.x, goal.y),
+      destination: ground(end.x, end.y),
+      ghost: ground(ghost.x, ghost.y),
+      rover: ground(rest.x, rest.y),
+    }
+    // Before their chunk, the flags and the ghost stand on no ground; the rover already does.
+    const before = standing()
+    expect(Math.abs(before.rover - expected.rover)).toBeLessThan(0.01)
+    expect(Math.abs(before.flag - expected.flag)).toBeGreaterThan(1)
+    expect(Math.abs(before.ghost - expected.ghost)).toBeGreaterThan(1)
+
+    place(northEast)
+    view.value = { grid, origin, placed: [southWest, northEast], complete: false }
+    await flushPromises()
+    const after = standing()
+    const within = (key: keyof typeof expected) => Math.abs(after[key] - expected[key]) < 0.01
+    expect({
+      flag: within('flag'),
+      destination: within('destination'),
+      ghost: within('ghost'),
+      rover: within('rover'),
+    }).toEqual({ flag: true, destination: true, ghost: true, rover: true })
+    wrapper.unmount()
+  })
+})
+
 describe('StopScene at a quality tier', () => {
   beforeEach(() => {
     localStorage.removeItem(SCENE_QUALITY_KEY)
@@ -210,7 +300,7 @@ describe('StopScene at a quality tier', () => {
     localStorage.setItem(SCENE_QUALITY_KEY, 'low')
     const stage = await mountScene()
     await flushPromises()
-    useSceneQuality().choice.value = 'high'
+    useSceneQuality().choice.value = { tier: 'high' }
     await flushPromises()
     const high = qualityFor('high')
     expect(tres.canvas.at(-1)).toMatchObject({ dpr: [1, high.maxDpr], shadows: true })
@@ -225,6 +315,18 @@ describe('StopScene at a quality tier', () => {
     })
     expect(stage.findComponent(RoverModel).props('lodDistanceM')).toBe(high.roverLodM)
   })
+
+  it('renders no shadow map and no caster once shadows are off, without a reload', async () => {
+    localStorage.setItem(SCENE_QUALITY_KEY, 'high')
+    const stage = await mountScene()
+    await flushPromises()
+    useSceneQuality().choice.value = { tier: 'high', shadows: 'off' }
+    await flushPromises()
+    expect(tres.canvas.at(-1)).toMatchObject({ shadows: false })
+    expect(stage.findComponent({ name: 'SceneSun' }).props('shadows')).toBe(false)
+    expect(stage.findComponent(TerrainChunks).props('casters')).toBeNull()
+    expect(stage.findComponent(RoverModel).props('shadows')).toBe(false)
+  })
 })
 
 describe('useSceneQuality', () => {
@@ -236,7 +338,7 @@ describe('useSceneQuality', () => {
   const Choice = defineComponent({
     setup() {
       const { choice, tier } = useSceneQuality()
-      return () => h('p', `${choice.value} ${tier.value}`)
+      return () => h('p', `${choice.value.tier} ${tier.value}`)
     },
   })
 
@@ -246,14 +348,17 @@ describe('useSceneQuality', () => {
     expect(choice).toBe('auto')
     expect(['high', 'medium', 'low']).toContain(tier)
 
-    useSceneQuality().choice.value = 'medium'
-    expect(localStorage.getItem(SCENE_QUALITY_KEY)).toBe('medium')
+    useSceneQuality().choice.value = { tier: 'medium', shadows: 'off' }
+    expect(JSON.parse(localStorage.getItem(SCENE_QUALITY_KEY)!)).toEqual({
+      tier: 'medium',
+      shadows: 'off',
+    })
 
     // A new page reads it back.
     clearNuxtState(['scene-quality', 'scene-quality-read'])
     expect((await mountSuspended(Choice)).text()).toBe('medium medium')
 
-    useSceneQuality().choice.value = 'auto'
+    useSceneQuality().choice.value = { tier: 'auto' }
     expect(localStorage.getItem(SCENE_QUALITY_KEY)).toBeNull()
   })
 

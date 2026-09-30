@@ -19,7 +19,7 @@ import { isMissionDue } from '../mission/background'
 import { publicMissionState } from '../mission/state'
 import { tickMission } from '../mission/tick'
 import type { AdminContext, AdminSettings } from './access'
-import { noStore, PLATFORM, readAdminBody } from './access'
+import { noStore, PLATFORM, requireAdmin } from './access'
 
 /**
  * Each probe gives up after this long, so a hung dependency still leaves an answer. The probes
@@ -88,7 +88,7 @@ async function rowsOf<T>(db: DB, query: ReturnType<typeof sql>): Promise<T[]> {
   return ((await db.execute(query)) as { rows: T[] }).rows
 }
 
-/** Everything an operator needs to name the failing step; only ever sent behind the admin token. */
+/** Everything an operator needs to name the failing step; only ever sent to an admin. */
 function detailOf(error: unknown): MissionDiagnosis['error'] {
   const name = error instanceof Error ? error.constructor.name : typeof error
   const postgres = postgresErrorOf(error)
@@ -282,13 +282,13 @@ export function diagnoseRuntime(settings: AdminSettings): RuntimeDiagnosis {
 
 /**
  * `POST /api/admin/diagnose`: whether the database, blobs and settings this deployment needs are
- * reachable and present. Refuses as {@link readAdminBody} does; past that it always answers 200,
- * each failing section carrying its own error.
+ * reachable and present. Answers 404 to anyone but an admin (see {@link requireAdmin}); to an
+ * admin it always answers 200, each failing section carrying its own error.
  */
 export function defineAdminDiagnoseHandlerWith(context: AdminContext) {
   return defineHandler(async (event) => {
     noStore(event)
-    await readAdminBody(event, context)
+    await requireAdmin(event, context)
     const [database, locks, blobs, mission] = await Promise.all([
       diagnoseDatabase(context.db),
       diagnoseLocks(context.db),
