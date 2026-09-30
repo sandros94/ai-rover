@@ -17,7 +17,7 @@ async function clientErrorOf(promise: Promise<unknown>): Promise<ClientError | u
 describe('recorded journey fixture', () => {
   it('matches the generator byte for byte', () => {
     const { files } = journeyFixture()
-    expect(files.size).toBe(55)
+    expect(files.size).toBe(58)
     for (const [key, bytes] of files)
       expect({ key, bytes: readRecord(key) }).toEqual({ key, bytes })
   })

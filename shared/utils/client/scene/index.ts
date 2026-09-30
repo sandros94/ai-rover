@@ -44,8 +44,6 @@ export {
 export type { Quat } from './placement'
 export { flatFrame, framePlacement, fromTo } from './placement'
 export type { RigNode, RigTransforms } from './rover-rig'
-export type { MotionLimits, MotionProfile } from './motion-profile'
-export { motionProfile } from './motion-profile'
 export {
   ARM_JOINT_MOTION,
   ARM_LEGS,

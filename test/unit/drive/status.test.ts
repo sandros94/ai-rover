@@ -39,6 +39,23 @@ describe('statusRuns', () => {
     ])
   })
 
+  it('steers before a turn in place and after it, straight into the next run', () => {
+    const runs = statusRuns([
+      ev(0, 'start'),
+      ev(0, 'steering', { durationS: 5 }),
+      ev(5, 'turning', { angleDeg: 90, durationS: 60 }),
+      ev(65, 'steering', { durationS: 5 }),
+      ev(100, 'arrived'),
+    ])
+    expect(runs).toEqual([
+      { t: 0, status: 'steering', endsAt: 5 },
+      { t: 5, status: 'turning', endsAt: 65, angleDeg: 90 },
+      { t: 65, status: 'steering', endsAt: 70 },
+      { t: 70, status: 'driving' },
+      { t: 100, status: 'stopped' },
+    ])
+  })
+
   it('lets a terminal event cut a stop short', () => {
     const runs = statusRuns([
       ev(0, 'start'),

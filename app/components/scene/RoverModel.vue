@@ -44,7 +44,7 @@ import { posableRover, poseRover } from '~/utils/rover-pose'
 
 const props = withDefaults(
   defineProps<{
-    /** The 19 keyframe values: position, attitude, spins and suspension, used as recorded. */
+    /** The 23 keyframe values: position, attitude, spins, suspension and steering, used as recorded. */
     frame: Float32Array
     /**
      * Draw as a red translucent silhouette, for a death marker: the low-poly model in the ghost

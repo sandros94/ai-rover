@@ -6,7 +6,7 @@ import { ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
 
 const props = withDefaults(
   defineProps<{
-    /** The 19 keyframe values at the playback time. */
+    /** The 23 keyframe values at the playback time. */
     frame: Float32Array
     /** Events up to the playback time. */
     events: DriveEvent[]
@@ -33,6 +33,7 @@ const efficiency = computed(() =>
 )
 const STATUS_ICON: Record<DriveStatus, string> = {
   driving: 'i-lucide-navigation',
+  steering: 'i-lucide-arrow-left-right',
   turning: 'i-lucide-rotate-cw',
   assessing: 'i-lucide-scan-search',
   imaging: 'i-lucide-camera',
@@ -42,6 +43,7 @@ const STATUS_ICON: Record<DriveStatus, string> = {
 const status = computed(() => {
   const run = statusAt(props.events, t.value)
   let label: string = run.status
+  if (run.status === 'steering') label = 'steering wheels'
   if (run.status === 'turning' && run.angleDeg !== undefined)
     label = `turning ${Math.round(Math.abs(run.angleDeg))}°`
   if (run.status === 'imaging' && run.endsAt !== undefined)

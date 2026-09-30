@@ -27,7 +27,7 @@ import {
 
 /**
  * A 60 m survey keeps the disk, margin included, to the sixteen chunks around the origin, so
- * every blob the manifest names is on disk; a 30 m drive keeps the slices near 160 KB.
+ * every blob the manifest names is on disk; a 30 m drive keeps the slices near 210 KB.
  * Production uses a 500 m survey, which would weigh megabytes.
  */
 export const JOURNEY_FIXTURE = Object.freeze({

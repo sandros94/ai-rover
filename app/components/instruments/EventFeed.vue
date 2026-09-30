@@ -17,6 +17,7 @@ const props = withDefaults(
 /** Icon and label per event; status colours only where the event is a state of the drive. */
 const KIND: Record<DriveEventType, { icon: string; label: string; color?: string }> = {
   start: { icon: 'i-lucide-play', label: 'Started' },
+  steering: { icon: 'i-lucide-arrow-left-right', label: 'Steering wheels' },
   turning: { icon: 'i-lucide-rotate-cw', label: 'Turning' },
   assessing: { icon: 'i-lucide-scan-search', label: 'Assessing' },
   replan: { icon: 'i-lucide-route', label: 'Replanned' },
@@ -35,7 +36,7 @@ function detail(item: (typeof items.value)[number]): string | undefined {
   const seconds = typeof d?.durationS === 'number' ? `${Math.round(d.durationS)} s` : undefined
   if (item.type === 'turning' && typeof d?.angleDeg === 'number')
     return `${Math.round(Math.abs(d.angleDeg))}° ${d.angleDeg > 0 ? 'left' : 'right'}`
-  if (item.type === 'imaging') return seconds
+  if (item.type === 'imaging' || item.type === 'steering') return seconds
   if (item.type === 'assessing')
     return [seconds, typeof d?.cause === 'string' && `${d.cause} ground`].filter(Boolean).join(', ')
   if (item.type === 'slip' && typeof d?.slip === 'number')

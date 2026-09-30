@@ -159,6 +159,17 @@ describe('rigTransforms', () => {
     expect(ahead.z).toBeGreaterThan(0.1)
   })
 
+  it('steers the corner wheels about the body up axis, a positive angle turning the front left', () => {
+    const rig = rigTransforms(
+      withField(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }), 'steerRL', 0.5),
+    )
+    const turned = ROVER_RIG_NODES.filter((name) => !isIdentity(rig.joints[name]))
+    expect(turned).toEqual(['steer_lr'])
+    const forward = rotate(rig.joints.steer_lr, { x: 1, y: 0, z: 0 })
+    expect(Math.atan2(forward.y, forward.x)).toBeCloseTo(0.5, 6)
+    expect(forward.z).toBeCloseTo(0, 12)
+  })
+
   it('spins the wheels about their axles, forward spin carrying the top forward', () => {
     const rig = rigTransforms(
       withField(flatFrame({ x: 0, y: 0, z: 0, headingRad: 0 }), 'spinRR', Math.PI / 2),

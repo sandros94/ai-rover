@@ -13,7 +13,7 @@ export type PlaygroundNeed = 'record' | 'disk'
  */
 export const PLAYGROUND_PROPS = {
   record: { type: Object as PropType<SegmentRecord>, required: true },
-  /** The 19 keyframe values at the scrub time, as `interpolatePose` returns them. */
+  /** The 23 keyframe values at the scrub time, as `interpolatePose` returns them. */
   frame: { type: Float32Array, required: true },
   /** Record events at or before the scrub time. */
   events: { type: Array as PropType<DriveEvent[]>, required: true },

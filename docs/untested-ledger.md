@@ -16,7 +16,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 12. Hand-rolled AT Protocol public client: DPoP nonce retry and handle/DID resolution against a real PDS untested.
 13. Ejecta-thickness constants (McGetchin 1973) cited second-hand.
 14. Client-side planner preview performance on phones over a 500 m disk of terrain.
-15. Turn-in-place rate of 3°/s: no published Perseverance figure found.
+15. Corner steering rate of 0.168 rad/s (taken equal to the identical drive actuators' output rate) and the 2° difference below which the rover drives on without re-steering: no published figure for either.
 16. Slip model constants (gain 1.2, stuck above 0.6 for 3 m, loose-regolith noise at 80 m wavelength): judgement calls, untested against the JPL slip data beyond the qualitative 50–94 % figures.
 17. Migration application on a real deploy: Netlify applies `netlify/database/migrations/*/migration.sql` before publish; unexercised until the first deploy.
 18. `unauth` `defineSession` does not forward `sessionHeader` to `unjwt`, so a sealed session token is also accepted from a request header, not only the cookie; upstream fix pending, then pass `sessionHeader: false`.

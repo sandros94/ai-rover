@@ -4,9 +4,10 @@ import { computed, defineAsyncComponent, onBeforeUnmount, ref, shallowRef, watch
 import type { Object3D } from 'three'
 import { useRoute, useRuntimeConfig } from '#imports'
 import { formatLmst } from '#shared/utils/client/instruments'
+import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import { MODEL_LOOKS, useModelLook } from '../../playground/model-look'
 import type { ModelLook } from '../../playground/model-look'
-import type { MotionDemo } from '../../playground/rover-motion'
+import type { MotionDemo, MotionState } from '../../playground/rover-motion'
 import { MOTION_DEMOS, motionAt } from '../../playground/rover-motion'
 
 // Lazy: three.js loads with the scene, never with the playground shell.
@@ -71,17 +72,19 @@ const lmst = computed(() => {
 })
 
 const DEG = 180 / Math.PI
-/** The joints the demos move, as the readout lists them. */
-const READOUT = [
-  'steer_lf',
-  'steer_rf',
-  'steer_lr',
-  'steer_rr',
-  'arm_1',
-  'arm_2',
-  'arm_3',
-  'arm_4',
-  'arm_5',
+/**
+ * What the demos move, as the readout lists it: the corner steering angles as the frame records
+ * them (counter-clockwise from above), and the arm joints.
+ */
+const READOUT: { label: string; read: (state: MotionState) => number }[] = [
+  ...(['steerFL', 'steerFR', 'steerRL', 'steerRR'] as const).map((name) => ({
+    label: name,
+    read: (state: MotionState) => state.frame[KEYFRAME_FIELDS.indexOf(name)]!,
+  })),
+  ...['arm_1', 'arm_2', 'arm_3', 'arm_4', 'arm_5'].map((node) => ({
+    label: node,
+    read: (state: MotionState) => state.joints[node] ?? 0,
+  })),
 ]
 </script>
 
@@ -139,18 +142,19 @@ const READOUT = [
       </p>
       <p v-if="failed" class="text-sm text-error">{{ failed }}</p>
       <ul class="grid grid-cols-2 gap-x-4 font-mono text-xs">
-        <li v-for="node in READOUT" :key="node" class="flex justify-between">
-          <span>{{ node }}</span>
-          <span class="tabular-nums">{{ ((state.joints[node] ?? 0) * DEG).toFixed(1) }}°</span>
+        <li v-for="{ label, read } in READOUT" :key="label" class="flex justify-between">
+          <span>{{ label }}</span>
+          <span class="tabular-nums">{{ (read(state) * DEG).toFixed(1) }}°</span>
         </li>
       </ul>
       <p class="text-xs text-muted">
-        Scripted motions: the steering, turn rate, speeds and arc here are the demo's own constants,
-        not the drive's. Point turn: the corner wheels steer into the toe-in stance, the body turns
-        with each side spinning the other way, then they steer back. Arc: the corners steer to
-        double-Ackermann angles about a centre 4 m to the left and each wheel spins at its own
-        radius. Dusk and dawn: the sol clock from a minute before sunset until the lamp is full,
-        then from before sunrise until the arm has stowed.
+        Scripted motions on the drive's own wheel angles, steering, turn and drive limits. Point
+        turn: the corner wheels steer into the toe-in stance, the body turns a quarter turn with
+        each side spinning the other way, then they steer back. Arc: the corners steer to
+        double-Ackermann angles about a centre 4 m to the left and the rover drives 3.6 m at the
+        cruise speed, each wheel spinning at its own radius. Dusk and dawn: the sol clock from a
+        minute before sunset until the lamp is full, then from before sunrise until the arm has
+        stowed.
       </p>
     </div>
   </div>

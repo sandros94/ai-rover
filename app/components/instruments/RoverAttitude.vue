@@ -11,7 +11,7 @@ import type { Point3, ResolvedRoverGeometry } from '#shared/utils/rover'
 import { DEFAULT_ROVER_GEOMETRY, DEFAULT_ROVER_LIMITS as L } from '#shared/utils/rover'
 
 const props = defineProps<{
-  /** The 19 keyframe values, as `interpolatePose` returns them. */
+  /** The 23 keyframe values, as `interpolatePose` returns them. */
   frame: Float32Array
   geometry?: ResolvedRoverGeometry
 }>()

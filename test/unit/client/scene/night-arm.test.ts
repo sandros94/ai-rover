@@ -10,7 +10,7 @@ import {
   armPoseAt,
   armSequenceSeconds,
 } from '#shared/utils/client/scene/night-arm'
-import { motionProfile } from '#shared/utils/client/scene/motion-profile'
+import { moveAt, planMove } from '#shared/utils/drive/profile'
 import { sunCrossings } from '#shared/utils/client/scene/sun'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments/sol-clock'
 
@@ -41,10 +41,11 @@ describe('the arm unstow', () => {
       const widest = Math.max(
         ...ARM_JOINTS.map(({ node }) => Math.abs(leg.to[node] - leg.from[node])),
       )
-      expect(leg.durationS).toBe(motionProfile(widest, ARM_JOINT_MOTION).durationS)
+      const move = planMove(widest, ARM_JOINT_MOTION)
+      expect(leg.durationS).toBe(move.durationS)
       for (const f of [0.1, 0.5, 0.8]) {
         const pose = armPoseAlong(leg.startS + leg.durationS * f)
-        const s = motionProfile(widest, ARM_JOINT_MOTION).positionAt(leg.durationS * f) / widest
+        const s = moveAt(move, leg.durationS * f).position / widest
         for (const { node } of ARM_JOINTS) {
           expect(pose[node]).toBeCloseTo(leg.from[node] + (leg.to[node] - leg.from[node]) * s, 12)
         }
@@ -66,9 +67,7 @@ describe('the arm unstow', () => {
     rates
       .slice(1)
       .forEach((v, k) =>
-        expect(Math.abs(v - rates[k]!)).toBeLessThanOrEqual(
-          ARM_JOINT_MOTION.acceleration * dt * 1.01,
-        ),
+        expect(Math.abs(v - rates[k]!)).toBeLessThanOrEqual(ARM_JOINT_MOTION.accel * dt * 1.01),
       )
     for (const { startS } of ARM_LEGS.slice(1)) {
       const before = armPoseAlong(startS - 1e-3)

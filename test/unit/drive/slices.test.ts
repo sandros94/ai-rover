@@ -134,9 +134,35 @@ describe('sliceRecord on seed mars, 150 m', () => {
 })
 
 describe('segment manifest schema', () => {
+  it('states the keyframe layout: version 2 with stride 23', () => {
+    expect(manifest.version).toBe(2)
+    expect(manifest.stride).toBe(23)
+  })
+
+  it('reads a version 1 manifest, whose stride is 19, and refuses a stride its version does not state', () => {
+    const plain = JSON.parse(JSON.stringify(manifest))
+    expect(parseSegmentManifest({ ...plain, version: 1, stride: 19 })).toMatchObject({
+      version: 1,
+      stride: 19,
+    })
+    for (const [version, stride] of [
+      [1, 23],
+      [2, 19],
+    ]) {
+      expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version, stride }))?.code).toBe(
+        'INVALID_RECORD',
+      )
+    }
+    const stored = { ...plain, version: 1, stride: 19, segmentId: 'seg-1', startedAt: 1 }
+    expect(parseStoredSegmentManifest(stored).stride).toBe(19)
+    expect(driveErrorOf(() => parseStoredSegmentManifest({ ...stored, stride: 23 }))?.code).toBe(
+      'INVALID_RECORD',
+    )
+  })
+
   it('refuses an outcome field or a wrong version', () => {
     const plain = JSON.parse(JSON.stringify(manifest))
-    expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version: 2 }))?.code).toBe(
+    expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version: 3 }))?.code).toBe(
       'INVALID_RECORD',
     )
     expect(
@@ -166,7 +192,29 @@ describe('segment manifest schema', () => {
   })
 })
 
-describe('slice binary format v1', () => {
+/** `slice` as format v1 wrote it: 19-value frames, no steering. */
+function encodeV1(slice: SegmentSlice): Uint8Array {
+  const v2 = encodeSlice(slice)
+  const frames = slice.keyframes.length / KEYFRAME_STRIDE
+  const tail = v2.subarray(SLICE_HEADER_BYTES + slice.keyframes.length * 4)
+  const bytes = new Uint8Array(SLICE_HEADER_BYTES + frames * 19 * 4 + tail.byteLength)
+  bytes.set(v2.subarray(0, SLICE_HEADER_BYTES), 0)
+  bytes[4] = 1
+  const view = new DataView(bytes.buffer)
+  for (let f = 0; f < frames; f++) {
+    for (let k = 0; k < 19; k++) {
+      view.setFloat32(
+        SLICE_HEADER_BYTES + (f * 19 + k) * 4,
+        slice.keyframes[f * KEYFRAME_STRIDE + k]!,
+        true,
+      )
+    }
+  }
+  bytes.set(tail, SLICE_HEADER_BYTES + frames * 19 * 4)
+  return bytes
+}
+
+describe('slice binary format v2', () => {
   const last = slices.at(-1)!
 
   it('writes the documented header', () => {
@@ -175,7 +223,7 @@ describe('slice binary format v1', () => {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     expect(SLICE_HEADER_BYTES).toBe(23)
     expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe('JRSL')
-    expect(view.getUint8(4)).toBe(1)
+    expect(view.getUint8(4)).toBe(2)
     expect(view.getUint8(5)).toBe(0)
     expect(view.getUint32(6, true)).toBe(1)
     expect(view.getUint32(10, true)).toBe(s.keyframes.length / KEYFRAME_STRIDE)
@@ -198,6 +246,21 @@ describe('slice binary format v1', () => {
     expect(decodeSlice(padded.subarray(1))).toEqual(last)
   })
 
+  it('reads a format v1 slice with its frames widened, the steering angles zero', () => {
+    const s = slices.find((slice) =>
+      slice.keyframes.some((value, k) => k % KEYFRAME_STRIDE >= 19 && value !== 0),
+    )!
+    expect(s).toBeDefined()
+    const decoded = decodeSlice(encodeV1(s))
+    expect(decoded.keyframes).toHaveLength(s.keyframes.length)
+    for (let k = 0; k < s.keyframes.length; k++) {
+      const field = k % KEYFRAME_STRIDE
+      expect(decoded.keyframes[k]).toBe(field < 19 ? s.keyframes[k] : 0)
+    }
+    expect(decoded.events).toEqual(s.events)
+    expect(decoded.reveals).toEqual(s.reveals)
+  })
+
   it('reports each malformed buffer with its code', () => {
     const bytes = encodeSlice(last)
     const code = (b: Uint8Array) => driveErrorOf(() => decodeSlice(b))?.code
@@ -211,7 +274,7 @@ describe('slice binary format v1', () => {
     magic[0] = 0x58
     expect(code(magic)).toBe('INVALID_RECORD')
     const version = bytes.slice()
-    version[4] = 2
+    version[4] = 3
     expect(code(version)).toBe('UNSUPPORTED_VERSION')
     const flags = bytes.slice()
     flags[5] = 1

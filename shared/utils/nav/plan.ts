@@ -2,10 +2,13 @@ import { slopeAt } from '../terrain/analysis'
 import type { StopDisk } from '../terrain/disk'
 import type { GridCell } from '../terrain/grid'
 import {
-  DEFAULT_SPEED_MODEL,
   DEFAULT_STOP_MODEL,
   groundSpeedMps,
-  imagingStopCount,
+  imagingStopsAt,
+  minArcRadiusM,
+  rampTimeS,
+  steeringTimeS,
+  turnDurationS,
 } from '../drive/models'
 import type { CostMapOptions } from './costmap'
 import { buildCostMap, DEFAULT_COST_MAP } from './costmap'
@@ -44,9 +47,11 @@ export interface NavMetrics {
   /**
    * Planned drive time, seconds, under the default speed and stop models: each cell of the path
    * at the speed its seen slope allows, unseen cells at the speed of ground that costs the
-   * unrevealed penalty, an imaging stop every `imagingEveryM` away from either end, and the turns in
-   * place. Assessments are left out, as they wait on ground the drive finds blocked; so are slip
-   * and a turn to face the route from the rover's heading.
+   * unrevealed penalty, an imaging stop every `imagingEveryM` away from either end, the turns in
+   * place, the wheels steered standing still before each motion that needs it, and the time each
+   * start from rest and stop to rest adds, all on the producer's jerk-limited profiles.
+   * Assessments are left out, as they wait on ground the drive finds blocked; so are slip and a
+   * turn to face the route from the rover's heading.
    */
   estimatedDriveS: number
   /** Turns in place among the motions. */
@@ -81,7 +86,14 @@ export function planSegment(
     Omit<MotionOptions, 'initialHeadingRad'>,
 ): SegmentPlan {
   const began = performance.now()
-  const { revealed, start, goal } = options
+  const { revealed, start, goal, blendRadiusM } = options
+  const tightest = minArcRadiusM()
+  if (blendRadiusM !== undefined && blendRadiusM < tightest) {
+    throw new NavError(
+      'INVALID_INPUT',
+      `planSegment: blendRadiusM is ${blendRadiusM}; pass at least ${tightest.toFixed(3)} m, the tightest arc the corner steering reaches.`,
+    )
+  }
   const { grid, origin } = disk
   const { width, cellSize } = grid
   const from = vertexInDisk(disk, start, 'start')
@@ -196,15 +208,23 @@ function alongPath(
 }
 
 /**
- * Standstill a drive of `lengthM` along `motions` spends under the default models: an imaging
- * stop at every `imagingEveryM` away from either end, and the turns in place.
+ * Time a drive of `lengthM` along `motions` spends beyond covering its ground at speed, under
+ * the default models: an imaging stop at every `imagingEveryM` away from either end, the turns
+ * in place, the steering before each motion that needs it, and the ramps into and out of every
+ * rest those make.
  */
 function stopsAlong(lengthM: number, motions: readonly Motion[]): number {
   const { imagingEveryM, imagingStopS } = DEFAULT_STOP_MODEL
-  const imaging = imagingStopCount(lengthM, imagingEveryM)
-  let turnedRad = 0
-  for (const motion of motions) if (motion.type === 'turn') turnedRad += Math.abs(motion.angleRad)
-  return imaging * imagingStopS + turnedRad / DEFAULT_SPEED_MODEL.turnRateRadPerS
+  const imaging = imagingStopsAt(lengthM, imagingEveryM)
+  let turning = 0
+  for (const motion of motions)
+    if (motion.type === 'turn') turning += turnDurationS(motion.angleRad)
+  return (
+    imaging.length * imagingStopS +
+    turning +
+    steeringTimeS(motions) +
+    rampTimeS(motions, { stopsAtM: imaging })
+  )
 }
 
 function vertexInDisk(disk: StopDisk, point: { x: number; y: number }, name: string): GridCell {

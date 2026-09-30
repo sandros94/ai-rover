@@ -1,8 +1,8 @@
+import type { Move, ProfileLimits } from '../../drive/profile'
+import { moveAt, planMove } from '../../drive/profile'
 import type { ArmPose } from '../../rover/arm'
 import { ARM_JOINTS, ARM_STOWED } from '../../rover/arm'
 import { MARS_SOL_SECONDS } from '../instruments/sol-clock'
-import type { MotionLimits, MotionProfile } from './motion-profile'
-import { motionProfile } from './motion-profile'
 import { DEFAULT_LATITUDE_DEG, sunCrossings } from './sun'
 
 /**
@@ -56,26 +56,26 @@ export const ARM_UNSTOW: readonly ArmPose[] = [
  * sequence of several minutes whose joint rates and accelerations are not published; 2°/s makes
  * this one take a few minutes of the sol.
  */
-export const ARM_JOINT_MOTION: MotionLimits = {
+export const ARM_JOINT_MOTION: ProfileLimits = {
   rate: (2 * Math.PI) / 180,
-  acceleration: (2 * Math.PI) / 180,
+  accel: (2 * Math.PI) / 180,
   jerk: (4 * Math.PI) / 180,
 }
 
-/** Each leg of {@link ARM_UNSTOW}: its end poses, the sol seconds it starts at and lasts, and its furthest mover's profile. */
+/** Each leg of {@link ARM_UNSTOW}: its end poses, the sol seconds it starts at and lasts, and its furthest mover's move. */
 export const ARM_LEGS = ARM_UNSTOW.slice(1).reduce<
   {
     from: ArmPose
     to: ArmPose
     startS: number
     durationS: number
-    widest: MotionProfile & { distance: number }
+    widest: Move
   }[]
 >((legs, to, k) => {
   const from = ARM_UNSTOW[k]!
   const last = legs.at(-1)
   const distance = Math.max(...ARM_JOINTS.map(({ node }) => Math.abs(to[node] - from[node])))
-  const widest = { ...motionProfile(distance, ARM_JOINT_MOTION), distance }
+  const widest = planMove(distance, ARM_JOINT_MOTION)
   legs.push({
     from,
     to,
@@ -93,7 +93,7 @@ export const ARM_SEQUENCE_S = ARM_LEGS.at(-1)!.startS + ARM_LEGS.at(-1)!.duratio
 export function armPoseAlong(seconds: number): ArmPose {
   const leg =
     ARM_LEGS.find(({ startS, durationS }) => seconds < startS + durationS) ?? ARM_LEGS.at(-1)!
-  const s = leg.widest.positionAt(seconds - leg.startS) / leg.widest.distance
+  const s = moveAt(leg.widest, seconds - leg.startS).position / leg.widest.distance
   const pose = {} as ArmPose
   for (const { node } of ARM_JOINTS) {
     pose[node] = leg.from[node] + (leg.to[node] - leg.from[node]) * s

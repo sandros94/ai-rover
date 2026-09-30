@@ -128,6 +128,38 @@ Candidate rules:
 
 Suggested default: **C**, with the mission clock advancing by simulated drive time (distance / effective speed + stop events) and the day budget derived from the 200-300 m/sol figure. Show real elapsed time in the HUD so "accurate" remains true even though playback is accelerated.
 
+## 7. Steering: how the rover turns
+
+Perseverance "shares much of its physical and electrical design" with Curiosity, including the 4.2 cm/s top wheel speed [S41], so Curiosity's mobility papers describe it: ten identical wheel-and-steer actuators, six driving and four steering; "the middle wheels are not steerable" [S38]. Only eight motor controllers serve the ten actuators, so the rover uses a **steer-then-drive** architecture: brakes released, front and rear wheels steered to their angles, brakes engaged, then the drive step runs [S38]. Steering therefore happens standing still, before the motion that needs it.
+
+- **Turn in place.** "Implemented by steering the four corner wheels to approximately 45 degrees off-forward-axis, and driving them in the same clockwise or counter-clockwise direction"; the centre does not translate, and the corner wheels "must be steered back" before driving on [S39]. Each corner wheel's axle points at the rover's centre; the rear wheels, closer to the middle axle, "steer to a slightly smaller angle than the front wheels" [S38]. Entering and leaving the stance costs up to 90° of steering per wheel [S39].
+- **Arcs.** "Traditional double Ackermann steering control, pointing each corner wheel independently along a tangent to the turning circle for that wheel's radius" [S38]. In constant-speed mode the wheel on the widest circle turns at the top rate, 0.168 rad/s (4.2 cm/s), "with other wheels' rates set in proportion" [S38].
+- **Limits.** Steering has a hard stop at ±95° and a software limit of ±85° from the longitudinal axis [S38]; the URDF leaves the steer joints unlimited [S40].
+
+Values used (body geometry from §1 and the URDF [S40]):
+
+| Quantity | Value | Basis |
+| --- | --- | --- |
+| Turn-in-place stance | front ±48.0°, rear ±45.3° | axle at the centre: `atan(x / y)` of each corner wheel [S38], [S39] |
+| Turn-in-place rate | 0.0264 rad/s ≈ 1.51°/s | outer corner wheel (1.59 m from the centre) at the 4.2 cm/s cap [S38] |
+| Steering rate | 0.168 rad/s ≈ 9.6°/s, ≈ 7.4 s into the stance with its ramps (§8) | **UNVERIFIED**: no figure published; the steer actuators are identical to the drive ones [S38], whose output rate this is |
+| Minimum arc radius | 1.17 m | inner corner wheels at the ±85° software limit [S38] |
+| Re-steer threshold | 2° | judgement call |
+
+---
+
+## 8. Acceleration: how the rover starts and stops
+
+No acceleration, deceleration or jerk figure for Perseverance's or Curiosity's drive was found in the fetched sources; the references give top rates only (0.042 m/s wheel speed, 0.168 rad/s actuator output [S38], [S41]). The profile values are therefore judgement calls, chosen so a start or stop is visible at 1× yet short beside the stops, and derived from one another where the hardware ties them together.
+
+| Quantity | Value | Basis |
+| --- | --- | --- |
+| Drive acceleration | 0.025 m/s² | **UNVERIFIED**, judgement call: rest to 0.033 m/s in about 2 s over about 3 cm; 26 N at 1,025 kg, far inside the wheels' traction at 3.69 m/s² [S1], [S11] |
+| Drive jerk | 0.04 m/s³ | **UNVERIFIED**, judgement call: 0.625 s to reach the acceleration |
+| Turn-in-place acceleration, jerk | 0.0157 rad/s², 0.0251 rad/s³ | the drive's at the outer corner wheel (1.59 m from the centre), which sets the turn rate [S38]; ramp about 2.3 s |
+| Steering acceleration, jerk | 0.095 rad/s², 0.152 rad/s³ | the drive's at the wheel radius (0.263 m): the steer and drive actuators are identical [S38]; ramp about 2.4 s |
+| Emergency deceleration | 0.1 m/s², no jerk limit | **UNVERIFIED**, judgement call: a fault stops the drive from 0.033 m/s in 0.33 s over 5 mm |
+
 ---
 
 ## Sources
@@ -169,3 +201,7 @@ Suggested default: **C**, with the mission clock advancing by simulated drive ti
 - [S35] Web search summary: Tresjs/nuxt repo archived 2026-02-01, moved to monorepo
 - [S36] Web search summary: Nuxt 5 targeted Q4 2026; nuxt-nightly 5.0.0 available
 - [S37] https://raw.githubusercontent.com/benjamincanac/avelune/main/package.json (exact dependency versions)
+- [S38] https://www-robotics.jpl.nasa.gov/media/documents/2020-mobility-trending.pdf (Rankin, Maimone, Biesiadecki et al., "Driving Curiosity: Mars Rover Mobility Trends During the First Seven Years", IEEE Aerospace 2020: ten identical wheel and steer actuators, middle wheels not steerable, steer-then-drive, double Ackermann arcs, 0.168 rad/s = 4.2 cm/s top wheel rate with the others in proportion, ±95° hard / ±85° software steering limits, rear wheels steer less in a turn in place)
+- [S39] https://www-robotics.jpl.nasa.gov/media/documents/Wheels_Made_for_Arcing.pdf (Maimone, Hilgemann, Abcouwer, Rollins et al., "These Wheels Are Made for Arc-ing", 2023: turn in place with the corner wheels about 45° off the forward axis, steered back before driving, up to 90° of steering per wheel into and out of it)
+- [S40] https://github.com/nasa-jpl/m2020-urdf-models/blob/c422fc6d96f2684521fb64049448d611e670f140/rover/m2020.urdf (`LF/RF/LR/RR_STEER` revolute about the link's z, limits unbounded)
+- [S41] https://www-robotics.jpl.nasa.gov/what-we-do/flight-projects/mars-2020-rover/m2020mobility/ (JPL Robotics, Mars 2020 mobility: shared design with Curiosity, 4.2 cm/s maximum wheel speed)
