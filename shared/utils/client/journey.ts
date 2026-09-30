@@ -1,8 +1,13 @@
 import type { SegmentSlice, StoredSegmentManifest } from '../drive/slices'
 import { decodeSlice, parseStoredSegmentManifest } from '../drive/slices'
 import type { SliceTrace } from '../drive/traces'
-import { decodeTrace } from '../drive/traces'
-import { segmentManifestKey, segmentSliceKey, segmentTraceKey } from '../drive/keys'
+import { decodeTrace, decodeTraceBlock, TRACE_BLOCK } from '../drive/traces'
+import {
+  segmentManifestKey,
+  segmentSliceKey,
+  segmentTraceBlockKey,
+  segmentTraceKey,
+} from '../drive/keys'
 import type { Chunk } from '../terrain/chunk'
 import { decodeChunk } from '../terrain/encode'
 import type { StopManifest } from '../terrain/manifest'
@@ -43,6 +48,8 @@ export interface JourneyClient {
   getSegmentManifest(segmentId: string): Promise<StoredSegmentManifest>
   getSlice(segmentId: string, sliceIndex: number): Promise<Released<SegmentSlice>>
   getTrace(segmentId: string, sliceIndex: number): Promise<Released<SliceTrace>>
+  /** Traces `16 · block … 16 · block + 15` in one request, released with the last of them. */
+  getTraceBlock(segmentId: string, block: number): Promise<Released<SliceTrace[]>>
 }
 
 /**
@@ -110,12 +117,16 @@ export function createJourneyClient(
     }
   }
 
-  /** A time-gated blob of slice `sliceIndex`: 404 with `x-release-at` until it is released. */
-  async function released<T extends { index: number }>(
+  /**
+   * A time-gated blob: 404 with `x-release-at` until it is released. `holds` lists the slice
+   * indices it decoded to, which must be `sliceIndices`.
+   */
+  async function released<T>(
     key: string,
-    sliceIndex: number,
+    sliceIndices: number[],
     what: string,
     decoder: (bytes: Uint8Array) => T,
+    holds: (value: T) => number[],
   ): Promise<Released<T>> {
     const response = await request(key)
     if (response.status === 404) {
@@ -131,10 +142,11 @@ export function createJourneyClient(
       return { status: 'not-yet', releaseAt }
     }
     const value = decode(key, what, await bytesOf(key, response), decoder)
-    if (value.index !== sliceIndex) {
+    const found = holds(value).join(', ')
+    if (found !== sliceIndices.join(', ')) {
       throw new ClientError(
         'DECODE',
-        `${what} "${key}" holds slice ${value.index}; the store is inconsistent.`,
+        `${what} "${key}" holds slice ${found || 'none'}; the store is inconsistent.`,
       )
     }
     return { status: 'ready', value }
@@ -205,9 +217,22 @@ export function createJourneyClient(
     },
 
     getSlice: async (segmentId, sliceIndex) =>
-      released(segmentSliceKey(segmentId, sliceIndex), sliceIndex, 'Slice', decodeSlice),
+      released(segmentSliceKey(segmentId, sliceIndex), [sliceIndex], 'Slice', decodeSlice, (s) => [
+        s.index,
+      ]),
 
     getTrace: async (segmentId, sliceIndex) =>
-      released(segmentTraceKey(segmentId, sliceIndex), sliceIndex, 'Trace', decodeTrace),
+      released(segmentTraceKey(segmentId, sliceIndex), [sliceIndex], 'Trace', decodeTrace, (t) => [
+        t.index,
+      ]),
+
+    getTraceBlock: async (segmentId, block) =>
+      released(
+        segmentTraceBlockKey(segmentId, block),
+        Array.from({ length: TRACE_BLOCK }, (_, k) => block * TRACE_BLOCK + k),
+        'Trace block',
+        decodeTraceBlock,
+        (traces) => traces.map((t) => t.index),
+      ),
   }
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { segmentSliceKey, segmentTraceKey } from '#shared/utils/drive'
+import {
+  encodeTraceBlock,
+  segmentSliceKey,
+  segmentTraceBlockKey,
+  segmentTraceKey,
+} from '#shared/utils/drive'
 import { ClientError, createJourneyClient } from '#shared/utils/client'
 import { JOURNEY_FIXTURE, journeyFixture, readRecord, recordsFetch } from './helpers'
 
@@ -101,6 +106,21 @@ describe('createJourneyClient over the recorded journey', () => {
         value: trace,
       })
     }
+    expect(await client.getTraceBlock(segmentId, 1)).toEqual({
+      status: 'ready',
+      value: fixture.traces.slice(16, 32),
+    })
+  })
+
+  it('answers a trace block not-yet until its last trace is released, missing past the end', async () => {
+    const { fetch } = recordsFetch({ now: () => startedAt + 16 * 30_000 - 1 })
+    const client = createJourneyClient({ fetch })
+    expect(await client.getTraceBlock(segmentId, 0)).toEqual({
+      status: 'not-yet',
+      releaseAt: startedAt + 16 * 30_000,
+    })
+    const released = createJourneyClient({ fetch: recordsFetch().fetch })
+    expect(await released.getTraceBlock(segmentId, 2)).toEqual({ status: 'missing' })
   })
 
   it('answers not-yet with the release time on a 404 carrying x-release-at', async () => {
@@ -140,6 +160,7 @@ describe('createJourneyClient over the recorded journey', () => {
       client.getSegmentManifest(segmentId),
       client.getSlice(segmentId, 0),
       client.getTrace(segmentId, 0),
+      client.getTraceBlock(segmentId, 0),
     ]) {
       const error = await clientErrorOf(promise)
       expect(error?.code).toBe('DECODE')
@@ -165,6 +186,21 @@ describe('createJourneyClient over the recorded journey', () => {
     expect((await clientErrorOf(client.getChunk(worldHash, 0, 0)))?.code).toBe('DECODE')
     expect((await clientErrorOf(client.getSlice(segmentId, 1)))?.code).toBe('DECODE')
     expect((await clientErrorOf(client.getTrace(segmentId, 1)))?.code).toBe('DECODE')
+    const shifted = createJourneyClient({
+      fetch: recordsFetch({
+        override: (key) =>
+          key === segmentTraceBlockKey(segmentId, 0)
+            ? new Response(
+                encodeTraceBlock(
+                  Array.from({ length: 16 }, (_, k) =>
+                    readRecord(segmentTraceKey(segmentId, 16 + k))!,
+                  ),
+                ) as Uint8Array<ArrayBuffer>,
+              )
+            : undefined,
+      }).fetch,
+    })
+    expect((await clientErrorOf(shifted.getTraceBlock(segmentId, 0)))?.code).toBe('DECODE')
   })
 
   it('refuses a 404 whose x-release-at is not a date with DECODE', async () => {

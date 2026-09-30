@@ -56,7 +56,12 @@ export { frameOdometry, SLIP_WINDOW_M } from './odometry'
 export type { SliceTrace } from './traces'
 export {
   decodeTrace,
+  decodeTraceBlock,
   encodeTrace,
+  encodeTraceBlock,
+  TRACE_BLOCK,
+  TRACE_BLOCK_FORMAT_VERSION,
+  TRACE_BLOCK_HEADER_BYTES,
   TRACE_FORMAT_VERSION,
   TRACE_HEADER_BYTES,
   TRACE_PATH_SECONDS,
@@ -69,6 +74,7 @@ export {
   SEGMENT_ID,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceBlockKey,
   segmentTraceKey,
 } from './keys'
 export type {

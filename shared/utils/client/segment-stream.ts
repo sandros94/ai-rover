@@ -4,6 +4,7 @@ import type { DriveEvent, DriveOutcome } from '../drive/segment'
 import type { SegmentSlice, SliceTotals, StoredSegmentManifest } from '../drive/slices'
 import { sliceReleaseAt } from '../drive/slices'
 import type { SliceTrace } from '../drive/traces'
+import { TRACE_BLOCK } from '../drive/traces'
 import { ClientError } from './errors'
 import type { JourneyClient, Released } from './journey'
 
@@ -17,13 +18,19 @@ export const NOT_YET_RETRY_FLOOR_MS = 1000
 /** Wait after a failed request before the next poll asks again. */
 export const ERROR_RETRY_MS = 5000
 
-/** Requests a poll keeps open when none is given: slices and traces alike. */
+/** Requests a poll keeps open when none is given: slices, traces and trace blocks alike. */
 export const DEFAULT_SLICE_CONCURRENCY = 8
 
 /** Slices `start … end − 1` of a segment. */
 export interface SliceWindow {
   start: number
   end: number
+}
+
+/** A request of a pass: slice `k`, trace `k`, or the trace block starting at slice `k`. */
+interface Request {
+  kind: 'slice' | 'trace' | 'block'
+  k: number
 }
 
 /** The totals of a window starting at the drive's first slice. */
@@ -83,7 +90,7 @@ export interface SegmentStream {
   revealsUntil(simSeconds: number): SliceTrace['reveals']
   /**
    * Fetches what showing `simSeconds` at `wallMs` needs. The first window opens at the slice
-   * holding `simSeconds`, with every trace before it; later polls extend it forward to every
+   * holding `simSeconds`, with every trace up to it, by whole trace blocks where it can; later polls extend it forward to every
    * slice released at `wallMs` (with a known `endsAt`, none released after it) and backward to
    * the slice holding `simSeconds` when that lies before it. Nothing is fetched before its
    * release time, nor twice. Overlapping calls share one pass. Rejects with the client's error,
@@ -237,15 +244,26 @@ export function createSegmentStream(options: {
     window!.end++
   }
 
-  /** What the pass still needs at `wallMs` for `simSeconds`, the most urgent first. */
-  function wanted(wallMs: number, simSeconds: number): { kind: 'slice' | 'trace'; k: number }[] {
+  /**
+   * What the pass still needs at `wallMs` for `simSeconds`, the most urgent first. Traces go by
+   * whole released blocks where every trace of the block is still needed, so visitors share the
+   * same cached keys, and one by one past the last whole block.
+   */
+  function wanted(wallMs: number, simSeconds: number): Request[] {
     const released = releasedCount(wallMs)
-    const out: { kind: 'slice' | 'trace'; k: number }[] = []
+    const out: Request[] = []
+    const needed = (k: number) => k >= traces.length && !fetchedTraces.has(k)
     const slice = (k: number) => {
       if (!fetchedSlices.has(k)) out.push({ kind: 'slice', k })
     }
+    let blockEnd = 0
     const trace = (k: number) => {
-      if (traced && k >= traces.length && !fetchedTraces.has(k)) out.push({ kind: 'trace', k })
+      if (!traced || k < blockEnd || !needed(k)) return
+      const end = k + TRACE_BLOCK
+      let whole = k % TRACE_BLOCK === 0 && end <= released
+      for (let j = k; whole && j < end; j++) whole = needed(j)
+      if (whole) blockEnd = end
+      out.push({ kind: whole ? 'block' : 'trace', k })
     }
     if (!window) {
       if (released === 0) return out
@@ -285,9 +303,11 @@ export function createSegmentStream(options: {
       const batch = wanted(wallMs, simSeconds).slice(0, concurrency)
       if (batch.length === 0) return
       const settled = await Promise.allSettled(
-        batch.map(({ kind, k }): Promise<Released<SegmentSlice | SliceTrace>> =>
-          kind === 'slice' ? client.getSlice(segmentId, k) : client.getTrace(segmentId, k),
-        ),
+        batch.map(({ kind, k }): Promise<Released<SegmentSlice | SliceTrace | SliceTrace[]>> => {
+          if (kind === 'slice') return client.getSlice(segmentId, k)
+          if (kind === 'trace') return client.getTrace(segmentId, k)
+          return client.getTraceBlock(segmentId, k / TRACE_BLOCK)
+        }),
       )
       // What arrived is kept; only what failed is asked again.
       let stop: unknown
@@ -302,12 +322,13 @@ export function createSegmentStream(options: {
         if (result.status === 'missing') {
           stop ??= new ClientError(
             'NOT_FOUND',
-            `The ${kind} of slice ${k} of segment ${segmentId} is released but missing, and no earlier slice held the outcome.`,
+            `The ${kind === 'block' ? 'trace block' : kind} of slice ${k} of segment ${segmentId} is released but missing, and no earlier slice held the outcome.`,
           )
         } else if (result.status === 'not-yet') {
           waitFor = Math.max(waitFor ?? 0, result.releaseAt, wallMs + NOT_YET_RETRY_FLOOR_MS)
         } else if (kind === 'slice') fetchedSlices.set(k, result.value as SegmentSlice)
-        else fetchedTraces.set(k, result.value as SliceTrace)
+        else if (kind === 'trace') fetchedTraces.set(k, result.value as SliceTrace)
+        else for (const trace of result.value as SliceTrace[]) fetchedTraces.set(trace.index, trace)
       }
       try {
         commit()

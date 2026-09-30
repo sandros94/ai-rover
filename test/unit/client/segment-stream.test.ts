@@ -4,7 +4,9 @@ import {
   interpolatePose,
   KEYFRAME_STRIDE,
   segmentSliceKey,
+  segmentTraceBlockKey,
   sliceReleaseAt,
+  TRACE_BLOCK,
 } from '#shared/utils/drive'
 import {
   createJourneyClient,
@@ -53,6 +55,12 @@ function setup(
 
 const sliceUrl = (k: number) => `/journey/segments/${segmentId}/slices/${k}.bin`
 const traceUrl = (k: number) => `/journey/segments/${segmentId}/traces/${k}.bin`
+const blockUrl = (b: number) => `/journey/${segmentTraceBlockKey(segmentId, b)}`
+/** Traces `0 … end − 1` as a first load asks for them: whole blocks, then the rest one by one. */
+const tracesUpTo = (end: number) => {
+  const blocks = Math.floor(end / TRACE_BLOCK)
+  return [...range(0, blocks).map(blockUrl), ...range(blocks * TRACE_BLOCK, end).map(traceUrl)]
+}
 const range = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => from + k)
 /** The values of slices `from … to − 1` back to back. */
 const framesOf = (from: number, to: number) =>
@@ -76,13 +84,14 @@ describe('createSegmentStream over the recorded drive', () => {
     expect(stream.eventsUntil(1e9)).toEqual([])
   })
 
-  it('opens at live: the slice playback shows, and every trace up to it', async () => {
+  it('opens at live: the slice playback shows, and the traces up to it in whole blocks first', async () => {
     const { stream, calls, poll } = setup()
     const wall = releaseAt(20) + 6000
     const sim = liveAt(wall)
     expect(Math.floor(sim / sliceSeconds)).toBe(20)
     await poll(wall)
-    expect(sorted(calls)).toEqual(sorted([sliceUrl(20), ...range(0, 21).map(traceUrl)]))
+    expect(sorted(calls)).toEqual(sorted([sliceUrl(20), ...tracesUpTo(21)]))
+    expect(calls).toHaveLength(7)
     expect(stream.window).toEqual({ start: 20, end: 21 })
     expect(stream.loadedFrom).toBe(20 * sliceSeconds)
     expect(stream.totals).toEqual(slices[20]!.totals)
@@ -98,7 +107,8 @@ describe('createSegmentStream over the recorded drive', () => {
   it('opens a settled drive at its last slice alone, the outcome with it', async () => {
     const { stream, calls, poll } = setup({ endsAt: releaseAt(last) })
     await poll(releaseAt(last) + 3_600_000)
-    expect(sorted(calls)).toEqual(sorted([sliceUrl(last), ...range(0, last + 1).map(traceUrl)]))
+    expect(sorted(calls)).toEqual(sorted([sliceUrl(last), ...tracesUpTo(last + 1)]))
+    expect(calls).toHaveLength(9)
     expect(stream.window).toEqual({ start: last, end: last + 1 })
     expect(stream.done).toBe(true)
     expect(stream.outcomeAt(Infinity)).toEqual(record.outcome)

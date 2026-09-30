@@ -4,7 +4,16 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { UApp } from '#components'
 import { createOdometer } from '#shared/utils/client/instruments'
-import { parseJourneyKey, sliceGate, sliceReleaseAt, statusAt } from '#shared/utils/drive'
+import {
+  encodeTraceBlock,
+  parseJourneyKey,
+  segmentTraceBlockKey,
+  segmentTraceKey,
+  sliceGate,
+  sliceReleaseAt,
+  statusAt,
+  TRACE_BLOCK,
+} from '#shared/utils/drive'
 import { useDisplayClock } from '~/composables/useDisplayClock'
 import { usePlaybackTrack } from '~/composables/usePlaybackTrack'
 import { useSegmentPlayback } from '~/composables/useSegmentPlayback'
@@ -19,9 +28,12 @@ const sliceUrl = (k: number) => `/journey/segments/${segmentId}/slices/${k}.bin`
 const traceUrl = (k: number) => `/journey/segments/${segmentId}/traces/${k}.bin`
 const range = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => from + k)
 
-/** A slice past the first few whose start falls inside a stop begun in the slice before. */
+/**
+ * A slice past the first trace block whose start falls inside a stop begun in the slice before,
+ * so that a first load reads blocks, a single trace and the totals.
+ */
 const opening = slices.findIndex(
-  (s, k) => k >= 3 && s.totals.status !== null && s.totals.status.status !== 'driving',
+  (s, k) => k > TRACE_BLOCK && s.totals.status !== null && s.totals.status.status !== 'driving',
 )
 const stop = slices[opening]!.totals.status!
 /** Live playback just inside that slice: its start plus the live lag (one slice and 5 s). */
@@ -31,17 +43,27 @@ const calls: string[] = []
 
 /**
  * `/journey/{key}` over the fixture journey, rebuilt in memory (the unit tests hold it byte for
- * byte against the recorded files), each slice and trace held back until its release.
+ * byte against the recorded files), each slice, trace and trace block held back until its release.
  */
 async function journeyFetch(input: string): Promise<Response> {
   calls.push(input)
   const key = input.replace(/^\/journey\//, '')
   const parsed = parseJourneyKey(key)
-  const gated = parsed?.kind === 'segment-slice' || parsed?.kind === 'segment-trace'
-  if (gated && !sliceGate(manifest, parsed.index, Date.now()).released) {
+  const last =
+    parsed?.kind === 'segment-trace-block'
+      ? parsed.to
+      : parsed?.kind === 'segment-slice' || parsed?.kind === 'segment-trace'
+        ? parsed.index
+        : undefined
+  if (last !== undefined && !sliceGate(manifest, last, Date.now()).released) {
     return new Response(null, { status: 404, headers: { 'x-release-at': 'later' } })
   }
-  const bytes = files.get(key)
+  const bytes =
+    parsed?.kind === 'segment-trace-block'
+      ? encodeTraceBlock(
+          range(parsed.from, parsed.to + 1).map((k) => files.get(segmentTraceKey(segmentId, k))!),
+        )
+      : files.get(key)
   if (!bytes) return new Response(null, { status: 404 })
   return new Response(bytes as Uint8Array<ArrayBuffer>)
 }
@@ -92,8 +114,8 @@ describe('a first load of a drive in progress', () => {
     vi.unstubAllGlobals()
   })
 
-  it('opens at live on the live slice and every trace up to it, reading from the totals', async () => {
-    expect(opening).toBeGreaterThan(2)
+  it('opens at live on the live slice and the traces up to it in blocks, reading from the totals', async () => {
+    expect(opening).toBeGreaterThan(TRACE_BLOCK)
     expect(sliceReleaseAt(startedAt, opening, sliceSeconds)).toBeLessThanOrEqual(openAt)
     const wrapper = await mountSuspended(
       defineComponent({ render: () => h(UApp, null, { default: () => h(Harness) }) }),
@@ -111,7 +133,10 @@ describe('a first load of a drive in progress', () => {
       [
         `/journey/segments/${segmentId}/manifest.json`,
         sliceUrl(opening),
-        ...range(0, opening + 1).map(traceUrl),
+        ...range(0, Math.floor((opening + 1) / TRACE_BLOCK)).map(
+          (b) => `/journey/${segmentTraceBlockKey(segmentId, b)}`,
+        ),
+        ...range(opening + 1 - ((opening + 1) % TRACE_BLOCK), opening + 1).map(traceUrl),
       ].sort(),
     )
     expect(Math.floor(t / sliceSeconds)).toBe(opening)

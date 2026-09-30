@@ -11,9 +11,11 @@ import {
   DEFAULT_SLICE_SECONDS,
   decodeSlice,
   decodeTrace,
+  decodeTraceBlock,
   driveSegment,
   encodeSlice,
   encodeTrace,
+  encodeTraceBlock,
   frameOdometry,
   KEYFRAME_STRIDE,
   MAX_SLICE_INDEX,
@@ -22,11 +24,14 @@ import {
   parseStoredSegmentManifest,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceBlockKey,
   segmentTraceKey,
   SLICE_HEADER_BYTES,
   sliceGate,
   sliceRecord,
   sliceReleaseAt,
+  TRACE_BLOCK,
+  TRACE_BLOCK_HEADER_BYTES,
   TRACE_HEADER_BYTES,
   TRACE_PATH_SECONDS,
 } from '#shared/utils/drive'
@@ -461,6 +466,43 @@ describe('trace binary format v1', () => {
   })
 })
 
+describe('trace block format v1', () => {
+  const block = traces.slice(TRACE_BLOCK, 2 * TRACE_BLOCK)
+
+  it('is the stored traces back to back, each after its length, behind a count', () => {
+    const entries = block.map(encodeTrace)
+    const bytes = encodeTraceBlock(entries)
+    const view = new DataView(bytes.buffer)
+    expect(TRACE_BLOCK).toBe(16)
+    expect(TRACE_BLOCK_HEADER_BYTES).toBe(10)
+    expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe('JRTB')
+    expect(view.getUint8(4)).toBe(1)
+    expect(view.getUint32(6, true)).toBe(TRACE_BLOCK)
+    expect(view.getUint32(10, true)).toBe(entries[0]!.byteLength)
+    expect(bytes.subarray(14, 14 + entries[0]!.byteLength)).toEqual(entries[0])
+    expect(decodeTraceBlock(bytes)).toEqual(block)
+    const padded = new Uint8Array(bytes.byteLength + 1)
+    padded.set(bytes, 1)
+    expect(decodeTraceBlock(padded.subarray(1))).toEqual(block)
+  })
+
+  it('reports each malformed block with its code', () => {
+    const bytes = encodeTraceBlock(block.map(encodeTrace))
+    const code = (b: Uint8Array) => driveErrorOf(() => decodeTraceBlock(b))?.code
+    expect(code(bytes.subarray(0, 6))).toBe('TRUNCATED')
+    expect(code(bytes.subarray(0, bytes.byteLength - 1))).toBe('TRUNCATED')
+    const extra = new Uint8Array(bytes.byteLength + 1)
+    extra.set(bytes)
+    expect(code(extra)).toBe('TRAILING_DATA')
+    const magic = bytes.slice()
+    magic[3] = 0x58
+    expect(code(magic)).toBe('INVALID_RECORD')
+    const version = bytes.slice()
+    version[4] = 2
+    expect(code(version)).toBe('UNSUPPORTED_VERSION')
+  })
+})
+
 describe('release gate', () => {
   const startedAt = Date.UTC(2026, 8, 25, 12)
   const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1', startedAt }
@@ -501,6 +543,10 @@ describe('journey keys', () => {
     expect(segmentManifestKey('smoke-1')).toBe('segments/smoke-1/manifest.json')
     expect(segmentSliceKey('smoke-1', 4)).toBe('segments/smoke-1/slices/4.bin')
     expect(segmentTraceKey('smoke-1', 4)).toBe('segments/smoke-1/traces/4.bin')
+    expect(segmentTraceBlockKey('smoke-1', 0)).toBe('segments/smoke-1/traces/0-15.bin')
+    expect(segmentTraceBlockKey('smoke-1', 3)).toBe('segments/smoke-1/traces/48-63.bin')
+    expect(driveErrorOf(() => segmentTraceBlockKey('a', -1))?.code).toBe('INVALID_INPUT')
+    expect(driveErrorOf(() => segmentTraceBlockKey('a', 625_000))?.code).toBe('INVALID_INPUT')
     expect(driveErrorOf(() => segmentTraceKey('a', MAX_SLICE_INDEX + 1))?.code).toBe(
       'INVALID_INPUT',
     )
@@ -539,6 +585,12 @@ describe('journey keys', () => {
       segmentId: 'smoke-1',
       index: 7,
     })
+    expect(parseJourneyKey('segments/smoke-1/traces/16-31.bin')).toEqual({
+      kind: 'segment-trace-block',
+      segmentId: 'smoke-1',
+      from: 16,
+      to: 31,
+    })
     for (const key of [
       '',
       'other/x',
@@ -550,6 +602,10 @@ describe('journey keys', () => {
       'segments/a/other.json',
       'segments/a/slices/10000000.bin',
       'segments/a/traces/01.bin',
+      'segments/a/traces/1-16.bin',
+      'segments/a/traces/0-31.bin',
+      'segments/a/traces/16-16.bin',
+      'segments/a/slices/0-15.bin',
       'segments/a/reveals/1.bin',
       'segments/a/slices/123456789012345.bin',
       `/terrain/${hash}/stops/0.json`,

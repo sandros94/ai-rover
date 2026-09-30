@@ -146,3 +146,70 @@ export function decodeTrace(bytes: Uint8Array): SliceTrace {
   for (let k = 0; k < path.length; k++, offset += 4) path[k] = view.getFloat32(offset, true)
   return { index, reveals, path }
 }
+
+/** Traces a block holds: slices `16b … 16b + 15` (see `segmentTraceBlockKey`). */
+export const TRACE_BLOCK = 16
+/** Trace block format version written by {@link encodeTraceBlock}. */
+export const TRACE_BLOCK_FORMAT_VERSION = 1
+/** Bytes before the first entry: magic, version, flags, count. */
+export const TRACE_BLOCK_HEADER_BYTES = 10
+
+const BLOCK_MAGIC = new TextEncoder().encode('JRTB')
+
+/**
+ * Trace block format v1, little-endian, the disk pack's layout: `"JRTB"`, u8 version, u8 flags
+ * (0), u32 count, then per trace a u32 byteLength and its {@link encodeTrace} bytes, in slice
+ * order. Built from stored traces as they are, so a block never differs from its traces.
+ */
+export function encodeTraceBlock(traces: readonly Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(
+    traces.reduce((sum, trace) => sum + 4 + trace.byteLength, TRACE_BLOCK_HEADER_BYTES),
+  )
+  const view = new DataView(bytes.buffer)
+  bytes.set(BLOCK_MAGIC, 0)
+  view.setUint8(4, TRACE_BLOCK_FORMAT_VERSION)
+  view.setUint8(5, 0)
+  view.setUint32(6, traces.length, true)
+  let offset = TRACE_BLOCK_HEADER_BYTES
+  for (const trace of traces) {
+    view.setUint32(offset, trace.byteLength, true)
+    bytes.set(trace, offset + 4)
+    offset += 4 + trace.byteLength
+  }
+  return bytes
+}
+
+/** Decodes a whole format v1 block into its traces, in block order. */
+export function decodeTraceBlock(bytes: Uint8Array): SliceTrace[] {
+  const invalid = (code: 'INVALID_RECORD' | 'UNSUPPORTED_VERSION' | 'TRUNCATED', why: string) =>
+    new DriveError(code, `Trace block ${why}; pass bytes produced by encodeTraceBlock.`)
+  if (bytes.byteLength < TRACE_BLOCK_HEADER_BYTES) {
+    throw invalid('TRUNCATED', `is ${bytes.byteLength} bytes, shorter than its header`)
+  }
+  if (BLOCK_MAGIC.some((b, k) => bytes[k] !== b)) throw invalid('INVALID_RECORD', 'is not "JRTB"')
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (view.getUint8(4) !== TRACE_BLOCK_FORMAT_VERSION || view.getUint8(5) !== 0) {
+    throw invalid(
+      'UNSUPPORTED_VERSION',
+      `has version ${view.getUint8(4)}, flags ${view.getUint8(5)}`,
+    )
+  }
+  const count = view.getUint32(6, true)
+  const traces: SliceTrace[] = []
+  let offset = TRACE_BLOCK_HEADER_BYTES
+  for (let n = 0; n < count; n++) {
+    if (bytes.byteLength < offset + 4) throw invalid('TRUNCATED', `ends inside trace ${n + 1}`)
+    const length = view.getUint32(offset, true)
+    offset += 4
+    if (bytes.byteLength < offset + length) throw invalid('TRUNCATED', `ends inside trace ${n + 1}`)
+    traces.push(decodeTrace(bytes.subarray(offset, offset + length)))
+    offset += length
+  }
+  if (offset !== bytes.byteLength) {
+    throw new DriveError(
+      'TRAILING_DATA',
+      `Trace block continues ${bytes.byteLength - offset} bytes past its ${count} traces; pass one block per buffer.`,
+    )
+  }
+  return traces
+}
