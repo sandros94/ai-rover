@@ -242,7 +242,7 @@ describe('segment manifest schema', () => {
         'INVALID_RECORD',
       )
     }
-    const stored = { ...plain, version: 1, stride: 19, segmentId: 'seg-1', startedAt: 1 }
+    const stored = { ...plain, version: 1, stride: 19, segmentId: 'seg-1' }
     expect(parseStoredSegmentManifest(stored).stride).toBe(19)
     expect(driveErrorOf(() => parseStoredSegmentManifest({ ...stored, stride: 23 }))?.code).toBe(
       'INVALID_RECORD',
@@ -260,9 +260,7 @@ describe('segment manifest schema', () => {
   })
 
   it('reads a stored manifest from before plans carried the fog goal and the drive estimate', () => {
-    const stored = JSON.parse(
-      JSON.stringify({ ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }),
-    )
+    const stored = JSON.parse(JSON.stringify({ ...manifest, segmentId: 'seg-1' }))
     delete stored.plan.metrics.goalInFog
     delete stored.plan.metrics.estimatedDriveS
     const parsed = parseStoredSegmentManifest(stored)
@@ -271,13 +269,24 @@ describe('segment manifest schema', () => {
     expect(parsed.plan.metrics.pathLengthM).toBe(manifest.plan.metrics.pathLengthM)
   })
 
-  it('stores the segment id and start time alongside', () => {
-    const stored = { ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }
+  it('stores the segment id alongside, and no start time', () => {
+    const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1' }
     expect(parseStoredSegmentManifest(JSON.parse(JSON.stringify(stored)))).toEqual(stored)
     expect(driveErrorOf(() => parseStoredSegmentManifest(manifest))?.code).toBe('INVALID_RECORD')
     expect(
       driveErrorOf(() => parseStoredSegmentManifest({ ...stored, segmentId: '../x' }))?.code,
     ).toBe('INVALID_RECORD')
+  })
+
+  it('reads an older stored manifest carrying a start time, and drops it', () => {
+    const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1' }
+    const older = JSON.parse(JSON.stringify({ ...stored, startedAt: 1_790_000_096_800 }))
+    const parsed = parseStoredSegmentManifest(older)
+    expect(parsed).toEqual(stored)
+    expect(parsed).not.toHaveProperty('startedAt')
+    expect(driveErrorOf(() => parseStoredSegmentManifest({ ...older, startedAt: -1 }))?.code).toBe(
+      'INVALID_RECORD',
+    )
   })
 })
 
@@ -505,7 +514,7 @@ describe('trace block format v1', () => {
 
 describe('release gate', () => {
   const startedAt = Date.UTC(2026, 8, 25, 12)
-  const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1', startedAt }
+  const stored = { startedAt, sliceSeconds: manifest.sliceSeconds }
 
   it('releases slice k at the end of its window, startedAt + (k + 1) · sliceSeconds', () => {
     expect(sliceReleaseAt(startedAt, 0, 30)).toBe(startedAt + 30_000)
@@ -565,6 +574,19 @@ describe('journey keys', () => {
     const hash = '0123456789abcdef'
     expect(parseJourneyKey(`terrain/${hash}/chunks/-3_4.bin`)).toEqual({ kind: 'terrain' })
     const mission = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+    // A stop's objects as `stopKeys` names them: by the landing or the drive that reached it.
+    const segment = '0190a1b2-c3d4-8e5f-8a9b-0c1d2e3f4a5c'
+    const digest = '0123456789abcdef'
+    for (const name of ['landing', segment]) {
+      expect(parseJourneyKey(`missions/${mission}/stops/${name}.${digest}.json`)).toEqual({
+        kind: 'stop',
+      })
+      expect(parseJourneyKey(`missions/${mission}/revealed/${name}.${digest}.bin`)).toEqual({
+        kind: 'stop',
+      })
+      expect(parseJourneyKey(`missions/${mission}/stops/${name}.pack`)).toEqual({ kind: 'stop' })
+    }
+    // Older stops' objects, named by the stop's index, stay served.
     expect(parseJourneyKey(`missions/${mission}/revealed/0.bin`)).toEqual({ kind: 'stop' })
     expect(parseJourneyKey(`missions/${mission}/stops/12.json`)).toEqual({ kind: 'stop' })
     expect(parseJourneyKey(`missions/${mission}/stops/12.pack`)).toEqual({ kind: 'stop' })
@@ -617,6 +639,14 @@ describe('journey keys', () => {
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/01.pack',
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/0.pack',
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/chunks/0_0.bin',
+      // A stop named otherwise: without its mask's digest, with a short one, or by no segment.
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/landing.bin',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.0123.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.0123456789abcdef.pack',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/smoke-1.0123456789abcdef.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/12.0123456789abcdef.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/landing.0123456789ABCDEF.bin',
     ]) {
       expect(parseJourneyKey(key)).toBeNull()
     }

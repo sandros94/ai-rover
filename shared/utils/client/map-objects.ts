@@ -37,6 +37,8 @@ export interface StopObject {
   x: number
   y: number
   index: number
+  /** Names the stop's stored objects: its manifest, and through it its mask and disk pack. */
+  manifestKey: string
   /** The stop the rover stands at or left from. */
   current: boolean
   /** The segment that reached it and when; null for the landing stop. */
@@ -127,6 +129,7 @@ export interface MapObjectsSource {
     index: number
     x: number
     y: number
+    manifestKey: string
     reachedBy: { segmentId: string; number: number; fromIndex: number; at: Instant } | null
   }[]
   deaths: readonly {
@@ -195,6 +198,7 @@ export function mapObjects(source: MapObjectsSource): MapObject[] {
       x: stop.x,
       y: stop.y,
       index: stop.index,
+      manifestKey: stop.manifestKey,
       current: stop.index === source.currentStop.index,
       reached: by
         ? { segmentId: by.segmentId, number: by.number, at: moment(epochMs, by.at) }
@@ -242,7 +246,7 @@ export interface PlayedDrive {
   distanceM: number
   reasons: readonly string[]
   from: { index: number }
-  to: { index: number; x: number; y: number } | null
+  to: { index: number; x: number; y: number; manifestKey: string } | null
   death: { x: number; y: number } | null
 }
 
@@ -261,8 +265,8 @@ export function replayedStopsAndDeaths(
   for (const [k, drive] of drives.slice(0, playing + 1).entries()) {
     const ref = { segmentId: drive.id, number: drive.number, fromIndex: drive.from.index }
     if (drive.to && k < playing) {
-      const { index, x, y } = drive.to
-      stops.set(index, { index, x, y, reachedBy: { ...ref, at: drive.endedAt } })
+      const { index, x, y, manifestKey } = drive.to
+      stops.set(index, { index, x, y, manifestKey, reachedBy: { ...ref, at: drive.endedAt } })
     }
     if (drive.death) {
       deaths.push({

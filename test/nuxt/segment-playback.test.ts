@@ -19,10 +19,11 @@ import { usePlaybackTrack } from '~/composables/usePlaybackTrack'
 import { useSegmentPlayback } from '~/composables/useSegmentPlayback'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import SpeedOdometer from '~/components/instruments/SpeedOdometer.vue'
-import { journeyFixture } from '../unit/client/helpers'
+import { JOURNEY_FIXTURE, journeyFixture } from '../unit/client/helpers'
 
 const { record, segmentManifest: manifest, slices, files } = journeyFixture()
-const { segmentId, startedAt, sliceSeconds } = manifest
+const { segmentId, sliceSeconds } = manifest
+const { startedAt } = JOURNEY_FIXTURE
 const whole = createOdometer(record.keyframes)
 const sliceUrl = (k: number) => `/journey/segments/${segmentId}/slices/${k}.bin`
 const traceUrl = (k: number) => `/journey/segments/${segmentId}/traces/${k}.bin`
@@ -55,7 +56,7 @@ async function journeyFetch(input: string): Promise<Response> {
       : parsed?.kind === 'segment-slice' || parsed?.kind === 'segment-trace'
         ? parsed.index
         : undefined
-  if (last !== undefined && !sliceGate(manifest, last, Date.now()).released) {
+  if (last !== undefined && !sliceGate({ startedAt, sliceSeconds }, last, Date.now()).released) {
     return new Response(null, { status: 404, headers: { 'x-release-at': 'later' } })
   }
   const bytes =
@@ -75,7 +76,10 @@ let track: ReturnType<typeof usePlaybackTrack> | undefined
 const Harness = defineComponent({
   setup() {
     const display = useDisplayClock(() => 0)
-    playback = useSegmentPlayback(() => segmentId, { display, serverOffsetMs: () => 0 })
+    playback = useSegmentPlayback(() => ({ id: segmentId, startedAt: new Date(startedAt) }), {
+      display,
+      serverOffsetMs: () => 0,
+    })
     track = usePlaybackTrack(playback)
     return () => {
       const s = track!.snapshot.value

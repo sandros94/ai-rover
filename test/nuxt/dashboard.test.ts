@@ -20,6 +20,10 @@ import SceneHud from '~/components/hud/SceneHud.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import NotMovingFlag from '~/components/dashboard/NotMovingFlag.vue'
 
+/** An older stop's manifest key, named by its index. */
+const stopKey = (index: number) =>
+  `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
+
 type Submission = NonNullable<MissionStateJson['round']>['submissions'][number]
 
 /** Mounts inside `UApp`, which provides what tooltips need. */
@@ -81,8 +85,8 @@ function state(overrides: Partial<MissionStateJson> = {}): MissionStateJson {
       x: 0,
       y: 0,
       headingRad: 0,
-      manifestKey: 'missions/m/stops/0.json',
-      revealedKey: 'missions/m/revealed/0.bin',
+      manifestKey: stopKey(0),
+      revealedKey: 'missions/0192f000-0000-7000-8000-000000000001/revealed/0.bin',
     },
     round: {
       id: '0192f000-0000-7000-8000-0000000000r1',
@@ -97,7 +101,7 @@ function state(overrides: Partial<MissionStateJson> = {}): MissionStateJson {
     flags: null,
     pause: null,
     lastSegment: null,
-    trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+    trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
     deaths: [],
     tally: {
       distanceM: 0,
@@ -557,11 +561,12 @@ function inspected(): MissionStateJson {
   return state({
     currentStop: { ...base.currentStop, index: 1, x: 0, y: 80 },
     trail: [
-      { index: 0, x: 0, y: 0, reachedBy: null },
+      { index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null },
       {
         index: 1,
         x: 0,
         y: 80,
+        manifestKey: stopKey(1),
         reachedBy: {
           segmentId: 'seg-2',
           number: 2,

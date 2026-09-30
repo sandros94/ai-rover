@@ -6,6 +6,8 @@ import type {
   PreviewResult,
   RoverObject,
 } from '#shared/utils/client'
+import { groundAround } from '#shared/utils/client'
+import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import type { MapViewMode } from '~/composables/useMapView'
@@ -45,6 +47,11 @@ const props = withDefaults(
     chunkVertices?: number
     heightAt: (x: number, y: number) => number | undefined
     loading: { loaded: number; total: number; error: unknown }
+    /**
+     * Whether this stage shows the terrain's loading progress; false for a stage beside another
+     * of the same stop and loader, which shows it for both.
+     */
+    progress?: boolean
     center: MapPoint
     radius: number
     /**
@@ -53,6 +60,11 @@ const props = withDefaults(
      */
     mastHeight?: number
     rover: { x: number; y: number; headingRad: number }
+    /**
+     * Whether the rover rests at `rover`, no drive playing; while one plays, the 3D view poses it
+     * by `frame` and draws none until that frame is in.
+     */
+    resting?: boolean
     /** The stops shown, the one the rover stands at or left from `current`. */
     trail?: (MapPoint & { current?: boolean })[]
     plan?: MapPoint[]
@@ -83,7 +95,9 @@ const props = withDefaults(
     reveals: () => [],
     fog: undefined,
     chunkVertices: undefined,
+    progress: true,
     mastHeight: undefined,
+    resting: true,
     trail: () => [],
     plan: () => [],
     driven: () => [],
@@ -129,6 +143,29 @@ const own = useStopFog({
       : { mastHeight: props.mastHeight, radiusM: props.radius },
 })
 const fog = computed(() => props.fog ?? own.value)
+
+const X = KEYFRAME_FIELDS.indexOf('x')
+const Y = KEYFRAME_FIELDS.indexOf('y')
+/** Where the 3D rover stands: at the playback frame, else at rest; nowhere while a frame is due. */
+const standing = computed(() => {
+  const frame = props.frame
+  if (frame) return { x: frame[X]!, y: frame[Y]! }
+  return props.resting ? props.rover : undefined
+})
+/**
+ * Whether the ground the 3D rover stands on is known and drawn true, so the rover and the path it
+ * drove may be drawn on it: the stop's mask in (a playback frame comes only with the drive's
+ * reveals up to it, which the fog lifts settled with it), and the chunks under and around it.
+ * Until then the terrain's loading progress stays up.
+ */
+const grounded = computed(() => {
+  const at = standing.value
+  const view = props.ground ?? props.terrain
+  const masked = props.fog ? !!props.fog.fade : props.seen === undefined || !!own.value.fade
+  if (!at || !view || !props.chunkVertices || !masked) return false
+  const survey = { center: props.center, radius: props.radius }
+  return groundAround(view, at, { chunkVertices: props.chunkVertices, survey })
+})
 </script>
 
 <template>
@@ -154,7 +191,7 @@ const fog = computed(() => props.fog ?? own.value)
       @hover="emit('hover', $event)"
       @pick="emit('pick', $event)"
     >
-      <TerrainProgress :ready="!!terrain" v-bind="loading" />
+      <TerrainProgress v-if="progress" :ready="!!terrain" v-bind="loading" />
     </StopMap>
     <DiskScene
       v-else-if="(ground ?? terrain) && chunkVertices"
@@ -165,7 +202,8 @@ const fog = computed(() => props.fog ?? own.value)
       :height-at="heightAt"
       :frame="frame"
       :rest="rover"
-      :driven="driven"
+      :grounded="grounded"
+      :driven="grounded ? driven : []"
       :t="t"
       :route="plan"
       :stops="trail"
@@ -176,11 +214,11 @@ const fog = computed(() => props.fog ?? own.value)
       :lighting="{ solFraction }"
     />
     <div v-else :class="['relative', BLANK]">
-      <TerrainProgress :ready="false" v-bind="loading" />
+      <TerrainProgress v-if="progress" :ready="false" v-bind="loading" />
     </div>
     <TerrainProgress
-      v-if="view !== '2d' && ground && chunkVertices"
-      :ready="!!terrain"
+      v-if="progress && view !== '2d' && ground && chunkVertices"
+      :ready="!!terrain && grounded"
       v-bind="loading"
     />
   </div>

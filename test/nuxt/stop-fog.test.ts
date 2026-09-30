@@ -10,6 +10,7 @@ import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
 import type { useSegmentPlayback } from '~/composables/useSegmentPlayback'
 import type { StopFog } from '~/composables/useStopFog'
+import { useStopFog } from '~/composables/useStopFog'
 import { SIGHT_INTERVAL_MS } from '~/composables/useCurrentSight'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
@@ -33,10 +34,12 @@ vi.mock('~/components/map/StopMap.vue', async () => {
     default: vue.defineComponent({
       name: 'StopMap',
       props: { fog: { type: Object, default: undefined } },
-      setup: (props) => () => {
-        handed.map.push((props.fog as StopFog | undefined)?.sight)
-        return vue.h('div', { 'data-test': 'map' })
-      },
+      setup:
+        (props, { slots }) =>
+        () => {
+          handed.map.push((props.fog as StopFog | undefined)?.sight)
+          return vue.h('div', { 'data-test': 'map' }, slots.default?.())
+        },
     }),
   }
 })
@@ -54,8 +57,8 @@ vi.mock('~/components/scene/DiskScene.vue', async () => {
   }
 })
 
-const { missionId, stopIndex, segmentId, startedAt } = JOURNEY_FIXTURE
-const { files, record } = journeyFixture()
+const { missionId, segmentId, startedAt } = JOURNEY_FIXTURE
+const { files, record, stopKeys } = journeyFixture()
 
 /** The playing segment's frame, moved by the test; no slices load. */
 const frame = shallowRef<Float32Array>()
@@ -73,6 +76,7 @@ function playback() {
     heldReveals: shallowRef([]),
     outcome: shallowRef(),
     simTime: ref(0),
+    jumpedTo: ref(0),
     liveTime: ref(0),
     heldUntil: ref(0),
     mode: ref('live'),
@@ -91,7 +95,7 @@ const keyframe = (k: number) =>
   record.keyframes.data.slice(k * KEYFRAME_STRIDE, (k + 1) * KEYFRAME_STRIDE)
 
 function state(): MissionStateJson {
-  const stop = { id: 's0', index: stopIndex, x: 0, y: 0, headingRad: 0 }
+  const stop = { id: 's0', index: 0, x: 0, y: 0, headingRad: 0, manifestKey: stopKeys.manifestKey }
   return {
     now: new Date(startedAt).toISOString(),
     mission: {
@@ -108,7 +112,7 @@ function state(): MissionStateJson {
     flags: null,
     pause: null,
     lastSegment: null,
-    trail: [{ index: stopIndex, x: 0, y: 0, reachedBy: null }],
+    trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKeys.manifestKey, reachedBy: null }],
     deaths: [],
     tally: { distanceM: 0, stops: 1, arrived: 0, stoppedShort: 0, failed: 0, resets: 0 },
   } as unknown as MissionStateJson
@@ -208,6 +212,122 @@ describe('the fog on the dashboard', () => {
     expect(distinct(handed.scene)).toEqual(new Set(computed))
     expect(handed.map.at(-1)).toBe(computed.at(-1))
     expect(handed.scene.at(-1)).toBe(computed.at(-1))
+  })
+})
+
+describe('the stop on the dashboard', () => {
+  it('is loaded through the manifest key the state names, its mask and pack through the manifest', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (input: string) => {
+      const key = input.replace(/^\/journey\//, '')
+      asked.push(key)
+      const bytes = files.get(key)
+      return bytes
+        ? new Response(bytes as Uint8Array<ArrayBuffer>)
+        : new Response(null, { status: 404 })
+    })
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(MissionDashboard, { state: state(), error: null, serverOffsetMs: 0 }),
+          }),
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    // The fog is drawn once the mask is in, over the ground the pack brought.
+    await vi.waitFor(() => expect(handed.map.at(-1)).toBeDefined())
+    const stopKeysAsked = asked.filter((key) => key.startsWith('missions/'))
+    expect(stopKeysAsked[0]).toBe(stopKeys.manifestKey)
+    expect(new Set(stopKeysAsked)).toEqual(
+      new Set([stopKeys.manifestKey, stopKeys.revealedKey, stopKeys.packKey]),
+    )
+  })
+})
+
+describe('the terrain loading on the dashboard', () => {
+  it('shows one progress indicator for the scene and the 2D map panel while chunks arrive', async () => {
+    // The stop's manifest arrives; its chunks never do.
+    vi.stubGlobal('fetch', async (input: string) => {
+      const key = input.replace(/^\/journey\//, '')
+      if (key.startsWith('terrain/') || key.endsWith('.pack'))
+        return new Promise<Response>(() => {})
+      const bytes = files.get(key)
+      return bytes
+        ? new Response(bytes as Uint8Array<ArrayBuffer>)
+        : new Response(null, { status: 404 })
+    })
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(MissionDashboard, { state: state(), error: null, serverOffsetMs: 0 }),
+          }),
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-panel=map2d] [data-test=map]').exists()).toBe(true)
+      expect(wrapper.find('[data-test=terrain-progress]').text()).toMatch(
+        /Loading terrain 0 \/ \d+/,
+      )
+    })
+    await flushPromises()
+    const shown = wrapper.findAll('[data-test=terrain-progress]')
+    expect(shown).toHaveLength(1)
+    expect(wrapper.find('[data-panel=map2d] [data-test=terrain-progress]').exists()).toBe(false)
+  })
+})
+
+describe('useStopFog as playback jumps', () => {
+  const size = 9
+  const grid = { heights: new Float32Array(size * size), width: size, height: size, cellSize: 1 }
+  const origin = { i: 0, j: 0 }
+
+  it('draws the reveals up to a jump settled at once, and fades those played into', async () => {
+    const reveals = shallowRef<{ t: number; vertices: Uint32Array }[]>([])
+    const settledUntil = ref(0)
+    let fog!: ReturnType<typeof useStopFog>
+    await mountSuspended(
+      defineComponent({
+        setup() {
+          fog = useStopFog({
+            seen: () => new Uint8Array(size * size),
+            reveals: () => reveals.value,
+            settledUntil: () => settledUntil.value,
+            ground: () => ({ grid, origin }),
+            eye: () => undefined,
+            sight: () => undefined,
+          })
+          return () => h('div')
+        },
+      }),
+    )
+    const times = () => fog.value.fade!.fog.revealedAt
+    // A seek to 60 s: what the drive revealed up to there is lifted and settled in the same tick.
+    settledUntil.value = 60
+    reveals.value = [
+      { t: 10, vertices: Uint32Array.of(1) },
+      { t: 50, vertices: Uint32Array.of(2) },
+    ]
+    await nextTick()
+    expect(fog.value.seen![1]).toBe(1)
+    expect(fog.value.seen![2]).toBe(1)
+    expect(times()[1]).toBe(-Infinity)
+    expect(times()[2]).toBe(-Infinity)
+
+    // Played on into a reveal at 61 s: it fades in.
+    reveals.value = [...reveals.value, { t: 61, vertices: Uint32Array.of(3) }]
+    await vi.waitFor(() => expect(fog.value.seen![3]).toBe(1))
+    expect(Number.isFinite(times()[3])).toBe(true)
+
+    // A seek back to 20 s drops the later reveals at once.
+    settledUntil.value = 20
+    reveals.value = reveals.value.slice(0, 1)
+    await nextTick()
+    expect(Array.from(fog.value.seen!.subarray(1, 4))).toEqual([1, 0, 0])
   })
 })
 

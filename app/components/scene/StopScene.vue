@@ -44,6 +44,8 @@ const props = withDefaults(
   defineProps<{
     /** The 23 keyframe values at the playback time. */
     frame: Float32Array
+    /** Whether the rover is drawn at `frame`; the camera frames it either way. */
+    roverShown?: boolean
     /** The stop disk's chunks; without any, the rover stands on a flat grid at its own height. */
     chunks?: { chunk: TerrainChunk }[]
     /** Height span of the disk for the colour ramp; required with `chunks`. */
@@ -86,6 +88,7 @@ const props = withDefaults(
   {
     chunks: () => [],
     heightRange: () => ({ min: 0, max: 1 }),
+    roverShown: true,
     heightAt: undefined,
     drawnHeightAt: undefined,
     stops: () => [],
@@ -292,15 +295,17 @@ onBeforeUnmount(() => {
       :from="currentStop"
       :destination="destination"
     />
-    <RoverModel
-      :frame="frame"
-      :ledger="ledger"
-      :lamp="lamp"
-      :joints="armJoints"
-      :environment="environment"
-      :lod-distance-m="quality.roverLodM"
-      @status="emit('roverStatus', $event)"
-    />
+    <TresGroup :visible="roverShown">
+      <RoverModel
+        :frame="frame"
+        :ledger="ledger"
+        :lamp="lamp"
+        :joints="armJoints"
+        :environment="environment"
+        :lod-distance-m="quality.roverLodM"
+        @status="emit('roverStatus', $event)"
+      />
+    </TresGroup>
     <ScenePicker
       v-if="pickables.length > 0"
       :pickables="pickables"

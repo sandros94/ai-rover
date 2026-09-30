@@ -8,6 +8,7 @@ import {
 } from '#server/utils/mission/journey'
 import { MissionError } from '#shared/utils/mission'
 import { settleSegment } from '#server/repositories/segments'
+import { listStops } from '#server/repositories/stops'
 import { createTestDb, dbErrorOf, JOURNEY_T0, seedJourney } from '../db/helpers'
 
 const HOUR = 3_600_000
@@ -134,20 +135,24 @@ describe('journeyDrive', () => {
     })
     expect(one.mission).toMatchObject({ id: j.mission.id, solsEpoch: j.mission.solsEpoch })
     expect(one.mission.rules).toEqual(j.mission.config.rules)
-    // The public facts of the live map: which drive reached each stop, and when.
+    // The public facts of the live map: which drive reached each stop, when, and its objects.
+    const [landing, reached] = await listStops(db, j.mission.id)
     expect(one.trail).toEqual([
-      { index: 0, x: 0, y: 0, reachedBy: null },
+      { index: 0, x: 0, y: 0, manifestKey: landing!.manifestKey, reachedBy: null },
       {
         index: 1,
         x: 0,
         y: 80,
+        manifestKey: reached!.manifestKey,
         reachedBy: { segmentId: j.arrival.id, number: 1, fromIndex: 0, at: j.arrival.endsAt },
       },
     ])
     // A drive's own death is its replay's to show; none came before it.
     expect(one.deaths).toEqual([])
     const first = await journeyDrive(db, { missionId: j.mission.id, segmentId: j.arrival.id })
-    expect(first.trail).toEqual([{ index: 0, x: 0, y: 0, reachedBy: null }])
+    expect(first.trail).toEqual([
+      { index: 0, x: 0, y: 0, manifestKey: landing!.manifestKey, reachedBy: null },
+    ])
   })
 
   it('gives the deaths public when the drive started, with the facts the live map shows', async () => {

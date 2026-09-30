@@ -7,7 +7,7 @@ import { listStops } from '#server/repositories/stops'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import { tickMission } from '#server/utils/mission/tick'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
-import { parseStopManifest, revealedKey, stopManifestKey } from '#shared/utils/terrain'
+import { parseStopManifest } from '#shared/utils/terrain'
 import { createTestDb, fakeJev, memoryStore, T0, tableCounts } from './helpers'
 
 let db: DB
@@ -37,9 +37,12 @@ describe('createMissionAtStop', () => {
       y: -20,
       headingRad: 0,
       fromSegmentId: null,
-      manifestKey: stopManifestKey(mission.id, 0),
-      revealedKey: revealedKey(mission.id, 0),
+      manifestKey: published.keys.manifestKey,
+      revealedKey: published.keys.revealedKey,
     })
+    expect(stop.manifestKey).toMatch(
+      new RegExp(`^missions/${mission.id}/stops/landing\\.[0-9a-f]{16}\\.json$`),
+    )
     expect(round).toMatchObject({
       fromStopId: stop.id,
       anchorX: 10,
@@ -51,9 +54,9 @@ describe('createMissionAtStop', () => {
     expect((await getOpenRound(db, mission.id))?.id).toBe(round.id)
     expect(await listRoundSubmissions(db, round.id)).toEqual([])
     expect(await listStops(db, mission.id)).toHaveLength(1)
-    expect(published.manifestKey).toBe(stop.manifestKey)
     const manifest = parseStopManifest(await store.getJson(stop.manifestKey))
-    expect(manifest.stop).toEqual({ index: 0, x: 10, y: -20 })
+    expect(manifest.stop).toEqual({ x: 10, y: -20 })
+    expect(manifest.revealedKey).toBe(stop.revealedKey)
     expect(manifest.missionId).toBe(mission.id)
     expect(blobs.blobs.has(stop.revealedKey)).toBe(true)
   })

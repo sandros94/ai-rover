@@ -65,21 +65,21 @@ const playing = computed(() => {
 })
 
 const display = useDisplayClock(() => props.serverOffsetMs)
-const playback = useSegmentPlayback(() => playing.value?.id, {
+const playback = useSegmentPlayback(playing, {
   display,
   serverOffsetMs: () => props.serverOffsetMs,
-  endsAt: () => playing.value?.endsAt,
 })
 
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 
 /**
- * A drive in progress from the current stop lifts its reveals from the fog as it plays. Once
- * settled the stop's own mask decides: it holds an arrival's reveals and never a failure's.
+ * A drive in progress from the current stop lifts its reveals from the fog as it plays, read with
+ * its frame rather than at the instruments' rate. Once settled the stop's own mask decides: it
+ * holds an arrival's reveals and never a failure's.
  */
 const fogReveals = computed(() => {
   const p = playing.value
-  return p?.driving && p.fromStopId === props.state?.currentStop.id ? snapshot.value.reveals : []
+  return p?.driving && p.fromStopId === props.state?.currentStop.id ? playback.reveals.value : []
 })
 
 const ground = shallowRef<{
@@ -155,6 +155,8 @@ const track: MapTrack = {
   plan,
   driven,
   reveals: fogReveals,
+  settledUntil: playback.jumpedTo,
+  playing: computed(() => playing.value !== null),
   frame: playback.frame,
   t: computed(() => snapshot.value.t),
   motion,
@@ -347,7 +349,7 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
           />
         </template>
         <template #panel-map2d>
-          <LiveStage :stage="stage" view="2d" />
+          <LiveStage :stage="stage" view="2d" :progress="false" />
         </template>
         <template #panel-vote>
           <div class="space-y-3 p-3">
@@ -370,7 +372,6 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
             v-if="focused"
             :key="focused.id"
             :object="focused"
-            :mission-id="state.mission.id"
             :rules="state.mission.rules"
             :submission="focusedSubmission"
           />

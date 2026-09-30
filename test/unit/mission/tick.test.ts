@@ -23,11 +23,26 @@ import type { JourneyStore } from '#server/utils/journey/store'
 import {
   decodeSlice,
   decodeTrace,
+  DEFAULT_SLICE_SECONDS,
   DriveError,
+  parseStoredSegmentManifest,
+  segmentManifestKey,
   segmentSliceKey,
   segmentTraceKey,
 } from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
+import {
+  chunksNearestFirst,
+  computeStopDisk,
+  decodeDiskPack,
+  decodeRevealedMask,
+  defineWorld,
+  encodeRevealedMask,
+  parseStopManifest,
+  revealDisk,
+  revealVertices,
+} from '#shared/utils/terrain'
+import { loadRecordReveals } from '#server/utils/mission/terrain'
 import { memoryJevCache } from '../jev/helpers'
 import { forced, stopShortAt } from './forced'
 import {
@@ -52,8 +67,8 @@ vi.setConfig({ testTimeout: 60_000 })
 const queries: string[] = []
 /** Top-level transactions, Jev requests and CDN priming requests, in the order they happened. */
 const events: ('begin' | 'end' | 'jev' | 'prime' | 'put')[] = []
-/** Runs before every blob write of a mission's store, with the key written. */
-let onPut: ((key: string) => unknown) | undefined
+/** Runs before every blob write of a mission's store, with the key and, but for JSON, the bytes. */
+let onPut: ((key: string, bytes?: Uint8Array) => unknown) | undefined
 afterEach(() => {
   onPut = undefined
 })
@@ -63,7 +78,7 @@ function hooked(store: JourneyStore): JourneyStore {
   return {
     ...store,
     putImmutable: async (key, bytes, options) => {
-      await onPut?.(key)
+      await onPut?.(key, bytes)
       return store.putImmutable(key, bytes, options)
     },
     putJson: async (key, value) => {
@@ -157,14 +172,18 @@ describe('priming the CDN', () => {
       const m = await stoppingShort()
       // Landing primes stop 0; starting a drive primes nothing.
       expect(primed).toEqual(
-        stopPrimeKeys(m.missionId, 0).map((key) => `https://rover.example/journey/${key}`),
+        stopPrimeKeys(m.published.keys).map((key) => `https://rover.example/journey/${key}`),
       )
       primed.length = 0
       events.length = 0
       await m.tick(m.driving.endsAt)
       await vi.waitFor(() => expect(primed).toHaveLength(3))
+      const [, reached] = await listStops(db, m.missionId)
+      const { packKey } = parseStopManifest(await m.store.getJson(reached!.manifestKey))
       expect(primed).toEqual(
-        stopPrimeKeys(m.missionId, 1).map((key) => `https://rover.example/journey/${key}`),
+        stopPrimeKeys({ ...reached!, packKey: packKey! }).map(
+          (key) => `https://rover.example/journey/${key}`,
+        ),
       )
       // After the settlement's transaction; the close it made due runs in a second one.
       expect(events.indexOf('prime')).toBeGreaterThan(events.indexOf('end'))
@@ -558,6 +577,45 @@ describe('the mission lock', () => {
     })
   })
 
+  it('leaves a close prepared by two ticks at once in the same bytes, started by the one committing it', async () => {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const first = at(T0, 6 * MINUTE)
+    // The later tick prepares the close first; the earlier one runs whole as it starts publishing.
+    const later = new Date(first.getTime() + 96_800)
+    const written = new Map<string, Uint8Array[]>()
+    let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
+    let raced = false
+    onPut = async (key, bytes) => {
+      if (!key.startsWith('segments/')) return
+      if (!raced) {
+        raced = true
+        meanwhile = await m.tick(first)
+      }
+      written.set(key, [...(written.get(key) ?? []), bytes!])
+    }
+    const tick = await m.tick(later)
+
+    expect(meanwhile?.started).toMatchObject({ startedAt: first })
+    expect(tick.started).toBeNull()
+    const segment = (await getDrivingSegment(db, m.missionId))!
+    expect(segment.id).toBe(meanwhile!.started!.segmentId)
+    expect(segment.startedAt).toEqual(first)
+    const slices = (await m.store.listKeys(`segments/${segment.id}/slices/`)).length
+    expect(segment.endsAt.getTime()).toBe(first.getTime() + slices * DEFAULT_SLICE_SECONDS * 1000)
+
+    // Both published: a blob both found missing was written twice, the same bytes each time.
+    expect([...written.values()].some((writes) => writes.length > 1)).toBe(true)
+    for (const [key, writes] of written) {
+      for (const bytes of writes) expect([key, bytes]).toEqual([key, writes[0]])
+    }
+    const manifestKey = segmentManifestKey(segment.id)
+    expect(written.get(manifestKey)).toHaveLength(1)
+    const stored = await m.store.getJson(manifestKey)
+    expect(stored).not.toHaveProperty('startedAt')
+    expect(parseStoredSegmentManifest(stored).segmentId).toBe(segment.id)
+  })
+
   it('applies nothing when another tick settled the drive while this one prepared it', async () => {
     const m = await landed()
     await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
@@ -572,6 +630,62 @@ describe('the mission lock', () => {
     expect(meanwhile?.settled).toEqual({ segmentId: driving.id, status: 'arrived' })
     expect(tick).toMatchObject({ settled: null, closed: null, started: null, opened: null })
     expect((await listStops(db, m.missionId)).map((stop) => stop.index)).toEqual([0, 1])
+  })
+
+  it('keeps the next stop whole when a tick holding an old snapshot settles a drive already settled', async () => {
+    let race: (() => Promise<unknown>) | undefined
+    const m = await stoppingShort(async () => {
+      const run = race
+      race = undefined
+      await run?.()
+      return {}
+    })
+    const written = new Map<string, Uint8Array[]>()
+    onPut = (key, bytes) => {
+      if (bytes) written.set(key, [...(written.get(key) ?? []), bytes])
+    }
+    // Tick B has read the drive as still driving; while it judges the waiting goals again, tick A
+    // settles the drive, starts the next one, and commits.
+    let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
+    race = async () => {
+      meanwhile = await m.tick(m.driving.endsAt)
+    }
+    const stale = await m.tick(m.driving.endsAt)
+    expect(meanwhile?.settled).toEqual({ segmentId: m.driving.id, status: 'stopped-short' })
+    expect(meanwhile?.started).not.toBeNull()
+    expect(stale.settled).toBeNull()
+    // Whatever both published for the same drive, they published in the same bytes.
+    for (const [key, writes] of written) {
+      for (const bytes of writes) expect([key, bytes]).toEqual([key, writes[0]])
+    }
+
+    const next = await getSegment(db, meanwhile!.started!.segmentId)
+    const settled = await m.tick(next.endsAt)
+    expect(settled.settled?.segmentId).toBe(next.id)
+    const [, reached, arrived] = await listStops(db, m.missionId)
+    expect(arrived!.fromSegmentId).toBe(next.id)
+
+    // Its mask: the one it left from, what the drive revealed, and the viewshed where it ended.
+    const world = defineWorld({ seed: 'mars' })
+    const radius = SMALL_RULES.stopRadiusM
+    const left = computeStopDisk(world, { center: reached!, radius })
+    const disk = computeStopDisk(world, { center: arrived!, radius })
+    const expected = revealDisk(
+      revealVertices(
+        decodeRevealedMask((await m.store.getInflated(reached!.revealedKey))!),
+        left,
+        await loadRecordReveals(m.store, next),
+      ),
+      disk,
+    )
+    expect(await m.store.getInflated(arrived!.revealedKey)).toEqual(encodeRevealedMask(expected))
+    // Its pack: its own disk's chunks, as its manifest lists them.
+    const manifest = parseStopManifest(await m.store.getJson(arrived!.manifestKey))
+    expect(manifest.stop).toMatchObject({ x: arrived!.x, y: arrived!.y })
+    expect(manifest.revealedKey).toBe(arrived!.revealedKey)
+    const pack = decodeDiskPack((await m.store.getInflated(manifest.packKey!))!)
+    const own = chunksNearestFirst(disk.chunks, { center: disk.center, chunkSize: 64 })
+    expect(pack.map(({ cx, cy }) => ({ cx, cy }))).toEqual(own.map(({ cx, cy }) => ({ cx, cy })))
   })
 
   /**

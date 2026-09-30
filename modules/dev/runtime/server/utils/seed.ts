@@ -72,7 +72,7 @@ export async function seedLocalMission(
     stopId: stop.id,
     roundId: round.id,
     worldHash: created.worldHash,
-    manifestKey: published.manifestKey,
+    manifestKey: published.keys.manifestKey,
     skippedChunks: published.skipped.length,
     bytes: {
       count: published.written.length,

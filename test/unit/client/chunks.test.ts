@@ -154,13 +154,11 @@ describe('createChunkCache', () => {
 
   it('loads a stop from its pack in one request, holding and reporting every chunk', async () => {
     const { cache, calls } = setup()
-    const { missionId, stop, packKey, chunks } = journeyFixture().stopManifest
+    const { packKey, chunks } = journeyFixture().stopManifest
     const seen: string[] = []
-    expect(
-      await cache.loadPack(missionId, stop.index, {
-        onChunk: (c) => seen.push(`${c.cx},${c.cy}`),
-      }),
-    ).toBe(true)
+    expect(await cache.loadPack(packKey, { onChunk: (c) => seen.push(`${c.cx},${c.cy}`) })).toBe(
+      true,
+    )
     expect(calls).toEqual([`/journey/${packKey}`])
     expect(seen).toEqual(chunks.map((c) => `${c.cx},${c.cy}`))
     expect(cache.size).toBe(16)
@@ -172,7 +170,7 @@ describe('createChunkCache', () => {
   it('answers false and loads nothing when the stop has no pack', async () => {
     const { cache, calls } = setup()
     const { missionId } = journeyFixture().stopManifest
-    expect(await cache.loadPack(missionId, 9)).toBe(false)
+    expect(await cache.loadPack(`missions/${missionId}/stops/9.pack`)).toBe(false)
     expect(cache.size).toBe(0)
     expect(calls).toHaveLength(1)
   })

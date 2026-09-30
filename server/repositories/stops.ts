@@ -39,3 +39,18 @@ export async function getStop(db: DB, stopId: string): Promise<Stop> {
   if (!row) throw new DbError('NOT_FOUND', `Stop ${stopId} does not exist.`)
   return row
 }
+
+/** Points the stop at other stored objects: its manifest and the revealed mask it names. */
+export async function setStopObjects(
+  db: DB,
+  stopId: string,
+  keys: { manifestKey: string; revealedKey: string },
+): Promise<Stop> {
+  const [row] = await db
+    .update(stop)
+    .set({ manifestKey: keys.manifestKey, revealedKey: keys.revealedKey })
+    .where(eq(stop.id, stopId))
+    .returning()
+  if (!row) throw new DbError('NOT_FOUND', `Stop ${stopId} does not exist.`)
+  return row
+}

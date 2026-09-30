@@ -19,7 +19,7 @@ import {
   segmentManifestKey,
   segmentSliceKey,
 } from '#shared/utils/drive'
-import { parseStopManifest, revealedKey, stopManifestKey } from '#shared/utils/terrain'
+import { parseStopManifest } from '#shared/utils/terrain'
 import { forced, stopShortAt } from './forced'
 import {
   at,
@@ -69,10 +69,11 @@ async function landed(judge?: Parameters<typeof fakeJev>[0]) {
     submit: (userId: string, goal: { x: number; y: number }, now: Date) =>
       submitGoal(db, { store, jev: jev.client, missionId, userId, goal, now }),
     tick: (now: Date) => tickMission(db, { store, jev: jev.client, missionId, now }),
-    /** Whether stop `index`'s manifest or revealed mask is anywhere in the store. */
-    published: async (index: number) =>
-      (await store.has(stopManifestKey(missionId, index))) ||
-      (await store.has(revealedKey(missionId, index))),
+    /** Whether any object of the stop `segmentId` reaches is anywhere in the store. */
+    published: async (segmentId: string) =>
+      (await store.listKeys(`missions/${missionId}/`)).some((key) =>
+        new RegExp(`/(stops|revealed)/${segmentId}\\.`).test(key),
+      ),
   }
 }
 
@@ -114,7 +115,8 @@ describe('an idle rover and the grace window', () => {
     const manifest = parseStoredSegmentManifest(
       await m.store.getJson(segmentManifestKey(segment.id)),
     )
-    expect(manifest).toMatchObject({ segmentId: segment.id, startedAt: now.getTime() })
+    expect(manifest.segmentId).toBe(segment.id)
+    expect(await m.store.getJson(segmentManifestKey(segment.id))).not.toHaveProperty('startedAt')
     const slices = (await m.store.listKeys(`segments/${segment.id}/slices/`)).length
     expect(slices).toBeGreaterThan(0)
     expect(await m.store.has(segmentSliceKey(segment.id, slices - 1))).toBe(true)
@@ -132,7 +134,7 @@ describe('an idle rover and the grace window', () => {
     })
     expect((await getMission(db, m.missionId)).currentStopId).toBe(m.stop.id)
     expect(await listStops(db, m.missionId)).toHaveLength(1)
-    expect(await m.published(1)).toBe(false)
+    expect(await m.published(segment.id)).toBe(false)
   })
 
   it('shows the drive and the anchor, without the outcome or the end, until it is released', async () => {
@@ -174,7 +176,7 @@ describe('an idle rover and the grace window', () => {
   it('plans a submission made during the drive from the anchor over what was seen before it', async () => {
     const m = await landed()
     await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
-    await m.tick(at(T0, 6 * MINUTE))
+    const { started } = await m.tick(at(T0, 6 * MINUTE))
     const during = at(T0, 10 * MINUTE)
     // About 25 min of driving from the anchor, over 30 min from the stop the rover left: the
     // time band is measured from the anchor.
@@ -184,7 +186,7 @@ describe('an idle rover and the grace window', () => {
     expect(beside.submission!.metrics.straightLineM).toBe(20)
     expect(beside.submission!.summary.destination.straight_line_m).toBe(20)
     // Stop 0's mask is what the plan saw; nothing from the drive leaked into it.
-    expect(await m.published(1)).toBe(false)
+    expect(await m.published(started!.segmentId)).toBe(false)
   })
 })
 
@@ -199,7 +201,7 @@ describe('settlement', () => {
     const before = await m.tick(at(driving.endsAt, -1))
     expect(before.settled).toBeNull()
     expect((await getSegment(db, driving.id)).status).toBe('driving')
-    expect(await m.published(1)).toBe(false)
+    expect(await m.published(driving.id)).toBe(false)
 
     const settled = await m.tick(driving.endsAt)
     expect(settled.settled).toEqual({ segmentId: driving.id, status: 'arrived' })
@@ -209,13 +211,15 @@ describe('settlement', () => {
       index: 1,
       fromSegmentId: driving.id,
       headingRad: driving.outcome!.endPose.headingRad,
-      manifestKey: stopManifestKey(m.missionId, 1),
-      revealedKey: revealedKey(m.missionId, 1),
     })
+    expect(stop1!.manifestKey).toMatch(
+      new RegExp(`^missions/${m.missionId}/stops/${driving.id}\\.[0-9a-f]{16}\\.json$`),
+    )
     expect(stop1!.x).toBeCloseTo(driving.outcome!.endPose.x, 9)
     expect(stop1!.y).toBeCloseTo(driving.outcome!.endPose.y, 9)
     const manifest = parseStopManifest(await m.store.getJson(stop1!.manifestKey))
-    expect(manifest).toMatchObject({ missionId: m.missionId, stop: { index: 1 } })
+    expect(manifest).toMatchObject({ missionId: m.missionId, revealedKey: stop1!.revealedKey })
+    expect(manifest.stop.x).toBeCloseTo(stop1!.x, 9)
     expect(await m.store.has(stop1!.revealedKey)).toBe(true)
     expect(await getSegment(db, driving.id)).toMatchObject({
       status: 'arrived',
@@ -289,7 +293,7 @@ describe('settlement', () => {
       anchorX: goal.x,
       anchorY: goal.y,
     })
-    expect(await m.published(2)).toBe(false)
+    expect(await m.published(second.id)).toBe(false)
   })
 
   it('re-plans and re-judges the waiting submissions from where a drive stopped short', async () => {

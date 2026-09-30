@@ -28,6 +28,17 @@ registerEndpoint('/api/admin/diagnose', {
   },
 })
 
+/** Each call's body, and the answers to give in order: the stops in two bounded steps. */
+const repairBodies: { apply?: boolean; cursor?: unknown }[] = []
+let repairAnswers: (() => Response)[] = []
+registerEndpoint('/api/admin/repair-stops', {
+  method: 'POST',
+  handler: async (event) => {
+    repairBodies.push(await event.req.json())
+    return repairAnswers.shift()?.() ?? new Response(null, { status: 500 })
+  },
+})
+
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
@@ -36,7 +47,40 @@ afterEach(() => {
   configured = true
   bodies.length = 0
   diagnoseBodies.length = 0
+  repairBodies.length = 0
+  repairAnswers = []
 })
+
+/** A stop as the repair reports it: stale ones miss vertices, the landing never. */
+function stopEntry(index: number, stale: boolean, applied = false) {
+  return {
+    index,
+    stopId: `s-${index}`,
+    stored: 1000,
+    recomputed: stale ? 1250 : 1000,
+    missing: stale ? 250 : 0,
+    extra: 0,
+    packMatches: !stale,
+    stale,
+    manifestKey: `missions/m/stops/${index}.json`,
+    applied,
+  }
+}
+
+/** The report of every stop in two calls, the first handing back a cursor. */
+function reports(apply: boolean) {
+  const cursor = { next: 2, corrected: { 's-1': 'missions/m/revealed/s-1.bin' } }
+  return [
+    () =>
+      json(200, {
+        apply,
+        total: 3,
+        stops: [stopEntry(0, false), stopEntry(1, true, apply)],
+        cursor,
+      }),
+    () => json(200, { apply, total: 3, stops: [stopEntry(2, false)], cursor: null }),
+  ]
+}
 
 async function submit(wrapper: Awaited<ReturnType<typeof mountSuspended>>) {
   await wrapper.find('[data-test=admin-token] input').setValue('the-token')
@@ -142,6 +186,46 @@ describe('admin page', () => {
     const runtime = wrapper.find('[data-test=diagnosis-runtime]')
     expect(runtime.attributes('data-ok')).toBe('true')
     expect(runtime.text()).toContain('eu-central-1')
+  })
+
+  it('checks the stops in bounded calls, shows each, and repairs only after the check', async () => {
+    const wrapper = await mountSuspended(AdminPage)
+    await wrapper.find('[data-test=admin-token] input').setValue('the-token')
+    const repair = () => wrapper.find('[data-test=admin-repair-stops]')
+    expect(repair().attributes('disabled')).toBeDefined()
+
+    repairAnswers = reports(false)
+    await wrapper.find('[data-test=admin-check-stops]').trigger('click')
+    for (let k = 0; k < 8; k++) await flushPromises()
+    expect(repairBodies).toEqual([
+      { token: 'the-token', apply: false },
+      {
+        token: 'the-token',
+        apply: false,
+        cursor: { next: 2, corrected: { 's-1': 'missions/m/revealed/s-1.bin' } },
+      },
+    ])
+    expect(wrapper.find('[data-test=admin-stops-summary]').text()).toContain(
+      '1 of 3 stops need repair',
+    )
+    expect(wrapper.find('[data-test=admin-stops-summary]').text()).toContain('left as they are')
+    const stale = wrapper.find('[data-test=admin-stop-1]')
+    expect(stale.attributes('data-stale')).toBe('true')
+    expect(stale.text()).toContain('1000 vertices stored, 1250 computed, 250 missing')
+    expect(stale.text()).toContain('pack differs')
+    expect(wrapper.find('[data-test=admin-stop-0]').attributes('data-stale')).toBe('false')
+    expect(repair().attributes('disabled')).toBeUndefined()
+    expect(repair().text()).toBe('Repair 1 stop')
+
+    repairBodies.length = 0
+    repairAnswers = reports(true)
+    await repair().trigger('click')
+    for (let k = 0; k < 8; k++) await flushPromises()
+    expect(repairBodies.map((body) => body.apply)).toEqual([true, true])
+    expect(wrapper.find('[data-test=admin-stops-summary]').text()).toContain('Repaired 1 of 3')
+    expect(wrapper.find('[data-test=admin-stop-1]').text()).toContain('repaired')
+    // A repair is applied once; checking again comes first.
+    expect(repair().attributes('disabled')).toBeDefined()
   })
 
   it('shows the refusal when diagnostics are refused', async () => {

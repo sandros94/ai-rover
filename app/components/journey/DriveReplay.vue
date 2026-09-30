@@ -55,10 +55,7 @@ const TRANSITION_NOTICE_MS = 4000
 const rules = computed(() => props.mission.rules)
 const multi = computed(() => props.drives.length > 1)
 
-const playback = useSegmentPlaylist(props.drives, {
-  missionId: props.mission.id,
-  rate: START_RATE,
-})
+const playback = useSegmentPlaylist(props.drives, { rate: START_RATE })
 const drive = playback.segment
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 /** Playlist time at the instruments' rate: the controls and the status need no more. */
@@ -141,7 +138,9 @@ const roverAt = computed(() => rover.value ?? { ...drive.value.from, headingRad:
 /** Once for every stage drawn: the fog, sight included, is the same in each view. */
 const fog = useStopFog({
   seen: () => revealed.value,
-  reveals: () => snapshot.value.reveals,
+  // With the frame, not at the instruments' rate.
+  reveals: () => playback.reveals.value,
+  settledUntil: () => playback.jumpedTo.value,
   ground: () => ground.value ?? terrain.value,
   eye: () => roverAt.value,
   sight: () => {
@@ -162,6 +161,7 @@ const stage = computed((): StageProps => ({
   radius: manifest.value?.radius ?? 500,
   mastHeight: manifest.value?.world.mastHeight,
   rover: roverAt.value,
+  resting: false,
   trail: shownTrail.value,
   plan: plan.value,
   driven: driven.value,
@@ -338,7 +338,7 @@ const instrumentProps = computed(() => ({
       />
     </template>
     <template #panel-map2d>
-      <LiveStage :stage="readStage" view="2d" />
+      <LiveStage :stage="readStage" view="2d" :progress="false" />
     </template>
     <template #panel-segment>
       <section :key="drive.id" class="space-y-2 p-3" data-test="segment" aria-label="This segment">
@@ -350,13 +350,7 @@ const instrumentProps = computed(() => ({
       </section>
     </template>
     <template #panel-details>
-      <ObjectDetails
-        v-if="focused"
-        :key="focused.id"
-        :object="focused"
-        :mission-id="mission.id"
-        :rules="rules"
-      />
+      <ObjectDetails v-if="focused" :key="focused.id" :object="focused" :rules="rules" />
     </template>
     <template v-for="group in instrumentGroups" #[`panel-${group}`]>
       <Instrument :group="group" v-bind="instrumentProps" />

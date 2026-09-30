@@ -46,6 +46,11 @@ const props = withDefaults(
     /** The 23 keyframe values at the playback time; without a drive the rover rests at `rest`. */
     frame?: Float32Array
     rest: { x: number; y: number; headingRad: number }
+    /**
+     * Whether the ground under the rover is known and drawn true; until it is, neither the rover
+     * nor the path it drove is drawn, and the camera frames where the rover stands.
+     */
+    grounded?: boolean
     /** The path driven, drawn up to `t`. */
     driven?: DrivenPoint[]
     /** Sim seconds, for the path driven so far. */
@@ -73,6 +78,7 @@ const props = withDefaults(
     fog: undefined,
     survey: undefined,
     frame: undefined,
+    grounded: true,
     driven: () => [],
     t: 0,
     route: () => [],
@@ -212,7 +218,18 @@ const heightRange = computed(() => {
 
 const groundAt = (p: MapPoint) => props.heightAt(p.x, p.y) ?? 0
 
-const frame = computed(() => props.frame ?? flatFrame({ ...props.rest, z: groundAt(props.rest) }))
+/** At rest the rover stands on the ground in so far: read again as the ground arrives. */
+const frame = computed(() => {
+  if (props.frame) return props.frame
+  const { rest, terrain } = props
+  const z = gridHeightAt(
+    terrain.grid.heights,
+    { ...terrain.grid, origin: terrain.origin },
+    rest.x,
+    rest.y,
+  )
+  return flatFrame({ ...rest, z: z ?? groundAt(rest) })
+})
 const ghosts = computed(() =>
   props.deaths.map((d) => ({
     x: d.x,
@@ -234,7 +251,7 @@ const goals = computed(() =>
 const standAt = (o: MapObject) =>
   o.kind === 'destination' ? (drawnHeightAt.value(o.x, o.y) ?? 0) : groundAt(o)
 /** Changes only when the rover becomes inspectable or stops being: not with every frame. */
-const roverInspectable = computed(() => props.roverObject !== undefined)
+const roverInspectable = computed(() => props.roverObject !== undefined && props.grounded)
 const pickables = computed((): Pickable[] => [
   ...props.objects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, z: standAt(o) })),
   // The picker moves the rover's volume with the rover.
@@ -288,7 +305,8 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :height-range="heightRange"
       :height-at="heightAt"
       :stops="stops"
-      :driven="driven"
+      :driven="grounded ? driven : []"
+      :rover-shown="grounded"
       :t="t"
       :route="route"
       :deaths="ghosts"

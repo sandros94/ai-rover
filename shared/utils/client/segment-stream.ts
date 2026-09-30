@@ -70,7 +70,9 @@ export interface SegmentStream {
   readonly nextFetchAt: number | undefined
   /**
    * The keyframe at `simSeconds` interpolated over the window with the shared
-   * `interpolatePose`, clamped to its frames; undefined before the first window.
+   * `interpolatePose`, clamped to its frames; undefined before the first window. A window holds
+   * every reveal from the drive's start to its end, so {@link revealsUntil} is complete for any
+   * frame this gives.
    */
   frameAt(simSeconds: number): Float32Array | undefined
   /**
@@ -102,9 +104,11 @@ export interface SegmentStream {
 
 /**
  * The slices of one published segment, opened where playback stands and fetched as they are
- * released, up to `concurrency` requests at a time. Only the last slice says it is the last, so a
- * drive whose end is public (a settled one) passes `endsAt`, the release of its last slice, and
- * no request goes past it.
+ * released, up to `concurrency` requests at a time. Each is released `sliceSeconds` after its
+ * window starts, counted from `startedAt`, the segment's start as the mission state names it: the
+ * start the server releases slices from. Only the last slice says it is the last, so a drive
+ * whose end is public (a settled one) passes `endsAt`, the release of its last slice, and no
+ * request goes past it.
  *
  * Segments published before manifest version 3 have no totals and no traces: their window always
  * opens at the first slice, which the totals would otherwise stand in for, and their reveals come
@@ -113,19 +117,24 @@ export interface SegmentStream {
 export function createSegmentStream(options: {
   client: JourneyClient
   manifest: StoredSegmentManifest
+  /** Epoch milliseconds the drive started. */
+  startedAt: number
   concurrency?: number
   /** Epoch milliseconds the drive ended, once public; undefined while it plays. */
   endsAt?: number
 }): SegmentStream {
-  const { client, manifest, concurrency = DEFAULT_SLICE_CONCURRENCY } = options
+  const { client, manifest, startedAt, concurrency = DEFAULT_SLICE_CONCURRENCY } = options
   const endsAt = options.endsAt ?? Infinity
+  if (!Number.isFinite(startedAt)) {
+    throw new ClientError('INVALID_INPUT', `startedAt is ${startedAt}; pass epoch milliseconds.`)
+  }
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new ClientError(
       'INVALID_INPUT',
       `Slice concurrency is ${concurrency}; pass a positive integer.`,
     )
   }
-  const { segmentId, startedAt, sliceSeconds, keyframeHz } = manifest
+  const { segmentId, sliceSeconds, keyframeHz } = manifest
   const traced = manifest.version >= 3
   const releaseAt = (k: number) => sliceReleaseAt(startedAt, k, sliceSeconds)
 

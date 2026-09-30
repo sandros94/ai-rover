@@ -33,13 +33,13 @@ export const GROUND_VIEW_HZ = 10
  * stitched disk once every chunk is in, and `revealed` the stop's mask over the disk, one byte per
  * disk vertex, as soon as the mask is in.
  *
- * A new `stopIndex` shows that stop's disk instead, the one before kept until the new manifest
- * is in; `prefetch` loads a stop's disk ahead so the switch is immediate. Stops share one chunk
- * cache per world.
+ * A stop is named by its manifest's key, as the mission state or a drive gives it; the mask and
+ * the pack are read by the keys the manifest names. A new `manifestKey` shows that stop's disk
+ * instead, the one before kept until the new manifest is in; `prefetch` loads a stop's disk ahead
+ * so the switch is immediate. Stops share one chunk cache per world.
  */
 export function useStopTerrain(
-  missionId: string,
-  stopIndex: MaybeRefOrGetter<number>,
+  manifestKey: MaybeRefOrGetter<string>,
   options: {
     center?: { x: number; y: number }
     viewport?: { x: number; y: number; halfSizeM: number }
@@ -47,6 +47,8 @@ export function useStopTerrain(
 ) {
   const client = useJourneyClient()
   const manifest = shallowRef<StopManifest>()
+  /** The manifest key of the stop `manifest` describes. */
+  const shownKey = shallowRef<string>()
   const mask = shallowRef<RevealedMask>()
   const cache = shallowRef<ChunkCache>()
   const sampler = shallowRef<TerrainSampler>()
@@ -68,24 +70,25 @@ export function useStopTerrain(
     disk.value && mask.value ? revealedOverDisk(mask.value, disk.value) : undefined,
   )
 
-  /** Each stop's manifest and mask, requested once; a failed request is asked again next time. */
+  /**
+   * Each stop's manifest and the mask it names, requested once by manifest key; a failed request
+   * is asked again next time.
+   */
   const requested = new Map<
-    number,
+    string,
     { manifest: Promise<StopManifest>; mask: Promise<RevealedMask> }
   >()
-  function request(index: number) {
-    let entry = requested.get(index)
+  function request(key: string) {
+    let entry = requested.get(key)
     if (!entry) {
-      entry = {
-        manifest: client.getStopManifest(missionId, index),
-        mask: client.getRevealedMask(missionId, index),
-      }
+      const manifest = client.getStopManifest(key)
+      entry = { manifest, mask: manifest.then((stop) => client.getRevealedMask(stop.revealedKey)) }
       const forget = () => {
-        if (requested.get(index) === entry) requested.delete(index)
+        if (requested.get(key) === entry) requested.delete(key)
       }
       entry.manifest.catch(forget)
       entry.mask.catch(forget)
-      requested.set(index, entry)
+      requested.set(key, entry)
     }
     return entry
   }
@@ -106,13 +109,11 @@ export function useStopTerrain(
     })
 
   /**
-   * Every chunk of stop `index` into the cache, `onChunk` called for each, held ones first. The
-   * pack costs the whole disk, so it is fetched only while most of the disk is missing, and only
-   * for a manifest that names one; a pack missing or broken off leaves the rest to per-chunk
-   * requests.
+   * Every chunk of the stop into the cache, `onChunk` called for each, held ones first. The pack
+   * costs the whole disk, so it is fetched only while most of the disk is missing, and only for a
+   * manifest that names one; a pack missing or broken off leaves the rest to per-chunk requests.
    */
   async function load(
-    index: number,
     stop: StopManifest,
     chunks: ChunkCache,
     onChunk?: (chunk: Chunk) => void,
@@ -126,7 +127,7 @@ export function useStopTerrain(
     }
     if (stop.packKey && 2 * missing > order.length) {
       try {
-        await chunks.loadPack(missionId, index, { onChunk })
+        await chunks.loadPack(stop.packKey, { onChunk })
       } catch (caught) {
         if (!(caught instanceof ClientError) || caught.code !== 'NETWORK') throw caught
       }
@@ -137,10 +138,10 @@ export function useStopTerrain(
   /** Bumped per stop shown, so a stop arriving after a switch is dropped. */
   let generation = 0
 
-  async function show(index: number): Promise<void> {
+  async function show(key: string): Promise<void> {
     const current = ++generation
     try {
-      const entry = request(index)
+      const entry = request(key)
       const stop = await entry.manifest
       if (current !== generation) return
       const chunks = chunksOf(stop.worldHash)
@@ -149,6 +150,7 @@ export function useStopTerrain(
       loaded.value = 0
       error.value = null
       manifest.value = stop
+      shownKey.value = key
       disk.value = shown
       // Without the manifest's height range the tint is measured over the whole disk, so ground
       // is shown only once all of it is in.
@@ -160,7 +162,7 @@ export function useStopTerrain(
       const masked = entry.mask.then((m) => {
         if (current === generation) mask.value = m
       })
-      await load(index, stop, chunks, (chunk) => {
+      await load(stop, chunks, (chunk) => {
         if (current !== generation || !shown.place(chunk)) return
         loaded.value = shown.placed.length
         view()
@@ -171,23 +173,24 @@ export function useStopTerrain(
     }
   }
 
-  /** Loads stop `index`'s manifest, mask and chunks without showing them. */
-  async function prefetch(index: number): Promise<void> {
-    const entry = request(index)
+  /** Loads the manifest at `key`, its mask and its chunks without showing them. */
+  async function prefetch(key: string): Promise<void> {
+    const entry = request(key)
     const stop = await entry.manifest
-    await Promise.all([entry.mask, load(index, stop, chunksOf(stop.worldHash))])
+    await Promise.all([entry.mask, load(stop, chunksOf(stop.worldHash))])
   }
 
   onMounted(() => {
     watch(
-      () => toValue(stopIndex),
-      (index) => void show(index),
+      () => toValue(manifestKey),
+      (key) => void show(key),
       { immediate: true },
     )
   })
 
   return {
     manifest,
+    manifestKey: shownKey,
     mask,
     cache,
     sampler,

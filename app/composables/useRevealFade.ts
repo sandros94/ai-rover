@@ -16,12 +16,14 @@ export interface RevealFrame {
  * The fog over `grid` as `seen` grows: vertices newly seen fade in over {@link REVEAL_FADE_MS},
  * and while any fade runs a new frame is given at most {@link REDRAW_HZ} times a second with the
  * rectangles to redraw, one per change still fading, so a long drive never grows one rectangle
- * over its whole path. A new grid, or a first `seen`, gives a frame without a rectangle; no
- * `seen`, or one not matching the grid, gives none.
+ * over its whole path. Vertices newly seen that `settled` flags (one byte per vertex, as `seen`)
+ * appear settled, in a frame given at once. A new grid, or a first `seen`, gives a frame without
+ * a rectangle; no `seen`, or one not matching the grid, gives none.
  */
 export function useRevealFade(
   seen: () => Uint8Array | undefined,
   grid: () => HeightGrid | undefined,
+  settled: () => Uint8Array | undefined = () => undefined,
 ) {
   const frame = shallowRef<RevealFrame>()
   let times: Float64Array | undefined
@@ -56,8 +58,8 @@ export function useRevealFade(
 
   // Synchronous, so a frame never pairs a new grid with the previous grid's flags.
   watch(
-    [seen, grid] as const,
-    ([flags, ground], previous) => {
+    [seen, grid, settled] as const,
+    ([flags, ground, base], previous) => {
       if (!flags || !ground || flags.length !== ground.width * ground.height) {
         reset()
         frame.value = undefined
@@ -72,10 +74,15 @@ export function useRevealFade(
         return
       }
       shown = flags
-      const changed = updateRevealTimes(times, flags, now, ground.width)
+      const fits = base?.length === flags.length ? base : undefined
+      const changed = updateRevealTimes(times, flags, now, ground.width, fits)
       if (!changed) return
       fading.push({ rect: changed, until: now + REVEAL_FADE_MS })
-      schedule()
+      // Settled ground is drawn in the same frame as whatever it arrived with.
+      if (fits && fits !== previous?.[2]) {
+        clearTimeout(timer)
+        tick()
+      } else schedule()
     },
     { immediate: true, flush: 'sync' },
   )

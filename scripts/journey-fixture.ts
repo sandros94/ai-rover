@@ -18,7 +18,8 @@ import {
   segmentTraceKey,
   sliceRecord,
 } from '#shared/utils/drive'
-import type { RevealedMask, StopDisk, StopManifestV3, World } from '#shared/utils/terrain'
+import { landingMask } from '#shared/utils/mission'
+import type { RevealedMask, StopDisk, StopKeys, StopManifestV4, World } from '#shared/utils/terrain'
 import {
   buildStopManifest,
   computeStopDisk,
@@ -28,8 +29,8 @@ import {
   encodeDiskPack,
   encodeRevealedMask,
   generateChunk,
-  revealDisk,
-  stopManifestKey,
+  revealedMaskDigest,
+  stopKeys,
 } from '#shared/utils/terrain'
 
 /**
@@ -40,12 +41,11 @@ import {
 export const JOURNEY_FIXTURE = Object.freeze({
   seed: 'mars',
   missionId: '0192f000-0000-7000-8000-000000000001',
-  stopIndex: 0,
   radius: 60,
   start: Object.freeze({ x: 0, y: 0, headingRad: 0 }),
   goal: Object.freeze({ x: 25, y: 15 }),
   segmentId: 'fixture-mars-0',
-  /** 2026-09-26T12:00:00Z. */
+  /** The start a segment row would give the drive, 2026-09-26T12:00:00Z; not stored. */
   startedAt: Date.UTC(2026, 8, 26, 12),
 })
 
@@ -53,7 +53,9 @@ export interface JourneyFixture {
   world: World
   disk: StopDisk
   mask: RevealedMask
-  stopManifest: StopManifestV3
+  /** Where the landing stop's objects are stored. */
+  stopKeys: StopKeys
+  stopManifest: StopManifestV4
   record: SegmentRecord
   segmentManifest: StoredSegmentManifest
   slices: WrittenSlice[]
@@ -63,11 +65,13 @@ export interface JourneyFixture {
 }
 
 export function buildJourneyFixture(): JourneyFixture {
-  const { seed, missionId, stopIndex, radius, start, goal, segmentId, startedAt } = JOURNEY_FIXTURE
+  const { seed, missionId, radius, start, goal, segmentId } = JOURNEY_FIXTURE
   const world = defineWorld({ seed })
   const disk = computeStopDisk(world, { center: { x: start.x, y: start.y }, radius })
-  const mask = revealDisk(createRevealedMask(world), disk)
-  const stopManifest = buildStopManifest(world, disk, { missionId, stopIndex })
+  const mask = landingMask(createRevealedMask(world), disk)
+  const maskBytes = encodeRevealedMask(mask)
+  const keys = stopKeys(missionId, { reachedBy: null, maskDigest: revealedMaskDigest(maskBytes) })
+  const stopManifest = buildStopManifest(world, disk, { missionId, keys })
   const { record } = driveSegment(world, {
     disk,
     revealed: mask,
@@ -75,17 +79,28 @@ export function buildJourneyFixture(): JourneyFixture {
     goal: { ...goal },
   })
   const { manifest, slices, traces } = sliceRecord(record)
-  const segmentManifest: StoredSegmentManifest = { ...manifest, segmentId, startedAt }
+  const segmentManifest: StoredSegmentManifest = { ...manifest, segmentId }
 
   const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
   const files = new Map<string, Uint8Array>()
   const chunks = stopManifest.chunks.map(({ cx, cy }) => generateChunk(world, { cx, cy }))
   for (const [n, { key }] of stopManifest.chunks.entries()) files.set(key, encodeChunk(chunks[n]!))
   files.set(stopManifest.packKey, encodeDiskPack(chunks))
-  files.set(stopManifest.revealedKey, encodeRevealedMask(mask))
-  files.set(stopManifestKey(missionId, stopIndex), json(stopManifest))
+  files.set(keys.revealedKey, maskBytes)
+  files.set(keys.manifestKey, json(stopManifest))
   for (const slice of slices) files.set(segmentSliceKey(segmentId, slice.index), encodeSlice(slice))
   for (const trace of traces) files.set(segmentTraceKey(segmentId, trace.index), encodeTrace(trace))
   files.set(segmentManifestKey(segmentId), json(segmentManifest))
-  return { world, disk, mask, stopManifest, record, segmentManifest, slices, traces, files }
+  return {
+    world,
+    disk,
+    mask,
+    stopKeys: keys,
+    stopManifest,
+    record,
+    segmentManifest,
+    slices,
+    traces,
+    files,
+  }
 }

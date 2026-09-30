@@ -106,11 +106,12 @@ describe('failures', () => {
       })
       // A stop names the segment that reached it and when; the landing stop has none.
       expect(after.trail).toEqual([
-        { index: 0, x: m.stop.x, y: m.stop.y, reachedBy: null },
+        { index: 0, x: m.stop.x, y: m.stop.y, manifestKey: m.stop.manifestKey, reachedBy: null },
         {
           index: 1,
           x: stop1.x,
           y: stop1.y,
+          manifestKey: stop1.manifestKey,
           reachedBy: { segmentId: reach.id, number: 1, fromIndex: 0, at: reach.endsAt },
         },
       ])

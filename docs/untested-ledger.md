@@ -34,3 +34,4 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 30. A denied GitHub consent (callback with `error=` and no `code`) is treated as a fresh start and bounces back to GitHub instead of showing `refused`.
 31. The Neon WebSocket pool inside Functions: works on the first deploy; cold-start cost and connection reuse across invocations unmeasured.
 32. Opening a drive at live: time to first frame over the real CDN unmeasured (about 16 requests at the end of a two-hour drive, trace blocks assembled by the function on their first request, then served from the durable cache), and so is publishing twice as many blobs per segment.
+33. The stop repair on the live mission: the dry run's recompute was checked against the live mission's public blobs, but applying it there, and whether a 500 m stop's check and republication fits one call within the synchronous function limit, are unexercised.

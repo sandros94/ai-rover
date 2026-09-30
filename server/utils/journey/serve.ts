@@ -16,13 +16,19 @@ const BINARY = 'application/octet-stream'
  * The response to `/journey/{key}`: journey blobs through the CDN, deflated as stored and cached
  * forever; a client that does not accept deflate gets them inflated, cached as its own variant. A
  * segment slice and its trace are refused, uncached, until wall-clock `now` passes the end of the
- * slice's window (see `sliceReleaseAt`); a trace block until its last trace is released, and it
- * is then assembled from the stored traces, never stored itself.
+ * slice's window since the segment's start, the one `startOf` gives (see `sliceReleaseAt`); a
+ * trace block until its last trace is released, and it is then assembled from the stored traces,
+ * never stored itself. A segment without a start (no row names it) serves none of them.
  */
 export async function serveJourney(
   store: JourneyStore,
   key: string,
-  options: { now: number; acceptEncoding: string | null },
+  options: {
+    now: number
+    acceptEncoding: string | null
+    /** The segment's start, epoch milliseconds, as its row states it; null for none. */
+    startOf: (segmentId: string) => Promise<number | null>
+  },
 ): Promise<Response> {
   const parsed = parseJourneyKey(key)
   if (!parsed) return notFound()
@@ -31,10 +37,13 @@ export async function serveJourney(
     parsed.kind === 'segment-trace' ||
     parsed.kind === 'segment-trace-block'
   ) {
+    const startedAt = await options.startOf(parsed.segmentId)
+    if (startedAt === null) return notFound()
     const manifest = await store.getJson(segmentManifestKey(parsed.segmentId))
     if (manifest === null) return notFound()
+    const { sliceSeconds } = parseStoredSegmentManifest(manifest)
     const last = parsed.kind === 'segment-trace-block' ? parsed.to : parsed.index
-    const gate = sliceGate(parseStoredSegmentManifest(manifest), last, options.now)
+    const gate = sliceGate({ startedAt, sliceSeconds }, last, options.now)
     if (!gate.released) {
       return notFound({ 'x-release-at': new Date(gate.releaseAt).toISOString() })
     }

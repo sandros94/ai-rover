@@ -16,6 +16,10 @@ import {
 } from '#shared/utils/client'
 import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
 
+/** An older stop's manifest key, named by its index. */
+const stopKey = (index: number) =>
+  `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
+
 const EPOCH = '2026-09-01T00:00:00.000Z'
 /** One sol and a quarter after the epoch: sol 1, 06:00:00 LMST. */
 const SOL_1_0600 = new Date(Date.parse(EPOCH) + 1.25 * MARS_SOL_SECONDS * 1000).toISOString()
@@ -27,17 +31,19 @@ function source(overrides: Partial<MapObjectsSource> = {}): MapObjectsSource {
     mission: { solsEpoch: EPOCH },
     currentStop: { index: 2 },
     trail: [
-      { index: 0, x: 0, y: 0, reachedBy: null },
+      { index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null },
       {
         index: 1,
         x: 40,
         y: 0,
+        manifestKey: stopKey(1),
         reachedBy: { segmentId: 'seg-1', number: 1, fromIndex: 0, at: SOL_1_0600 },
       },
       {
         index: 2,
         x: 80,
         y: 30,
+        manifestKey: stopKey(2),
         reachedBy: { segmentId: 'seg-3', number: 3, fromIndex: 1, at: '2026-09-03T00:00:00.000Z' },
       },
     ],
@@ -76,7 +82,14 @@ describe('mapObjects', () => {
   it('builds a stop per trail entry: index, when it was reached, by which segment', () => {
     const stops = byKind(mapObjects(source()), 'stop')
     expect(stops.map((s) => s.id)).toEqual(['stop:0', 'stop:1', 'stop:2'])
-    expect(stops[0]).toMatchObject({ index: 0, x: 0, y: 0, reached: null, current: false })
+    expect(stops[0]).toMatchObject({
+      index: 0,
+      x: 0,
+      y: 0,
+      manifestKey: stopKey(0),
+      reached: null,
+      current: false,
+    })
     expect(stops[1]).toMatchObject({
       kind: 'stop',
       index: 1,
@@ -153,7 +166,7 @@ describe('mapObjects', () => {
 
 describe('replayedStopsAndDeaths', () => {
   const BEFORE: Pick<MapObjectsSource, 'trail' | 'deaths'> = {
-    trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+    trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
     deaths: [],
   }
   const DRIVES = [
@@ -164,7 +177,7 @@ describe('replayedStopsAndDeaths', () => {
       distanceM: 80,
       reasons: [],
       from: { index: 0 },
-      to: { index: 1, x: 0, y: 80 },
+      to: { index: 1, x: 0, y: 80, manifestKey: stopKey(1) },
       death: null,
     },
     {
@@ -183,11 +196,12 @@ describe('replayedStopsAndDeaths', () => {
     expect(replayedStopsAndDeaths(BEFORE, DRIVES, 0)).toEqual(BEFORE)
     const second = replayedStopsAndDeaths(BEFORE, DRIVES, 1)
     expect(second.trail).toEqual([
-      { index: 0, x: 0, y: 0, reachedBy: null },
+      { index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null },
       {
         index: 1,
         x: 0,
         y: 80,
+        manifestKey: stopKey(1),
         reachedBy: { segmentId: 'd1', number: 1, fromIndex: 0, at: '2026-09-02T00:00:00.000Z' },
       },
     ])
@@ -223,7 +237,7 @@ describe('mapObjects with a departing drive', () => {
     const base = {
       mission: { solsEpoch: EPOCH },
       currentStop: { index: 0 },
-      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+      trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
       deaths: [],
       round: null,
     }

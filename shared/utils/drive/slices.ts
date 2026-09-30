@@ -168,15 +168,22 @@ export type SegmentManifest = v.InferOutput<typeof SegmentManifestSchema>
 /** A published segment's opening plan metrics: `NavMetrics`, older segments lacking some. */
 export type PublishedPlanMetrics = SegmentManifest['plan']['metrics']
 
-/** A manifest as published: the segment's id and its wall-clock start, epoch milliseconds. */
+/**
+ * A manifest as published: the segment's content and its id, the same for every run that
+ * publishes it. When the segment started is the segment row's alone: slices are released and
+ * played from the row's start.
+ */
 const StoredManifestObject = v.strictObject({
   ...ManifestEntries,
   segmentId: v.pipe(v.string(), v.regex(SEGMENT_ID)),
-  startedAt: count,
+  // Blobs are immutable, and older manifests carry a `startedAt`: the clock of whichever run
+  // wrote them last, which can be later than the row's start. It is read and dropped.
+  startedAt: v.optional(count),
 })
 export const StoredSegmentManifestSchema = v.pipe(
   StoredManifestObject,
   v.check<v.InferOutput<typeof StoredManifestObject>, string>(strideOfVersion, STRIDE_MISMATCH),
+  v.transform(({ startedAt: _dropped, ...manifest }) => manifest),
 )
 
 export type StoredSegmentManifest = v.InferOutput<typeof StoredSegmentManifestSchema>
@@ -421,15 +428,16 @@ export function sliceReleaseAt(
 }
 
 /**
- * Whether slice `sliceIndex` of a published segment may be served at epoch milliseconds `now`,
- * that is whether its whole window lies in the past (see {@link sliceReleaseAt}).
+ * Whether slice `sliceIndex` of a segment started at `release.startedAt` (epoch milliseconds, the
+ * segment row's) may be served at epoch milliseconds `now`, that is whether its whole window lies
+ * in the past (see {@link sliceReleaseAt}).
  */
 export function sliceGate(
-  manifest: Pick<StoredSegmentManifest, 'startedAt' | 'sliceSeconds'>,
+  release: { startedAt: number; sliceSeconds: number },
   sliceIndex: number,
   now: number,
 ): { released: boolean; releaseAt: number } {
-  const releaseAt = sliceReleaseAt(manifest.startedAt, sliceIndex, manifest.sliceSeconds)
+  const releaseAt = sliceReleaseAt(release.startedAt, sliceIndex, release.sliceSeconds)
   return { released: now >= releaseAt, releaseAt }
 }
 

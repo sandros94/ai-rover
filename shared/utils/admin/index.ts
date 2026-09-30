@@ -84,3 +84,51 @@ export interface Diagnosis {
   mission: MissionDiagnosis
   runtime: RuntimeDiagnosis
 }
+
+/**
+ * Where a repair of the stops stands between calls: the position of the next stop to check, and
+ * the revealed mask key of every stop checked so far whose stored mask was wrong, so the stops
+ * after it are computed from the right one before any stop row points at it.
+ */
+export interface StopRepairCursor {
+  next: number
+  /** Stop id → key of its corrected revealed mask. */
+  corrected: Record<string, string>
+}
+
+/** One stop as `POST /api/admin/repair-stops` found it. */
+export interface StopRepairEntry {
+  index: number
+  stopId: string
+  /** World vertices in the mask the stop names. */
+  stored: number
+  /** World vertices in the mask computed again from the landing. */
+  recomputed: number
+  /** In the recomputed mask and not in the stored one. */
+  missing: number
+  /** In the stored mask and not in the recomputed one. */
+  extra: number
+  /**
+   * Whether the stored manifest describes the stop and its pack holds exactly the chunks it
+   * lists; null when the manifest names no pack.
+   */
+  packMatches: boolean | null
+  /** The stop names other objects than it should: the right ones are published under `manifestKey`. */
+  stale: boolean
+  /** The manifest key the stop names once repaired; the one it names when not stale. */
+  manifestKey: string
+  /** This call pointed the stop at the right objects. */
+  applied: boolean
+}
+
+/**
+ * What `POST /api/admin/repair-stops` answers: the stops checked by this call, in index order,
+ * and the cursor to pass to the next call; null once every stop is checked.
+ */
+export interface StopRepairReport {
+  apply: boolean
+  /** Stops of the mission. */
+  total: number
+  stops: StopRepairEntry[]
+  cursor: StopRepairCursor | null
+}

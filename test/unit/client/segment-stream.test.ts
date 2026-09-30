@@ -15,10 +15,11 @@ import {
   ERROR_RETRY_MS,
 } from '#shared/utils/client'
 import { encodeLegacySlice } from '../drive/helpers'
-import { journeyFixture, recordsFetch } from './helpers'
+import { JOURNEY_FIXTURE, journeyFixture, recordsFetch } from './helpers'
 
 const { record, segmentManifest: manifest, slices, traces } = journeyFixture()
-const { startedAt, sliceSeconds, segmentId } = manifest
+const { sliceSeconds, segmentId } = manifest
+const { startedAt } = JOURNEY_FIXTURE
 const releaseAt = (k: number) => sliceReleaseAt(startedAt, k, sliceSeconds)
 const last = slices.length - 1
 /** The live edge at `wall`, as the playback clock places it. */
@@ -40,6 +41,7 @@ function setup(
   const stream = createSegmentStream({
     client,
     manifest: options.manifest ?? manifest,
+    startedAt,
     endsAt: options.endsAt,
   })
   return {
@@ -102,6 +104,32 @@ describe('createSegmentStream over the recorded drive', () => {
     expect(Array.from(stream.pathBefore)).toEqual(
       traces.slice(0, 20).flatMap((t) => Array.from(t.path)),
     )
+  })
+
+  it('gives no frame from a live slice in before its traces: frames come with every reveal up to them', async () => {
+    const wall = releaseAt(20) + 6000
+    const records = recordsFetch({ now: () => wall })
+    const traced = Promise.withResolvers<void>()
+    const slice = Promise.withResolvers<void>()
+    const client = createJourneyClient({
+      fetch: async (input: string) => {
+        if (input.includes('/traces/')) await traced.promise
+        const response = await records.fetch(input)
+        if (input.includes('/slices/')) slice.resolve()
+        return response
+      },
+    })
+    const stream = createSegmentStream({ client, manifest, startedAt })
+    const sim = liveAt(wall)
+    const polled = stream.poll(wall, sim)
+    await slice.promise
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(stream.frameAt(sim)).toBeUndefined()
+    expect(stream.revealsUntil(Infinity)).toEqual([])
+    traced.resolve()
+    await polled
+    expect(stream.frameAt(sim)).toEqual(interpolatePose(record.keyframes, sim))
+    expect(stream.revealsUntil(sim)).toEqual(record.reveals.filter((group) => group.t <= sim))
   })
 
   it('opens a settled drive at its last slice alone, the outcome with it', async () => {
@@ -342,5 +370,35 @@ describe('createSegmentStream over a segment published before totals', () => {
     const sim = liveAt(releaseAt(12))
     expect(stream.frameAt(sim)).toEqual(interpolatePose(record.keyframes, sim))
     expect(stream.keyframesUntil(Infinity).count * KEYFRAME_STRIDE).toBe(framesOf(0, 13).length)
+  })
+})
+
+describe('createSegmentStream over a stored manifest stamped with a later start', () => {
+  // A manifest rewritten by a run that prepared the drive after the one that started it: its own
+  // start 96.8 s after the segment row's, the start the server releases slices from.
+  const skewed = startedAt + 96_800
+  const override = (key: string) =>
+    key === `segments/${segmentId}/manifest.json`
+      ? Response.json({ ...manifest, startedAt: skewed })
+      : undefined
+
+  it("plays from the state's start and loads every slice up to `endsAt`, the outcome included", async () => {
+    let wall = startedAt
+    const records = recordsFetch({ now: () => wall, override })
+    const client = createJourneyClient({ fetch: records.fetch })
+    const loaded = await client.getSegmentManifest(segmentId)
+    expect(loaded).not.toHaveProperty('startedAt')
+    expect(loaded).toEqual(manifest)
+    const endsAt = releaseAt(last)
+    const stream = createSegmentStream({ client, manifest: loaded, startedAt, endsAt })
+    for (wall = startedAt; wall <= endsAt + 10_000; wall += 5_000) {
+      await stream.poll(wall, liveAt(wall))
+    }
+    expect(stream.window).toEqual({ start: expect.any(Number), end: slices.length })
+    expect(stream.done).toBe(true)
+    expect(stream.outcome).toEqual(record.outcome)
+    expect(stream.outcome?.kind).toBe('arrived')
+    expect(stream.eventsUntil(Infinity).at(-1)?.type).toBe('arrived')
+    expect(records.calls).toContain(sliceUrl(last))
   })
 })

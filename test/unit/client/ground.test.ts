@@ -6,6 +6,7 @@ import {
   contourTiles,
   createDiskGround,
   expandRect,
+  groundAround,
   groundView,
   reliefPixels,
 } from '#shared/utils/client'
@@ -69,6 +70,32 @@ describe('createDiskGround', () => {
     expect(view.complete).toBe(false)
     expect(view.heightRange).toBe(manifest.heightRange)
     expect(view.grid).toBe(ground.grid)
+  })
+})
+
+describe('groundAround', () => {
+  const options = { chunkVertices: 65, survey: { center: { x: 0, y: 0 }, radius: 60 } }
+
+  it('holds once the chunk under the point and those around it within the survey are in', () => {
+    const ground = createDiskGround(manifest)
+    const point = { x: 10, y: 10 }
+    ground.place(northEast)
+    ground.place(southWest)
+    ground.place(southEast)
+    expect(groundAround(groundView(ground), point, options)).toBe(false)
+    ground.place(northWest)
+    // The chunks east and north of these four lie beyond the 60 m survey.
+    expect(groundAround(groundView(ground), point, options)).toBe(true)
+    expect(ground.complete).toBe(false)
+  })
+
+  it('holds for a whole grid, and for one complete', () => {
+    const ground = createDiskGround(manifest)
+    expect(
+      groundAround({ grid: ground.grid, origin: ground.origin }, { x: 0, y: 0 }, options),
+    ).toBe(true)
+    for (const chunk of chunks) ground.place(chunk)
+    expect(groundAround(groundView(ground), { x: -50, y: 20 }, options)).toBe(true)
   })
 })
 

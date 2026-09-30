@@ -46,22 +46,23 @@ export {
   REVEALED_FORMAT_VERSION,
   REVEALED_HEADER_BYTES,
   revealDisk,
+  revealedMaskDigest,
   revealedOverDisk,
   revealedVertexCount,
+  revealedVerticesMissing,
   revealVertices,
 } from './revealed'
-export type { StopManifest, StopManifestV3 } from './manifest'
+export type { StopKeys, StopManifest, StopManifestV4 } from './manifest'
 export {
   buildStopManifest,
   chunkKey,
+  LANDING_STOP,
   MISSION_ID,
   parseStopManifest,
-  revealedKey,
   STOP_MANIFEST_VERSION,
   StopManifestSchema,
-  StopManifestV3Schema,
-  stopManifestKey,
-  stopPackKey,
+  StopManifestV4Schema,
+  stopKeys,
   worldHash,
 } from './manifest'
 export {

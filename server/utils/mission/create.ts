@@ -8,16 +8,9 @@ import { primeStop } from '../journey/prime'
 import { publishStop } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { MissionRules } from '#shared/utils/mission'
-import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
+import { DEFAULT_MISSION_RULES, landingMask } from '#shared/utils/mission'
 import type { WorldConfig } from '#shared/utils/terrain'
-import {
-  computeStopDisk,
-  createRevealedMask,
-  defineWorld,
-  revealDisk,
-  revealedKey,
-  worldHash,
-} from '#shared/utils/terrain'
+import { computeStopDisk, createRevealedMask, defineWorld, worldHash } from '#shared/utils/terrain'
 
 export interface NewMissionAtStop {
   store: JourneyStore
@@ -52,9 +45,9 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
   const world = defineWorld({ seed, ...config.world })
   const hash = worldHash(world)
   const disk = computeStopDisk(world, { center: at, radius: config.rules.stopRadiusM })
-  const mask = revealDisk(createRevealedMask(world), disk)
+  const mask = landingMask(createRevealedMask(world), disk)
   const missionId = uuidv7()
-  const published = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
+  const published = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
 
   const landed = await db.transaction(async (tx) => {
     await createMission(tx, {
@@ -70,8 +63,8 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
       x: at.x,
       y: at.y,
       headingRad: 0,
-      manifestKey: published.manifestKey,
-      revealedKey: revealedKey(missionId, 0),
+      manifestKey: published.keys.manifestKey,
+      revealedKey: published.keys.revealedKey,
     })
     const round = await openRound(tx, {
       missionId,
@@ -82,6 +75,6 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
     const mission = await setCurrentStop(tx, missionId, stop.id)
     return { mission, stop, round, published }
   })
-  void primeStop(missionId, 0)
+  void primeStop(published.keys)
   return landed
 }

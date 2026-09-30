@@ -6,10 +6,8 @@ import {
   computeStopDisk,
   defineWorld,
   parseStopManifest,
-  revealedKey,
   STOP_MANIFEST_VERSION,
-  stopManifestKey,
-  stopPackKey,
+  stopKeys,
   TerrainError,
   worldHash,
 } from '#shared/utils/terrain'
@@ -54,28 +52,48 @@ describe('worldHash', () => {
 })
 
 const MISSION = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+const SEGMENT = '0190a1b2-c3d4-8e5f-8a9b-0c1d2e3f4a5c'
+const DIGEST = '0123456789abcdef'
+const KEYS = stopKeys(MISSION, { reachedBy: SEGMENT, maskDigest: DIGEST })
 
 describe('blob keys', () => {
   it('follow the documented layout: chunks per world, stops and masks per mission', () => {
     expect(chunkKey('0123456789abcdef', { cx: -3, cy: 7 })).toBe(
       'terrain/0123456789abcdef/chunks/-3_7.bin',
     )
-    expect(revealedKey(MISSION, 4)).toBe(`missions/${MISSION}/revealed/4.bin`)
-    expect(stopManifestKey(MISSION, 4)).toBe(`missions/${MISSION}/stops/4.json`)
-    expect(stopPackKey(MISSION, 4)).toBe(`missions/${MISSION}/stops/4.pack`)
+    expect(KEYS).toEqual({
+      manifestKey: `missions/${MISSION}/stops/${SEGMENT}.${DIGEST}.json`,
+      revealedKey: `missions/${MISSION}/revealed/${SEGMENT}.${DIGEST}.bin`,
+      packKey: `missions/${MISSION}/stops/${SEGMENT}.pack`,
+    })
   })
 
-  it('refuses a negative or fractional stop index', () => {
-    expect(terrainErrorOf(() => revealedKey(MISSION, -1))?.code).toBe('OUT_OF_BOUNDS')
-    expect(terrainErrorOf(() => stopManifestKey(MISSION, 1.5))?.code).toBe('OUT_OF_BOUNDS')
-    expect(terrainErrorOf(() => stopPackKey(MISSION, -1))?.code).toBe('OUT_OF_BOUNDS')
+  it('name the landing stop, which no drive reached, landing', () => {
+    expect(stopKeys(MISSION, { reachedBy: null, maskDigest: DIGEST })).toEqual({
+      manifestKey: `missions/${MISSION}/stops/landing.${DIGEST}.json`,
+      revealedKey: `missions/${MISSION}/revealed/landing.${DIGEST}.bin`,
+      packKey: `missions/${MISSION}/stops/landing.pack`,
+    })
+  })
+
+  it('refuses a segment id that is not a lowercase UUID, and a digest that is not 16 hex', () => {
+    for (const reachedBy of ['landing', '4', SEGMENT.toUpperCase(), `${SEGMENT}/..`]) {
+      expect(terrainErrorOf(() => stopKeys(MISSION, { reachedBy, maskDigest: DIGEST }))?.code).toBe(
+        'OUT_OF_BOUNDS',
+      )
+    }
+    for (const maskDigest of ['', '0123', DIGEST.toUpperCase(), `${DIGEST}0`]) {
+      expect(
+        terrainErrorOf(() => stopKeys(MISSION, { reachedBy: SEGMENT, maskDigest }))?.code,
+      ).toBe('OUT_OF_BOUNDS')
+    }
   })
 
   it('refuses a mission id that is not a lowercase UUID', () => {
     for (const id of ['', '0123456789abcdef', MISSION.toUpperCase(), `${MISSION}/..`]) {
-      expect(terrainErrorOf(() => revealedKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
-      expect(terrainErrorOf(() => stopManifestKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
-      expect(terrainErrorOf(() => stopPackKey(id, 0))?.code).toBe('OUT_OF_BOUNDS')
+      expect(
+        terrainErrorOf(() => stopKeys(id, { reachedBy: null, maskDigest: DIGEST }))?.code,
+      ).toBe('OUT_OF_BOUNDS')
     }
   })
 
@@ -89,17 +107,17 @@ describe('blob keys', () => {
 describe('stop manifest', () => {
   const world = defineWorld({ seed: 'mars' })
   const disk = computeStopDisk(world, { center: { x: 12.5, y: -3 }, radius: 70 })
-  const manifest = buildStopManifest(world, disk, { missionId: MISSION, stopIndex: 3 })
+  const manifest = buildStopManifest(world, disk, { missionId: MISSION, keys: KEYS })
   const hash = worldHash(world)
 
   it('describes the disk with its blob keys', () => {
-    expect(STOP_MANIFEST_VERSION).toBe(3)
+    expect(STOP_MANIFEST_VERSION).toBe(4)
     expect(manifest).toEqual({
-      version: 3,
+      version: 4,
       missionId: MISSION,
       worldHash: hash,
       world: { chunkSize: 64, cellSize: 1, mastHeight: 2, slopeLimitDeg: 16 },
-      stop: { index: 3, x: 12.5, y: -3 },
+      stop: { x: 12.5, y: -3 },
       radius: 70,
       heightRange: manifest.heightRange,
       chunks: chunksNearestFirst(disk.chunks, { center: disk.center, chunkSize: 64 }).map((c) => ({
@@ -107,9 +125,15 @@ describe('stop manifest', () => {
         cy: c.cy,
         key: chunkKey(hash, c),
       })),
-      packKey: stopPackKey(MISSION, 3),
-      revealedKey: revealedKey(MISSION, 3),
+      packKey: KEYS.packKey,
+      revealedKey: KEYS.revealedKey,
     })
+  })
+
+  it('reads a version 3 manifest, which also names its stop index', () => {
+    const v3 = { ...manifest, version: 3, stop: { index: 3, ...manifest.stop } }
+    const parsed = parseStopManifest(JSON.parse(JSON.stringify(v3)))
+    expect(parsed).toEqual({ ...manifest, version: 3 })
   })
 
   it('spans the heights of every listed chunk', () => {
@@ -140,10 +164,7 @@ describe('stop manifest', () => {
     const built = buildStopManifest(
       custom,
       computeStopDisk(custom, { center: { x: 0, y: 0 }, radius: 40 }),
-      {
-        missionId: MISSION,
-        stopIndex: 0,
-      },
+      { missionId: MISSION, keys: KEYS },
     )
     expect(built.world).toEqual({ chunkSize: 32, cellSize: 2, mastHeight: 1.5, slopeLimitDeg: 16 })
   })
@@ -153,11 +174,11 @@ describe('stop manifest', () => {
   })
 
   it('refuses another version, naming the field', () => {
-    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 4 }))
+    const error = terrainErrorOf(() => parseStopManifest({ ...manifest, version: 5 }))
     expect(error?.code).toBe('INVALID_MANIFEST')
     expect(error?.message).toContain('version')
     expect(error?.cause).toBeInstanceOf(Error)
-    expect(terrainErrorOf(() => parseStopManifest({ version: 4 }))?.message).toContain('version')
+    expect(terrainErrorOf(() => parseStopManifest({ version: 5 }))?.message).toContain('version')
   })
 
   it('reads a version 2 manifest, written before packs, without a pack or a height range', () => {
@@ -202,12 +223,5 @@ describe('stop manifest', () => {
   it('names nested paths', () => {
     const broken = { ...manifest, chunks: [{ cx: 0, cy: 'x', key: 'k' }] }
     expect(terrainErrorOf(() => parseStopManifest(broken))?.message).toContain('chunks.0.cy')
-  })
-
-  it('refuses a non-integer stop index when building', () => {
-    expect(
-      terrainErrorOf(() => buildStopManifest(world, disk, { missionId: MISSION, stopIndex: -1 }))
-        ?.code,
-    ).toBe('OUT_OF_BOUNDS')
   })
 })

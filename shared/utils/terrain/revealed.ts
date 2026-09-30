@@ -159,21 +159,40 @@ export function revealedVertexCount(mask: RevealedMask): number {
   return inner + edges.size
 }
 
-/** Whether the vertex nearest `point` has been seen. */
-export function isRevealed(
-  mask: RevealedMask,
-  world: World,
-  point: { x: number; y: number },
-): boolean {
-  const { chunkSize, cellSize } = world.config
-  const cells = mask.vertexCount - 1
-  if (cellSize !== mask.cellSize || chunkSize / cellSize !== cells) {
+/**
+ * World vertices `mask` holds as seen and `other` does not, each counted once however many chunks
+ * store it. Both masks must share a chunk layout.
+ */
+export function revealedVerticesMissing(mask: RevealedMask, other: RevealedMask): number {
+  if (mask.vertexCount !== other.vertexCount || mask.cellSize !== other.cellSize) {
     throw new TerrainError(
       'INVALID_GRID',
-      `isRevealed: world chunks (${chunkSize} m at ${cellSize} m) differ from the mask's ${mask.vertexCount}-vertex chunks at ${mask.cellSize} m; pass the mask's own world.`,
+      `revealedVerticesMissing: masks of ${mask.vertexCount}-vertex chunks at ${mask.cellSize} m and ${other.vertexCount}-vertex chunks at ${other.cellSize} m; pass masks of one world.`,
     )
   }
-  const { i, j } = worldToVertex(world, point)
+  const { vertexCount } = mask
+  const cells = vertexCount - 1
+  let inner = 0
+  const edges = new Set<string>()
+  for (const [key, bits] of mask.chunks) {
+    const [cx, cy] = key.split(',').map(Number) as [number, number]
+    const same = other.chunks.get(key)
+    for (let b = 0; b <= cells; b++) {
+      for (let a = 0; a <= cells; a++) {
+        const k = b * vertexCount + a
+        if (!bits[k] || same?.[k]) continue
+        if (a > 0 && a < cells && b > 0 && b < cells) inner++
+        else if (!holdsVertex(other, cx * cells + a, cy * cells + b))
+          edges.add(`${cx * cells + a},${cy * cells + b}`)
+      }
+    }
+  }
+  return inner + edges.size
+}
+
+/** Whether `mask` holds world vertex (`i`, `j`) in any chunk storing it. */
+function holdsVertex(mask: RevealedMask, i: number, j: number): boolean {
+  const cells = mask.vertexCount - 1
   const cx = Math.floor(i / cells)
   const cy = Math.floor(j / cells)
   const a = i - cx * cells
@@ -190,6 +209,24 @@ export function isRevealed(
     if (bits?.[(b + oy * cells) * mask.vertexCount + a + ox * cells]) return true
   }
   return false
+}
+
+/** Whether the vertex nearest `point` has been seen. */
+export function isRevealed(
+  mask: RevealedMask,
+  world: World,
+  point: { x: number; y: number },
+): boolean {
+  const { chunkSize, cellSize } = world.config
+  const cells = mask.vertexCount - 1
+  if (cellSize !== mask.cellSize || chunkSize / cellSize !== cells) {
+    throw new TerrainError(
+      'INVALID_GRID',
+      `isRevealed: world chunks (${chunkSize} m at ${cellSize} m) differ from the mask's ${mask.vertexCount}-vertex chunks at ${mask.cellSize} m; pass the mask's own world.`,
+    )
+  }
+  const { i, j } = worldToVertex(world, point)
+  return holdsVertex(mask, i, j)
 }
 
 /**
@@ -242,6 +279,30 @@ export function encodeRevealedMask(mask: RevealedMask): Uint8Array {
     offset += stride
   }
   return bytes
+}
+
+/**
+ * The digest naming a mask's objects (see `stopKeys`): 16 hex characters over its encoding
+ * (`encodeRevealedMask`), two independent 32-bit lanes. Content is produced by the server alone,
+ * so it guards against accidental collisions, not crafted ones.
+ */
+export function revealedMaskDigest(encoded: Uint8Array): string {
+  return [0x243f6a88, 0x85a308d3]
+    .map((lane) => {
+      let h = (lane ^ encoded.length) >>> 0
+      for (let k = 0; k < encoded.length; k++) {
+        h = Math.imul(h ^ encoded[k]!, 0xcc9e2d51)
+        h = (h << 15) | (h >>> 17)
+        h = Math.imul(h, 0x1b873593) + lane
+      }
+      h ^= h >>> 16
+      h = Math.imul(h, 0x85ebca6b)
+      h ^= h >>> 13
+      h = Math.imul(h, 0xc2b2ae35)
+      h ^= h >>> 16
+      return (h >>> 0).toString(16).padStart(8, '0')
+    })
+    .join('')
 }
 
 /** Decodes format v1 into fresh arrays; the input may be any view, aligned or not. */

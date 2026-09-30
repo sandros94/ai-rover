@@ -18,24 +18,33 @@ import type {
 import { createPlaybackClock, createSegmentStream } from '#shared/utils/client'
 import { useJourneyClient } from './useJourneyClient'
 
+/** A segment to play, as the mission state names it. */
+export interface PlayedSegment {
+  id: string
+  /** The segment's start: the clock its slices are released and played on. */
+  startedAt: string | Date
+  /** The release of its last slice, once public. */
+  endsAt?: string | Date | null
+}
+
 /**
  * Plays a published segment in the browser: an animation-frame loop ticks the clock, polls for
  * what the playback time needs and exposes the interpolated keyframe with the stream's window up
  * to it (keyframes and events from the window's start, the totals there and the path before it)
  * and the reveals since the drive's start, and the outcome only once playback reaches it. The
- * stream opens where the clock does, at live, and reaches back only as far as a seek goes. A new
- * `segmentId` starts over; none stops playback and clears everything.
+ * stream opens where the clock does, at live, and reaches back only as far as a seek goes. A
+ * segment with a new id starts over; none stops playback and clears everything.
  * Playback runs on `display` (see `useDisplayClock`), stepped only by a seek or a new segment;
  * slice requests run on the browser's clock plus `serverOffsetMs` (server minus browser clock, see
- * `useMissionState`), the server's release times. `endsAt`, the end of a drive already settled
- * when it is started, keeps the slice requests from going past its last slice.
+ * `useMissionState`), the server's release times, both from the segment's `startedAt`. `endsAt`,
+ * the end of a drive already settled when it is started, keeps the slice requests from going past
+ * its last slice.
  */
 export function useSegmentPlayback(
-  segmentId: MaybeRefOrGetter<string | null | undefined>,
+  segment: MaybeRefOrGetter<PlayedSegment | null | undefined>,
   options: {
     display: DisplayClock
     serverOffsetMs?: MaybeRefOrGetter<number | null>
-    endsAt?: MaybeRefOrGetter<string | Date | null | undefined>
   },
 ) {
   const client = useJourneyClient()
@@ -52,6 +61,11 @@ export function useSegmentPlayback(
   const heldReveals = shallowRef<SliceTrace['reveals']>([])
   const outcome = shallowRef<DriveOutcome>()
   const simTime = ref(0)
+  /**
+   * Sim time playback last jumped to: where it opened, a seek's target, the live edge it went back
+   * to. What the drive revealed up to it happened before playback got there.
+   */
+  const jumpedTo = ref(0)
   /** The live edge: the latest sim time playback may show. */
   const liveTime = ref(0)
   /** Sim time of the last held keyframe; seeking past it shows nothing new. */
@@ -68,12 +82,19 @@ export function useSegmentPlayback(
   let handle: number | undefined
   /** Bumped per segment, so a manifest arriving after a switch is dropped. */
   let generation = 0
+  /** Set by a jump; the next frame records where it landed. */
+  let jumped = false
 
   function frameLoop(): void {
     handle = requestAnimationFrame(frameLoop)
     if (!clock || !stream) return
     const wall = display.now()
     const sim = clock.tick(wall)
+    // Before the reveals, which the fog reads against it.
+    if (jumped) {
+      jumpedTo.value = sim
+      jumped = false
+    }
     stream.poll(serverNow(), sim).catch((caught: unknown) => {
       error.value = caught
     })
@@ -111,6 +132,7 @@ export function useSegmentPlayback(
     heldReveals.value = []
     outcome.value = undefined
     simTime.value = 0
+    jumpedTo.value = 0
     liveTime.value = 0
     heldUntil.value = 0
     mode.value = 'live'
@@ -118,25 +140,27 @@ export function useSegmentPlayback(
     error.value = null
   }
 
-  async function start(id: string): Promise<void> {
+  async function start(played: PlayedSegment): Promise<void> {
     const current = ++generation
     try {
-      const loaded = await client.getSegmentManifest(id)
+      const startedAt = new Date(played.startedAt).getTime()
+      const loaded = await client.getSegmentManifest(played.id)
       if (current !== generation) return
       manifest.value = loaded
       display.snap()
       clock = createPlaybackClock({
         now: () => display.now(),
-        startedAt: loaded.startedAt,
+        startedAt,
         sliceSeconds: loaded.sliceSeconds,
       })
       clock.setRate(rate.value)
-      const endsAt = toValue(options.endsAt)
       stream = createSegmentStream({
         client,
         manifest: loaded,
-        endsAt: endsAt ? new Date(endsAt).getTime() : undefined,
+        startedAt,
+        endsAt: played.endsAt ? new Date(played.endsAt).getTime() : undefined,
       })
+      jumped = true
       frameLoop()
     } catch (caught) {
       if (current === generation) error.value = caught
@@ -145,11 +169,12 @@ export function useSegmentPlayback(
 
   onMounted(() => {
     watch(
-      () => toValue(segmentId),
+      () => toValue(segment)?.id,
       (id) => {
         generation++
         stop()
-        if (id) void start(id)
+        const played = toValue(segment)
+        if (id && played) void start(played)
       },
       { immediate: true },
     )
@@ -170,6 +195,7 @@ export function useSegmentPlayback(
     heldReveals,
     outcome,
     simTime,
+    jumpedTo,
     liveTime,
     heldUntil,
     mode,
@@ -179,6 +205,7 @@ export function useSegmentPlayback(
     seek(simSeconds: number): void {
       display.snap()
       clock?.seek(simSeconds)
+      jumped = true
       mode.value = clock?.mode ?? mode.value
     },
     setRate(next: PlaybackRate): void {
@@ -187,6 +214,7 @@ export function useSegmentPlayback(
     },
     goLive(): void {
       clock?.goLive()
+      jumped = true
       mode.value = 'live'
       paused.value = false
     },

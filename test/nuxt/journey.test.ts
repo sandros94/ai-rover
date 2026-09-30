@@ -6,6 +6,10 @@ import SiteHeader from '~/components/SiteHeader.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import DriveList from '~/components/journey/DriveList.vue'
 
+/** An older stop's manifest key, named by its index. */
+const stopKey = (index: number) =>
+  `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
+
 const JUDGMENT: DriveJson['judgment'] = {
   feasible: 0.9,
   verdict: 'accept',
@@ -30,7 +34,7 @@ const DRIVES: DriveJson[] = [
     distanceM: 41.6,
     durationS: 1260,
     reasons: ['stuck'],
-    from: { id: 's1', index: 1, x: 0, y: 80 },
+    from: { id: 's1', index: 1, x: 0, y: 80, manifestKey: stopKey(1) },
     to: null,
     goal: { x: 30, y: 100 },
     death: { x: 30, y: 100 },
@@ -48,8 +52,8 @@ const DRIVES: DriveJson[] = [
     distanceM: 80,
     durationS: 2400,
     reasons: [],
-    from: { id: 's0', index: 0, x: 0, y: 0 },
-    to: { id: 's1', index: 1, x: 0, y: 80 },
+    from: { id: 's0', index: 0, x: 0, y: 0, manifestKey: stopKey(0) },
+    to: { id: 's1', index: 1, x: 0, y: 80, manifestKey: stopKey(1) },
     goal: { x: 0, y: 80 },
     death: null,
     submitter: { id: 'u2', displayName: 'Grace', avatarUrl: null },

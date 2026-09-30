@@ -6,6 +6,10 @@ import { destinationObject, mapObjects } from '#shared/utils/client'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopStage from '~/components/map/StopStage.vue'
 
+/** An older stop's manifest key, named by its index. */
+const stopKey = (index: number) =>
+  `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
+
 // The scene needs WebGL; these tests inspect the 2D map.
 vi.mock('~/components/scene/DiskScene.vue', async () => {
   const vue = await import('vue')
@@ -25,11 +29,12 @@ const OBJECTS: MapObject[] = mapObjects({
   mission: { solsEpoch: EPOCH },
   currentStop: { index: 1 },
   trail: [
-    { index: 0, x: 0, y: 0, reachedBy: null },
+    { index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null },
     {
       index: 1,
       x: -20,
       y: -10,
+      manifestKey: stopKey(1),
       reachedBy: { segmentId: 'seg-1', number: 1, fromIndex: 0, at: '2026-09-02T00:00:00.000Z' },
     },
   ],
