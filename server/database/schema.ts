@@ -79,6 +79,11 @@ export const userAccount = snakeCase.table(
     handle: text(),
     /** One of the account's own identities; the repository keeps it so. */
     primaryProvider: text({ enum: IDENTITY_PROVIDERS }),
+    /**
+     * The development login that signs in as this account, which linking and switching the
+     * primary identity leave alone; null for every account outside local development.
+     */
+    devLogin: text().unique(),
   },
   (t) => [
     check(

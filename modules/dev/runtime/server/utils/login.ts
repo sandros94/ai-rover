@@ -6,8 +6,10 @@ import { useDB } from '#server/utils/db'
 import { assertLoopback } from './migrate'
 
 /**
- * The user `dev:<handle>`, created on first sign-in. Refuses, writing nothing, unless `url`
- * (the database `useDB()` reaches) is on this machine.
+ * The account development login `handle` signs in as, created on first sign-in as `dev:<handle>`.
+ * Found by its `devLogin`, which linking identities and switching the primary one leave alone,
+ * so the login keeps its account once it has taken a linked identity's name. Refuses, writing
+ * nothing, unless `url` (the database `useDB()` reaches) is on this machine.
  */
 export async function findOrCreateDevUser(
   url: string | undefined,
@@ -22,7 +24,7 @@ export async function findOrCreateDevUser(
       handle: userAccount.handle,
     })
     .from(userAccount)
-    .where(eq(userAccount.handle, `dev:${handle}`))
+    .where(eq(userAccount.devLogin, handle))
     .limit(1)
   if (found) return found
   const {
@@ -32,6 +34,7 @@ export async function findOrCreateDevUser(
   } = await createUser(db, {
     displayName: handle,
     handle: `dev:${handle}`,
+    devLogin: handle,
   })
   return { id, displayName, handle: stored }
 }
