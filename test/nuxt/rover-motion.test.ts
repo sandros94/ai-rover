@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { framePlacement } from '#shared/utils/client/scene'
+import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import RoverMotion3D from '~~/modules/dev/runtime/app/components/playground/RoverMotion3D.vue'
 import { PLAYGROUND_ENTRIES } from '~~/modules/dev/runtime/app/playground/registry'
@@ -54,12 +55,14 @@ describe('the rover motion playground', () => {
   it('scrubs the point turn through the steering, the arc along its path and twilight through the arm', async () => {
     const { scene, scrub, pick } = await mountPage()
     const joints = () => ({ ...(scene().props('joints') as Record<string, number>) })
+    const steerFL = () =>
+      (scene().props('frame') as Float32Array)[KEYFRAME_FIELDS.indexOf('steerFL')]!
 
     await scrub(0)
-    const straight = joints()
+    expect(steerFL()).toBeCloseTo(0, 12)
     await scrub(25)
-    expect(joints().steer_lf).not.toBe(straight.steer_lf)
-    expect(joints().steer_lf).toBeGreaterThan(0.5)
+    // Counter-clockwise positive: the front left toes in to the right.
+    expect(steerFL()).toBeLessThan(-0.5)
 
     await pick('arc')
     const before = framePlacement(scene().props('frame') as Float32Array).position

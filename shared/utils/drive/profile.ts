@@ -1,7 +1,9 @@
+import { DriveError } from './errors'
+
 /**
  * Limits of a jerk-limited motion, in the motion's own unit (metres for a drive, radians for a
- * turn or a steering joint): the top `rate` per second, the largest `accel`eration per second²
- * and the largest `jerk` per second³. All three positive.
+ * turn, a steering joint or an arm joint): the top `rate` per second, the largest `accel`eration
+ * per second² and the largest `jerk` per second³. All three positive.
  */
 export interface ProfileLimits {
   rate: number
@@ -114,11 +116,19 @@ export function peakRate(from: number, distance: number, limits: ProfileLimits):
 
 /**
  * The rest-to-rest move of `distance` (≥ 0) under `limits`: the top rate when both ramps fit
- * with room to cruise, else the peak whose two ramps cover the distance exactly.
+ * with room to cruise, else the peak whose two ramps cover the distance exactly. The move is
+ * symmetric in time: played backwards it is the same move the other way. Throws on a negative
+ * distance or a limit that is not positive.
  */
 export function planMove(distance: number, limits: ProfileLimits): Move {
   const { rate, accel, jerk } = limits
-  const d = Math.max(0, distance)
+  if (!(distance >= 0) || !(rate > 0) || !(accel > 0) || !(jerk > 0)) {
+    throw new DriveError(
+      'INVALID_INPUT',
+      `planMove: expected a distance ≥ 0 and positive limits, got ${distance} with ${JSON.stringify(limits)}.`,
+    )
+  }
+  const d = distance
   let peak = rate
   if (2 * rampDistance(0, rate, limits) > d) {
     // Two ramps up to `p` cover p · rampDurationS(0, p): solved in closed form on either side of

@@ -112,8 +112,8 @@ const standsIn = (copy: Object3D) =>
   copy.visible &&
   meshes(copy).every((mesh) => mesh.material === roverLookMaterial('standin') && mesh.castShadow)
 
-/** A point turn's steering phase with the arm in its night pose. */
-const motion = motionAt('point-turn', 25)
+/** A point turn's steering phase, its corner wheels part way round, with the arm in its night pose. */
+const motion = motionAt('point-turn', 5)
 const joints = { ...motion.joints, ...ARM_NIGHT }
 const turn = new Quaternion()
 
@@ -171,7 +171,7 @@ async function mountRover(
 
 describe('the rover while its full model loads', () => {
   it('draws the stand-in first, posed by the frame, the steering and the arm night pose', async () => {
-    expect(Math.abs(motion.joints.steer_lf!)).toBeGreaterThan(0.1)
+    expect(Math.abs(motion.frame[KEYFRAME_FIELDS.indexOf('steerFL')]!)).toBeGreaterThan(0.1)
     const standins = copiesOf('low-poly')
     const rover = await mountRover(
       deferred<LoadedRoverModel>().promise,

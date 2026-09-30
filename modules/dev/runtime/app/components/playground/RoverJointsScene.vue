@@ -31,7 +31,7 @@ import SceneSun from '~/components/scene/SceneSun.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** The rover's keyframe: its placement, suspension and spins. */
+    /** The rover's keyframe: its placement, suspension, spins and corner steering. */
     frame: Float32Array
     /** Joint values by model node name, over the keyframe's. */
     joints: Record<string, number>

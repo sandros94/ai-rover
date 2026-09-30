@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Move, ProfileLimits } from '#shared/utils/drive'
 import {
   DEFAULT_SPEED_MODEL,
+  DriveError,
   driveLimits,
   moveAt,
   peakRate,
@@ -112,6 +113,28 @@ describe('planMove', () => {
       9,
     )
     expect(planMove(0, limits).durationS).toBe(0)
+  })
+
+  it('is symmetric in time, whether it cruises, holds the acceleration or neither', () => {
+    for (const d of [10, 0.04, 0.005]) {
+      const move = planMove(d, limits)
+      for (let k = 0; k <= 50; k++) {
+        const t = (move.durationS * k) / 50
+        expect(moveAt(move, t).position + moveAt(move, move.durationS - t).position).toBeCloseTo(
+          d,
+          12,
+        )
+      }
+    }
+  })
+
+  it('stays at rest before its start, and refuses a negative distance or a limit that is not positive', () => {
+    const move = planMove(1, limits)
+    expect(moveAt(move, -1)).toEqual({ position: 0, rate: 0, accel: 0 })
+    expect(() => planMove(-1, limits)).toThrow(DriveError)
+    expect(() => planMove(Number.NaN, limits)).toThrow(DriveError)
+    expect(() => planMove(1, { ...limits, jerk: 0 })).toThrow(DriveError)
+    expect(() => planMove(1, { ...limits, rate: -1 })).toThrow(DriveError)
   })
 
   it('lands on its distance at every sample, rising monotonically', () => {
