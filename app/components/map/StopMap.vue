@@ -523,6 +523,28 @@ const destinationMarker = computed(() => {
   return end ? toScreen(end) : undefined
 })
 
+/**
+ * The camera's footprint drawn as a short wedge from its ground position, a little longer than
+ * the rover's arrow, fading out along its far edge: it shows where the camera faces, not how far
+ * the view reaches, which would cover most of the map.
+ */
+const VIEW_CONE_PX = 34
+const viewWedge = computed(() => {
+  const cone = props.viewCone
+  if (!view.value || !cone || cone.polygon.length < 3) return undefined
+  const apex = toScreen(cone.apex)
+  const far = cone.polygon.slice(-2).map(toScreen)
+  const edge = (p: { x: number; y: number }) => {
+    const dx = p.x - apex.x
+    const dy = p.y - apex.y
+    const len = Math.hypot(dx, dy) || 1
+    return { x: apex.x + (dx / len) * VIEW_CONE_PX, y: apex.y + (dy / len) * VIEW_CONE_PX }
+  }
+  const [right, left] = far.map(edge) as [{ x: number; y: number }, { x: number; y: number }]
+  const mid = { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 }
+  return { apex, left, right, mid }
+})
+
 const roverMarker = computed(() => {
   if (!view.value || !props.rover) return undefined
   const { x, y } = toScreen(props.rover)
@@ -766,17 +788,36 @@ const focusRing = computed(() => {
       :viewBox="`0 0 ${view.width} ${view.height}`"
       aria-hidden="true"
     >
-      <g v-if="viewCone" data-test="view-cone">
+      <g v-if="viewWedge" data-test="view-cone">
+        <defs>
+          <linearGradient
+            id="view-cone-fade"
+            gradientUnits="userSpaceOnUse"
+            :x1="viewWedge.apex.x"
+            :y1="viewWedge.apex.y"
+            :x2="viewWedge.mid.x"
+            :y2="viewWedge.mid.y"
+          >
+            <stop offset="0" style="stop-color: var(--ui-bg)" stop-opacity="0.75" />
+            <stop offset="1" style="stop-color: var(--ui-bg)" stop-opacity="0" />
+          </linearGradient>
+        </defs>
         <polygon
-          :points="points(viewCone.polygon)"
-          class="fill-(--ui-primary)/15 stroke-(--ui-primary)/50"
+          :points="`${viewWedge.apex.x},${viewWedge.apex.y} ${viewWedge.left.x},${viewWedge.left.y} ${viewWedge.right.x},${viewWedge.right.y}`"
+          fill="url(#view-cone-fade)"
+        />
+        <polyline
+          :points="`${viewWedge.left.x},${viewWedge.left.y} ${viewWedge.apex.x},${viewWedge.apex.y} ${viewWedge.right.x},${viewWedge.right.y}`"
+          fill="none"
+          stroke="url(#view-cone-fade)"
           stroke-width="1.5"
           stroke-linejoin="round"
+          stroke-linecap="round"
         />
         <circle
           data-test="view-cone-apex"
-          :cx="toScreen(viewCone.apex).x"
-          :cy="toScreen(viewCone.apex).y"
+          :cx="viewWedge.apex.x"
+          :cy="viewWedge.apex.y"
           r="3"
           class="fill-(--ui-primary)/70"
         />
