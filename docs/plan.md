@@ -25,7 +25,7 @@ Each phase is thin: a wrong assumption in phase N should invalidate at most phas
 - Theta* over the 1 m costmap (slope² + distance) on revealed cells, unrevealed cells at penalty cost, polyline smoothed into turn-in-place + arc motions; navigation metrics with every plan; 0.25 m clearance checks along the path sampled from the analytic height function (ENav/ACE-shaped). Roughness lives here, not in the 1 m chunk masks, where a smooth height function leaves it near zero.
 - Rocker-bogie kinematics (ACE equations, geometry from `research/rover-geometry-mars-terrain.md`): wheel contacts, suspension angles, body pose, belly clearance, limit checks.
 - Producer drives the true terrain motion by motion, replans on discovery, applies the slip model, stops at the last safe pose when the way is blocked, and records per-metre reveals.
-- Segment record: binary 2 Hz keyframes plus events and reveal deltas, stored as time-indexed slices with release times.
+- Segment record: binary 2 Hz keyframes plus events and reveal deltas, stored as time-indexed slices carrying running totals, with each slice's reveals and light path in a trace beside it, both released at the slice's release time.
 - Kinematic terrain-following producer (Mars gravity and terrain) → keyframes; failure detection (slope, obstacle, slip) → failed record with death pose.
 - Safe-stop detection → intermediate checkpoint record (progress kept) vs hazard → failed record.
 - Golden tests: fixed seed + fixed destination → byte-identical keyframes.
