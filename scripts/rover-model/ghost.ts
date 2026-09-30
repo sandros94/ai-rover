@@ -1,185 +1,360 @@
-import { MeshoptSimplifier } from 'meshoptimizer'
 import { silhouettes, viewBasis } from './silhouette'
 
-type Vec3 = [number, number, number]
+export type Vec3 = [number, number, number]
+type Vec2 = [number, number]
 
-/** An indexed triangle mesh, positions only. */
-export interface Shape {
-  positions: Float32Array<ArrayBuffer>
-  indices: Uint32Array<ArrayBuffer>
+/** The points `p` with `n·p ≤ d`, `n` of unit length. */
+export interface Plane {
+  n: Vec3
+  d: number
 }
 
-export const triangleCount = (shape: Shape): number => shape.indices.length / 3
-
-/** Shapes as one. */
-export function merge(shapes: Shape[]): Shape {
-  const positions: number[] = []
-  const indices: number[] = []
-  for (const shape of shapes) {
-    const base = positions.length / 3
-    positions.push(...shape.positions)
-    for (const i of shape.indices) indices.push(base + i)
-  }
-  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) }
+/** A closed polyhedron: its corners, and its faces as loops of them, anticlockwise from outside. */
+export interface Solid {
+  vertices: Vec3[]
+  faces: number[][]
 }
 
-/** A shape's triangles, flat. */
-export function flatten(shape: Shape): Float32Array<ArrayBuffer> {
-  const out = new Float32Array(shape.indices.length * 3)
-  shape.indices.forEach((v, k) => out.set(shape.positions.subarray(3 * v, 3 * v + 3), 3 * k))
-  return out
+/**
+ * A primitive of the low-poly rover: its solid, and the region it fills for comparing volumes:
+ * inside every plane of `planes`, and outside the convex `hole` when there is one (a tube's).
+ */
+export interface Primitive {
+  solid: Solid
+  planes: Plane[]
+  hole?: Plane[]
 }
 
-const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-const scale = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k]
-const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-const cross = (a: Vec3, b: Vec3): Vec3 => [
+export const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+export const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+export const scale = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k]
+export const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+export const cross = (a: Vec3, b: Vec3): Vec3 => [
   a[1] * b[2] - a[2] * b[1],
   a[2] * b[0] - a[0] * b[2],
   a[0] * b[1] - a[1] * b[0],
 ]
 const normalize = (a: Vec3): Vec3 => scale(a, 1 / Math.hypot(...a))
 
-/** Two unit vectors square to `axis` and to each other. */
+/** Triangles a solid is drawn with: a fan per face. */
+export const triangleCount = (solid: Solid): number =>
+  solid.faces.reduce((s, f) => s + f.length - 2, 0)
+
+/** A solid's triangles, flat (nine numbers each). */
+export function trianglesOf(solid: Solid): Float32Array<ArrayBuffer> {
+  const out: number[] = []
+  for (const face of solid.faces) {
+    for (let k = 1; k + 1 < face.length; k++) {
+      for (const v of [face[0]!, face[k]!, face[k + 1]!]) out.push(...solid.vertices[v]!)
+    }
+  }
+  return Float32Array.from(out)
+}
+
+/**
+ * Solids as one indexed mesh with flat normals: each face its own corners, carrying its normal,
+ * so a face shades flat and neighbouring faces share no vertex across their edge.
+ */
+export function meshOf(solids: Solid[]): {
+  positions: Float32Array<ArrayBuffer>
+  normals: Float32Array<ArrayBuffer>
+  indices: Uint32Array<ArrayBuffer>
+} {
+  const positions: number[] = []
+  const normals: number[] = []
+  const indices: number[] = []
+  for (const solid of solids) {
+    for (const face of solid.faces) {
+      const corners = face.map((v) => solid.vertices[v]!)
+      const n = faceNormal(corners)
+      const base = positions.length / 3
+      for (const p of corners) {
+        positions.push(...p)
+        normals.push(...n)
+      }
+      for (let k = 1; k + 1 < face.length; k++) indices.push(base, base + k, base + k + 1)
+    }
+  }
+  return {
+    positions: Float32Array.from(positions),
+    normals: Float32Array.from(normals),
+    indices: Uint32Array.from(indices),
+  }
+}
+
+/** A polygon's unit normal by Newell's method, the side it winds anticlockwise about. */
+function faceNormal(corners: Vec3[]): Vec3 {
+  let n: Vec3 = [0, 0, 0]
+  corners.forEach((a, k) => (n = add(n, cross(a, corners[(k + 1) % corners.length]!))))
+  return normalize(n)
+}
+
+/** A solid carried by a rigid map: rotation `r` (row-major) then translation `t`. */
+export function moved(solid: Solid, r: number[], t: Vec3): Solid {
+  const vertices = solid.vertices.map((p): Vec3 => [
+    r[0]! * p[0] + r[1]! * p[1] + r[2]! * p[2] + t[0],
+    r[3]! * p[0] + r[4]! * p[1] + r[5]! * p[2] + t[1],
+    r[6]! * p[0] + r[7]! * p[1] + r[8]! * p[2] + t[2],
+  ])
+  return { vertices, faces: solid.faces }
+}
+
+/** Planes carried by a rigid map: rotation `r` (row-major) then translation `t`. */
+export function movedPlanes(planes: Plane[], r: number[], t: Vec3): Plane[] {
+  return planes.map(({ n, d }) => {
+    const m: Vec3 = [
+      r[0]! * n[0] + r[1]! * n[1] + r[2]! * n[2],
+      r[3]! * n[0] + r[4]! * n[1] + r[5]! * n[2],
+      r[6]! * n[0] + r[7]! * n[1] + r[8]! * n[2],
+    ]
+    return { n: m, d: d + dot(m, t) }
+  })
+}
+
+/** Corners closer than this are one, metres. */
+const SAME = 1e-6
+
+/**
+ * The convex solid the planes bound, or nothing when they bound none. Its corners are where three
+ * planes meet inside all the others; a corner fewer than three faces share lies along an edge,
+ * and is dropped, so faces meet edge to edge and every corner is shared exactly.
+ */
+export function convex(planes: Plane[]): Solid | undefined {
+  const points: Vec3[] = []
+  for (let i = 0; i < planes.length; i++) {
+    for (let j = i + 1; j < planes.length; j++) {
+      for (let k = j + 1; k < planes.length; k++) {
+        const [a, b, c] = [planes[i]!, planes[j]!, planes[k]!]
+        const bc = cross(b.n, c.n)
+        const det = dot(a.n, bc)
+        if (Math.abs(det) < 1e-9) continue
+        const p = scale(
+          add(add(scale(bc, a.d), scale(cross(c.n, a.n), b.d)), scale(cross(a.n, b.n), c.d)),
+          1 / det,
+        )
+        if (planes.some((q) => dot(q.n, p) > q.d + SAME)) continue
+        if (points.some((q) => Math.hypot(...sub(p, q)) < SAME)) continue
+        points.push(p)
+      }
+    }
+  }
+  if (points.length < 4) return undefined
+  const on = planes.map((q) => points.flatMap((p, v) => (dot(q.n, p) > q.d - SAME ? [v] : [])))
+  const uses = new Int32Array(points.length)
+  const seen = new Set<string>()
+  const loops: { plane: Plane; corners: number[] }[] = []
+  planes.forEach((plane, k) => {
+    const corners = on[k]!
+    const key = [...corners].sort((a, b) => a - b).join()
+    if (corners.length < 3 || seen.has(key)) return
+    seen.add(key)
+    loops.push({ plane, corners })
+    for (const v of corners) uses[v]!++
+  })
+  const vertices: Vec3[] = []
+  const renumber = new Int32Array(points.length).fill(-1)
+  const faces: number[][] = []
+  for (const { plane, corners } of loops) {
+    const kept = corners.filter((v) => uses[v]! >= 3)
+    if (kept.length < 3) continue
+    const [u, w] = across(plane.n)
+    const centre = scale(
+      kept.reduce((s, v): Vec3 => add(s, points[v]!), [0, 0, 0]),
+      1 / kept.length,
+    )
+    const angle = (v: number) => {
+      const d = sub(points[v]!, centre)
+      return Math.atan2(dot(d, w), dot(d, u))
+    }
+    kept.sort((a, b) => angle(a) - angle(b))
+    faces.push(
+      kept.map((v) => {
+        if (renumber[v] === -1) {
+          renumber[v] = vertices.length
+          vertices.push(points[v]!)
+        }
+        return renumber[v]!
+      }),
+    )
+  }
+  return faces.length >= 4 ? { vertices, faces } : undefined
+}
+
+/** Two unit vectors square to `axis` and to each other, `u × v = axis`. */
 function across(axis: Vec3): [Vec3, Vec3] {
   const helper: Vec3 = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
   const u = normalize(cross(axis, helper))
   return [u, cross(axis, u)]
 }
 
-/** A box about `centre` with half extents `half` along the unit `axes`: 12 triangles. */
-export function box(centre: Vec3, axes: [Vec3, Vec3, Vec3], half: Vec3): Shape {
-  const positions: number[] = []
-  for (let c = 0; c < 8; c++) {
-    let p = centre
-    for (let k = 0; k < 3; k++) p = add(p, scale(axes[k]!, (c >> k) & 1 ? half[k]! : -half[k]!))
-    positions.push(...p)
-  }
-  // Each face's corners, counter-clockwise seen from outside for a right-handed frame.
-  const faces = [
-    [0, 4, 6, 2],
-    [1, 3, 7, 5],
-    [0, 1, 5, 4],
-    [2, 6, 7, 3],
-    [0, 2, 3, 1],
-    [4, 5, 7, 6],
+/** A right-handed frame: `w = u × v`. */
+export interface Frame {
+  u: Vec3
+  v: Vec3
+  w: Vec3
+}
+
+/**
+ * The planes of a prism: the convex `outline` (anticlockwise in `u`, `v` coordinates of `frame`)
+ * extruded along `w` from `from` to `to`.
+ */
+export function prism(frame: Frame, outline: Vec2[], from: number, to: number): Plane[] {
+  const { u, v, w } = frame
+  const planes: Plane[] = [
+    { n: w, d: to },
+    { n: scale(w, -1), d: -from },
   ]
-  const handed = dot(cross(axes[0], axes[1]), axes[2]) > 0
-  const indices: number[] = []
-  for (const [a, b, c, d] of faces) {
-    const quad = handed ? [a!, b!, c!, a!, c!, d!] : [a!, c!, b!, a!, d!, c!]
-    indices.push(...quad)
-  }
-  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) }
+  outline.forEach((a, k) => {
+    const b = outline[(k + 1) % outline.length]!
+    const [eu, ev] = [b[0] - a[0], b[1] - a[1]]
+    const length = Math.hypot(eu, ev)
+    if (length < SAME) return
+    const [nu, nv] = [ev / length, -eu / length]
+    planes.push({ n: add(scale(u, nu), scale(v, nv)), d: nu * a[0] + nv * a[1] })
+  })
+  return planes
+}
+
+/** A regular polygon of `sides` about `centre`, one corner along the first axis. */
+export function polygon(centre: Vec2, radius: number, sides: number): Vec2[] {
+  return Array.from({ length: sides }, (_, s): Vec2 => {
+    const a = (2 * Math.PI * s) / sides
+    return [centre[0] + radius * Math.cos(a), centre[1] + radius * Math.sin(a)]
+  })
 }
 
 /**
- * A prism of `segments` sides about `axis` through `centre`, from `from` to `to` along the axis:
- * its side, and the ends asked for as flat polygons. `inner` makes it a tube whose ends are
- * rings, drawn only where asked.
+ * The radius of a regular polygon of `sides` with the area of a circle of `radius`: the
+ * polygon's silhouette covers what the circle's does, on average over its edge.
  */
-export function cylinder(options: {
-  centre: Vec3
-  axis: Vec3
-  radius: number
-  from: number
-  to: number
-  segments: number
-  ends?: { from?: boolean; to?: boolean }
-  inner?: number
-}): Shape {
-  const { centre, radius, from, to, segments, ends = { from: true, to: true }, inner } = options
-  const axis = normalize(options.axis)
-  const [u, v] = across(axis)
-  const positions: number[] = []
-  const ring = (r: number, along: number) => {
-    const first = positions.length / 3
-    for (let s = 0; s < segments; s++) {
-      const a = (2 * Math.PI * s) / segments
-      positions.push(
-        ...add(
-          add(centre, scale(axis, along)),
-          add(scale(u, r * Math.cos(a)), scale(v, r * Math.sin(a))),
-        ),
-      )
+export const equalArea = (radius: number, sides: number): number =>
+  radius * Math.sqrt((2 * Math.PI) / (sides * Math.sin((2 * Math.PI) / sides)))
+
+/** The convex hull of points, anticlockwise, no three corners in line (monotone chain). */
+export function hull(points: Vec2[]): Vec2[] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const turn = (o: Vec2, a: Vec2, b: Vec2) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const half = (list: Vec2[]) => {
+    const out: Vec2[] = []
+    for (const p of list) {
+      while (out.length >= 2 && turn(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop()
+      out.push(p)
     }
-    return first
+    out.pop()
+    return out
   }
-  const a = ring(radius, from)
-  const b = ring(radius, to)
-  const indices: number[] = []
-  const next = (s: number) => (s + 1) % segments
-  for (let s = 0; s < segments; s++) {
-    indices.push(a + s, a + next(s), b + next(s), a + s, b + next(s), b + s)
-  }
-  const cap = (outer: number, along: number, facing: 1 | -1) => {
-    if (inner) {
-      const i = ring(inner, along)
-      for (let s = 0; s < segments; s++) {
-        const quad = [outer + s, i + s, i + next(s), outer + s, i + next(s), outer + next(s)]
-        indices.push(
-          ...(facing < 0 ? quad : [quad[0]!, quad[2]!, quad[1]!, quad[3]!, quad[5]!, quad[4]!]),
-        )
-      }
-      return
-    }
-    for (let s = 1; s + 1 < segments; s++) {
-      indices.push(
-        ...(facing > 0 ? [outer, outer + s, outer + s + 1] : [outer, outer + s + 1, outer + s]),
-      )
-    }
-  }
-  if (ends.from) cap(a, from, -1)
-  if (ends.to) cap(b, to, 1)
-  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) }
+  return sorted.length < 3 ? sorted : [...half(sorted), ...half([...sorted].reverse())]
 }
 
-/** A flat polygon of `segments` sides about `centre`, facing along `normal`. */
-export function disc(centre: Vec3, normal: Vec3, radius: number, segments: number): Shape {
-  const [u, v] = across(normalize(normal))
-  const positions: number[] = []
-  for (let s = 0; s < segments; s++) {
-    const a = (2 * Math.PI * s) / segments
-    positions.push(
-      ...add(centre, add(scale(u, radius * Math.cos(a)), scale(v, radius * Math.sin(a)))),
-    )
-  }
-  const indices: number[] = []
-  for (let s = 1; s + 1 < segments; s++) indices.push(0, s, s + 1)
-  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) }
+/** A polygon's signed area, positive anticlockwise. */
+export function area(outline: Vec2[]): number {
+  let s = 0
+  outline.forEach((a, k) => {
+    const b = outline[(k + 1) % outline.length]!
+    s += a[0] * b[1] - a[1] * b[0]
+  })
+  return s / 2
 }
 
 /**
- * The radius of a regular polygon of `segments` sides with the area of a circle of `radius`:
- * the polygon's silhouette covers what the circle's does, on average over its edge.
+ * A convex outline with at most `corners`, circumscribing it: the edge whose removal (its two
+ * neighbours extended to meet) adds the least area goes first, while the neighbours still meet
+ * ahead of it. Covers everything the outline covers.
  */
-export const equalArea = (radius: number, segments: number): number =>
-  radius * Math.sqrt((2 * Math.PI) / (segments * Math.sin((2 * Math.PI) / segments)))
-
-/**
- * The box around flat triangles' area along axes of their own: the principal axes of their
- * surface (area-weighted), or `axes` when given.
- */
-export function orientedBox(triangles: ArrayLike<number>, axes?: [Vec3, Vec3, Vec3]): Shape {
-  const frame = axes ?? principalAxes(triangles)
-  const lo: Vec3 = [Infinity, Infinity, Infinity]
-  const hi: Vec3 = [-Infinity, -Infinity, -Infinity]
-  for (let i = 0; i < triangles.length; i += 3) {
-    const p: Vec3 = [triangles[i]!, triangles[i + 1]!, triangles[i + 2]!]
-    for (let k = 0; k < 3; k++) {
-      const d = dot(p, frame[k]!)
-      lo[k] = Math.min(lo[k]!, d)
-      hi[k] = Math.max(hi[k]!, d)
+export function reduceOutline(outline: Vec2[], corners: number): Vec2[] {
+  let out = [...outline]
+  while (out.length > corners) {
+    let best = -1
+    let bestArea = Infinity
+    let bestPoint: Vec2 = [0, 0]
+    const n = out.length
+    for (let k = 0; k < n; k++) {
+      // Edge k runs from out[k] to out[k+1]; its neighbours are out[k-1]→out[k] and out[k+1]→out[k+2].
+      const [p0, p1, p2, p3] = [
+        out[(k - 1 + n) % n]!,
+        out[k]!,
+        out[(k + 1) % n]!,
+        out[(k + 2) % n]!,
+      ]
+      const d1: Vec2 = [p1[0] - p0[0], p1[1] - p0[1]]
+      const d2: Vec2 = [p2[0] - p3[0], p2[1] - p3[1]]
+      const denom = d1[0] * d2[1] - d1[1] * d2[0]
+      if (denom >= -1e-12) continue
+      const s = ((p3[0] - p0[0]) * d2[1] - (p3[1] - p0[1]) * d2[0]) / denom
+      if (s < 1) continue
+      const q: Vec2 = [p0[0] + s * d1[0], p0[1] + s * d1[1]]
+      const added = area([p1, q, p2])
+      if (added < bestArea) [best, bestArea, bestPoint] = [k, added, q]
     }
+    if (best < 0) break
+    out = out.flatMap((p, i) => (i === best ? [bestPoint] : i === (best + 1) % n ? [] : [p]))
   }
-  let centre: Vec3 = [0, 0, 0]
-  for (let k = 0; k < 3; k++) centre = add(centre, scale(frame[k]!, (lo[k]! + hi[k]!) / 2))
-  return box(centre, frame, [0, 1, 2].map((k) => (hi[k]! - lo[k]!) / 2) as Vec3)
+  return out
 }
 
-/** The principal axes of flat triangles' surface, largest spread first. */
+/** The rectangle of least area around a convex outline, as the angle of its first side. */
+export function leastRectangle(outline: Vec2[]): number {
+  let best = 0
+  let bestArea = Infinity
+  outline.forEach((a, k) => {
+    const b = outline[(k + 1) % outline.length]!
+    const angle = Math.atan2(b[1] - a[1], b[0] - a[0])
+    const [c, s] = [Math.cos(angle), Math.sin(angle)]
+    let [lu, hu, lv, hv] = [Infinity, -Infinity, Infinity, -Infinity]
+    for (const p of outline) {
+      const pu = c * p[0] + s * p[1]
+      const pv = -s * p[0] + c * p[1]
+      ;[lu, hu, lv, hv] = [Math.min(lu, pu), Math.max(hu, pu), Math.min(lv, pv), Math.max(hv, pv)]
+    }
+    const a2 = (hu - lu) * (hv - lv)
+    if (a2 < bestArea) [best, bestArea] = [angle, a2]
+  })
+  return best
+}
+
+/**
+ * The circle fitted to points by least squares on `x² + y² + a·x + b·y + c = 0` (Kåsa's
+ * method), or nothing for points in line.
+ */
+export function fitCircle(points: Vec2[]): { centre: Vec2; radius: number } | undefined {
+  let [sx, sy, sxx, syy, sxy, sxz, syz, sz] = [0, 0, 0, 0, 0, 0, 0, 0]
+  for (const [x, y] of points) {
+    const z = x * x + y * y
+    sx += x
+    sy += y
+    sxx += x * x
+    syy += y * y
+    sxy += x * y
+    sxz += x * z
+    syz += y * z
+    sz += z
+  }
+  const n = points.length
+  // Normal equations for [a, b, c].
+  const m = [
+    [sxx, sxy, sx],
+    [sxy, syy, sy],
+    [sx, sy, n],
+  ]
+  const r = [-sxz, -syz, -sz]
+  const det3 = (a: number[][]) =>
+    a[0]![0]! * (a[1]![1]! * a[2]![2]! - a[1]![2]! * a[2]![1]!) -
+    a[0]![1]! * (a[1]![0]! * a[2]![2]! - a[1]![2]! * a[2]![0]!) +
+    a[0]![2]! * (a[1]![0]! * a[2]![1]! - a[1]![1]! * a[2]![0]!)
+  const det = det3(m)
+  if (Math.abs(det) < 1e-18) return undefined
+  const solve = (k: number) =>
+    det3(m.map((row, i) => row.map((x, j) => (j === k ? r[i]! : x)))) / det
+  const [a, b, c] = [solve(0), solve(1), solve(2)]
+  const centre: Vec2 = [-a / 2, -b / 2]
+  const r2 = centre[0] ** 2 + centre[1] ** 2 - c
+  return r2 > 0 ? { centre, radius: Math.sqrt(r2) } : undefined
+}
+
+/** The principal axes of flat triangles' surface (area-weighted), largest spread first. */
 export function principalAxes(triangles: ArrayLike<number>): [Vec3, Vec3, Vec3] {
-  let area = 0
+  let total = 0
   let mean: Vec3 = [0, 0, 0]
   const tri = (t: number): [Vec3, Vec3, Vec3] =>
     [0, 1, 2].map((k) => [
@@ -190,19 +365,16 @@ export function principalAxes(triangles: ArrayLike<number>): [Vec3, Vec3, Vec3] 
   const areas: number[] = []
   for (let t = 0; t < triangles.length; t += 9) {
     const [a, b, c] = tri(t)
-    const w =
-      Math.hypot(
-        ...cross([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]),
-      ) / 2
+    const w = Math.hypot(...cross(sub(b, a), sub(c, a))) / 2
     areas.push(w)
-    area += w
+    total += w
     mean = add(mean, scale(add(add(a, b), c), w / 3))
   }
-  mean = scale(mean, 1 / (area || 1))
+  mean = scale(mean, 1 / (total || 1))
   const cov = [0, 0, 0, 0, 0, 0, 0, 0, 0]
   for (let t = 0, n = 0; t < triangles.length; t += 9, n++) {
     for (const p of tri(t)) {
-      const d = [p[0] - mean[0], p[1] - mean[1], p[2] - mean[2]]
+      const d = sub(p, mean)
       for (let i = 0; i < 3; i++)
         for (let j = 0; j < 3; j++) cov[3 * i + j]! += (areas[n]! * d[i]! * d[j]!) / 3
     }
@@ -253,178 +425,15 @@ function jacobiAxes(m: number[]): [Vec3, Vec3, Vec3] {
 }
 
 /**
- * The closed surface of the cubes of `cell` metres that flat triangles cross or enclose: every
- * cube a triangle passes through is marked, every one the outside cannot reach is solid, and each
- * face between a solid cube and the outside is a quad facing out. Unlike the source's open,
- * overlapping pieces, a closed surface collapses freely under simplification. It lies up to a
- * cell outside the triangles, half a cell on average.
- */
-export function voxelSurface(triangles: ArrayLike<number>, cell: number): Shape {
-  const lo: Vec3 = [Infinity, Infinity, Infinity]
-  const hi: Vec3 = [-Infinity, -Infinity, -Infinity]
-  for (let i = 0; i < triangles.length; i += 3) {
-    for (let k = 0; k < 3; k++) {
-      lo[k] = Math.min(lo[k]!, triangles[i + k]!)
-      hi[k] = Math.max(hi[k]!, triangles[i + k]!)
-    }
-  }
-  // One empty cell all round, so the outside is connected.
-  const origin = lo.map((x) => x - cell) as Vec3
-  const [nx, ny, nz] = [0, 1, 2].map((k) => Math.ceil((hi[k]! - lo[k]!) / cell) + 3) as Vec3
-  const at = (x: number, y: number, z: number) => x + nx * (y + ny * z)
-  const grid = new Uint8Array(nx * ny * nz)
-  const mark = (p: Vec3) => {
-    const [x, y, z] = [0, 1, 2].map((k) => Math.floor((p[k]! - origin[k]!) / cell))
-    grid[at(x!, y!, z!)] = 1
-  }
-  for (let t = 0; t < triangles.length; t += 9) {
-    const a: Vec3 = [triangles[t]!, triangles[t + 1]!, triangles[t + 2]!]
-    const b: Vec3 = [triangles[t + 3]!, triangles[t + 4]!, triangles[t + 5]!]
-    const c: Vec3 = [triangles[t + 6]!, triangles[t + 7]!, triangles[t + 8]!]
-    const edge = Math.max(
-      Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]),
-      Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]),
-      Math.hypot(c[0] - b[0], c[1] - b[1], c[2] - b[2]),
-    )
-    // Samples closer than half a cell: no cell a triangle crosses is missed.
-    const n = Math.max(1, Math.ceil((2 * edge) / cell))
-    for (let i = 0; i <= n; i++) {
-      for (let j = 0; i + j <= n; j++) {
-        const [s, r] = [i / n, j / n]
-        mark([0, 1, 2].map((k) => a[k]! + s * (b[k]! - a[k]!) + r * (c[k]! - a[k]!)) as Vec3)
-      }
-    }
-  }
-  // The outside: every empty cell reachable from the corner. The rest is solid.
-  const outside = new Uint8Array(grid.length)
-  const queue = new Int32Array(grid.length)
-  let head = 0
-  let tail = 0
-  outside[0] = 1
-  queue[tail++] = 0
-  const steps = [1, -1, nx, -nx, nx * ny, -nx * ny]
-  while (head < tail) {
-    const i = queue[head++]!
-    const x = i % nx
-    const y = Math.floor(i / nx) % ny
-    const z = Math.floor(i / (nx * ny))
-    for (let s = 0; s < 6; s++) {
-      if ((s === 0 && x === nx - 1) || (s === 1 && x === 0)) continue
-      if ((s === 2 && y === ny - 1) || (s === 3 && y === 0)) continue
-      if ((s === 4 && z === nz - 1) || (s === 5 && z === 0)) continue
-      const j = i + steps[s]!
-      if (outside[j] || grid[j]) continue
-      outside[j] = 1
-      queue[tail++] = j
-    }
-  }
-  // A quad on each face between a solid cell and the outside, facing out.
-  const corners = new Map<number, number>()
-  const positions: number[] = []
-  const corner = (x: number, y: number, z: number) => {
-    const key = x + (nx + 1) * (y + (ny + 1) * z)
-    let v = corners.get(key)
-    if (v === undefined) {
-      v = positions.length / 3
-      corners.set(key, v)
-      positions.push(origin[0] + x * cell, origin[1] + y * cell, origin[2] + z * cell)
-    }
-    return v
-  }
-  const indices: number[] = []
-  const quad = (p: number[][]) => {
-    const [a, b, c, d] = p.map(([x, y, z]) => corner(x!, y!, z!))
-    indices.push(a!, b!, c!, a!, c!, d!)
-  }
-  for (let z = 1; z < nz - 1; z++) {
-    for (let y = 1; y < ny - 1; y++) {
-      for (let x = 1; x < nx - 1; x++) {
-        const i = at(x, y, z)
-        if (outside[i]) continue
-        if (outside[i + 1])
-          quad([
-            [x + 1, y, z],
-            [x + 1, y + 1, z],
-            [x + 1, y + 1, z + 1],
-            [x + 1, y, z + 1],
-          ])
-        if (outside[i - 1])
-          quad([
-            [x, y, z],
-            [x, y, z + 1],
-            [x, y + 1, z + 1],
-            [x, y + 1, z],
-          ])
-        if (outside[i + nx])
-          quad([
-            [x, y + 1, z],
-            [x, y + 1, z + 1],
-            [x + 1, y + 1, z + 1],
-            [x + 1, y + 1, z],
-          ])
-        if (outside[i - nx])
-          quad([
-            [x, y, z],
-            [x + 1, y, z],
-            [x + 1, y, z + 1],
-            [x, y, z + 1],
-          ])
-        if (outside[i + nx * ny])
-          quad([
-            [x, y, z + 1],
-            [x + 1, y, z + 1],
-            [x + 1, y + 1, z + 1],
-            [x, y + 1, z + 1],
-          ])
-        if (outside[i - nx * ny])
-          quad([
-            [x, y, z],
-            [x, y + 1, z],
-            [x + 1, y + 1, z],
-            [x + 1, y, z],
-          ])
-      }
-    }
-  }
-  return { positions: Float32Array.from(positions), indices: Uint32Array.from(indices) }
-}
-
-/** A shape simplified by meshopt to about `target` triangles, whatever the error. */
-export async function simplify(shape: Shape, target: number): Promise<Shape> {
-  if (triangleCount(shape) <= target) return shape
-  await MeshoptSimplifier.ready
-  const [out] = MeshoptSimplifier.simplify(shape.indices, shape.positions, 3, target * 3, 1, [
-    'Prune',
-  ])
-  return compact(shape.positions, out)
-}
-
-/** Only the vertices `indices` uses, renumbered in first-use order. */
-export function compact(positions: Float32Array, indices: Uint32Array): Shape {
-  const remap = new Int32Array(positions.length / 3).fill(-1)
-  const kept: number[] = []
-  const out = new Uint32Array(indices.length)
-  indices.forEach((vertex, k) => {
-    if (remap[vertex] === -1) {
-      remap[vertex] = kept.length / 3
-      kept.push(...positions.subarray(3 * vertex, 3 * vertex + 3))
-    }
-    out[k] = remap[vertex]!
-  })
-  return { positions: Float32Array.from(kept), indices: out }
-}
-
-/**
- * A wheel fitted to its triangles, turning about `axis`, with its outboard face towards
- * `outboard` along it: the tread as a prism of `segments` sides with the rim's outboard edge as a
- * ring, and the hub as a flat polygon on that face; the spokes between them are left out. The
- * radii come from the wheel's own silhouette along its axis: where its coverage, ring by ring,
- * crosses a half.
+ * A wheel fitted to its triangles, turning about `axis`: the tread and rim as a closed tube of
+ * `segments` sides, and the hub as a closed prism of `hubSegments` inside it, both the wheel's
+ * width; the spokes between them are left out. The radii come from the wheel's own silhouette
+ * along its axis: where its coverage, ring by ring, crosses a half.
  */
 export function wheel(
   triangles: ArrayLike<number>,
-  options: { axis: Vec3; outboard: 1 | -1; segments: number; hubSegments: number },
-): Shape {
+  options: { axis: Vec3; segments: number; hubSegments: number },
+): Primitive[] {
   const axis = normalize(options.axis)
   const [u, v] = viewBasis(axis)
   const bounds = { u: [Infinity, -Infinity], v: [Infinity, -Infinity], a: [Infinity, -Infinity] }
@@ -458,50 +467,119 @@ export function wheel(
     }
   }
   const full = (r: number) => total[r]! > 0 && covered[r]! / total[r]! >= 0.5
-  let hub = 0
-  while (hub < rings && full(hub)) hub++
+  let hubRing = 0
+  while (hubRing < rings && full(hubRing)) hubRing++
   let outer = rings - 1
   while (outer > 0 && !full(outer)) outer--
   let inner = outer
-  while (inner > hub && full(inner)) inner--
-  const radius = { hub: hub * ring, inner: (inner + 1) * ring, outer: (outer + 1) * ring }
-  // The axis of this basis (u × v) is the wheel's axis, so its centre is the box's middle.
-  const centre = add(scale(u, mid('u')), scale(v, mid('v')))
-  const [from, to] = bounds.a as [number, number]
-  const face = options.outboard > 0 ? to : from
-  const tread = cylinder({
-    centre,
-    axis: scale(axis, options.outboard),
-    radius: equalArea(radius.outer, options.segments),
-    inner: equalArea(radius.inner, options.segments),
-    from: options.outboard > 0 ? from : -to,
-    to: options.outboard > 0 ? to : -from,
-    segments: options.segments,
-    ends: { to: true },
-  })
-  const hubDisc = disc(
-    add(centre, scale(axis, face)),
-    scale(axis, options.outboard),
-    equalArea(radius.hub, options.hubSegments),
-    options.hubSegments,
-  )
-  return merge([tread, hubDisc])
+  while (inner > hubRing && full(inner)) inner--
+  const radius = { hub: hubRing * ring, inner: (inner + 1) * ring, outer: (outer + 1) * ring }
+  // A view's basis has u × v against the look: the prisms run along it, the wheel's axis reversed.
+  const frame: Frame = { u, v, w: cross(u, v) }
+  const centre: Vec2 = [mid('u'), mid('v')]
+  const [from, to] = [-bounds.a[1]!, -bounds.a[0]!]
+  const rim = (r: number, sides: number) => polygon(centre, equalArea(r, sides), sides)
+  const outside = rim(radius.outer, options.segments)
+  const hole = rim(radius.inner, options.segments)
+  const hub = prism(frame, rim(radius.hub, options.hubSegments), from, to)
+  return [
+    {
+      solid: tube(frame, outside, hole, from, to),
+      planes: prism(frame, outside, from, to),
+      hole: prism(frame, hole, from, to).slice(2),
+    },
+    { solid: convex(hub)!, planes: hub },
+  ]
 }
 
-/** Flat triangles as an indexed shape, vertices at the same position shared. */
-export function weld(triangles: ArrayLike<number>): Shape {
-  const byPosition = new Map<string, number>()
-  const positions: number[] = []
-  const indices = new Uint32Array(triangles.length / 3)
-  for (let v = 0; v < indices.length; v++) {
-    const key = `${triangles[3 * v]},${triangles[3 * v + 1]},${triangles[3 * v + 2]}`
-    let kept = byPosition.get(key)
-    if (kept === undefined) {
-      kept = positions.length / 3
-      byPosition.set(key, kept)
-      positions.push(triangles[3 * v]!, triangles[3 * v + 1]!, triangles[3 * v + 2]!)
+/**
+ * The closed tube between two convex outlines of as many corners (anticlockwise, the second
+ * inside the first) extruded along `w` from `from` to `to`: outer and inner sides, and a ring of
+ * quads at each end.
+ */
+function tube(frame: Frame, outside: Vec2[], hole: Vec2[], from: number, to: number): Solid {
+  const { u, v, w } = frame
+  const n = outside.length
+  const vertices: Vec3[] = []
+  const ring = (outline: Vec2[], along: number) => {
+    const first = vertices.length
+    for (const [pu, pv] of outline) {
+      vertices.push(add(add(scale(u, pu), scale(v, pv)), scale(w, along)))
     }
-    indices[v] = kept
+    return first
   }
-  return { positions: Float32Array.from(positions), indices }
+  const [o0, o1, i0, i1] = [
+    ring(outside, from),
+    ring(outside, to),
+    ring(hole, from),
+    ring(hole, to),
+  ]
+  const faces: number[][] = []
+  for (let s = 0; s < n; s++) {
+    const t = (s + 1) % n
+    faces.push([o0 + s, o0 + t, o1 + t, o1 + s])
+    faces.push([i0 + t, i0 + s, i1 + s, i1 + t])
+    faces.push([o0 + t, o0 + s, i0 + s, i0 + t])
+    faces.push([o1 + s, o1 + t, i1 + t, i1 + s])
+  }
+  return { vertices, faces }
+}
+
+/**
+ * How sound a surface of flat triangles is, its vertices matched by exact position: `open`, the
+ * edges not matched by as many uses the other way round (a hole's rim, or a face wound against
+ * its neighbours); `least`, the least volume a closed shell (an edge-connected piece) encloses,
+ * cubic metres, negative for one wound inward; `smallest`, the least triangle area, square metres.
+ */
+export function surfaceHealth(triangles: ArrayLike<number>): {
+  shells: number
+  open: number
+  least: number
+  smallest: number
+} {
+  const ids = new Map<string, number>()
+  const vertex = (i: number) => {
+    const key = `${triangles[i]},${triangles[i + 1]},${triangles[i + 2]}`
+    let id = ids.get(key)
+    if (id === undefined) ids.set(key, (id = ids.size))
+    return id
+  }
+  const count = triangles.length / 9
+  const corners = Array.from({ length: 3 * count }, (_, k) => vertex(3 * k))
+  // Directed uses of each edge, and its faces.
+  const uses = new Map<string, number>()
+  const faces = new Map<string, number[]>()
+  for (let f = 0; f < count; f++) {
+    for (let e = 0; e < 3; e++) {
+      const [a, b] = [corners[3 * f + e]!, corners[3 * f + ((e + 1) % 3)]!]
+      const key = a < b ? `${a},${b}` : `${b},${a}`
+      uses.set(key, (uses.get(key) ?? 0) + (a < b ? 1 : -1))
+      faces.set(key, [...(faces.get(key) ?? []), f])
+    }
+  }
+  const root = Array.from({ length: count }, (_, f) => f)
+  const find = (f: number): number => (root[f] === f ? f : (root[f] = find(root[f]!)))
+  for (const list of faces.values()) for (const f of list) root[find(f)] = find(list[0]!)
+  const openShell = new Set<number>()
+  let open = 0
+  for (const [key, n] of uses) {
+    if (!n) continue
+    open++
+    openShell.add(find(faces.get(key)![0]!))
+  }
+  const volume = new Map<number, number>()
+  let smallest = Infinity
+  for (let f = 0; f < count; f++) {
+    const p = (k: number): Vec3 => [
+      triangles[9 * f + 3 * k]!,
+      triangles[9 * f + 3 * k + 1]!,
+      triangles[9 * f + 3 * k + 2]!,
+    ]
+    const [a, b, c] = [p(0), p(1), p(2)]
+    smallest = Math.min(smallest, Math.hypot(...cross(sub(b, a), sub(c, a))) / 2)
+    volume.set(find(f), (volume.get(find(f)) ?? 0) + dot(a, cross(b, c)) / 6)
+  }
+  let least = Infinity
+  for (const [shell, v] of volume) if (!openShell.has(shell)) least = Math.min(least, v)
+  return { shells: volume.size, open, least, smallest }
 }
