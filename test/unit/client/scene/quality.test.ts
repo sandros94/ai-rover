@@ -3,8 +3,11 @@ import type { SceneDevice } from '#shared/utils/client/scene/quality'
 import {
   defaultTier,
   isSceneTier,
+  parseQualityChoice,
   qualityFor,
+  resolveQuality,
   SCENE_TIERS,
+  serializeQualityChoice,
 } from '#shared/utils/client/scene/quality'
 
 describe('qualityFor', () => {
@@ -90,5 +93,49 @@ describe('defaultTier', () => {
     expect(defaultTier({ ...phone, screenShortPx: 599 })).toBe('medium')
     expect(defaultTier({ ...phone, cores: 4, screenShortPx: 600 })).toBe('medium')
     expect(defaultTier({ ...phone, cores: 16, memoryGb: 8, screenShortPx: 1024 })).toBe('medium')
+  })
+})
+
+describe('resolveQuality', () => {
+  it("is the device's tier on auto and the chosen tier otherwise", () => {
+    expect(resolveQuality({ tier: 'auto' }, 'low')).toEqual(qualityFor('low'))
+    expect(resolveQuality({ tier: 'high' }, 'low')).toEqual(qualityFor('high'))
+  })
+
+  it("sets the shadows and frame cap chosen over the tier's, and nothing else", () => {
+    expect(resolveQuality({ tier: 'high', shadows: 'off', frameCap: 30 }, 'low')).toEqual({
+      ...qualityFor('high'),
+      shadows: 'off',
+      frameCap: 30,
+    })
+    expect(resolveQuality({ tier: 'auto', frameCap: 'display' }, 'medium').frameCap).toBe(Infinity)
+    // Full shadows on the low tier: the ground near the rover casts.
+    const low = resolveQuality({ tier: 'low', shadows: 'full' }, 'high')
+    expect(low.shadows).toBe('full')
+    expect(low.casterRangeM).toBeGreaterThan(0)
+  })
+})
+
+describe('the stored choice', () => {
+  it('round-trips, storing nothing for the default', () => {
+    for (const choice of [
+      { tier: 'low' as const },
+      { tier: 'auto' as const, shadows: 'rover' as const },
+      { tier: 'high' as const, shadows: 'off' as const, frameCap: 'display' as const },
+      { tier: 'medium' as const, frameCap: 120 as const },
+    ]) {
+      expect(parseQualityChoice(serializeQualityChoice(choice))).toEqual(choice)
+    }
+    expect(serializeQualityChoice({ tier: 'auto' })).toBeNull()
+    expect(parseQualityChoice(null)).toEqual({ tier: 'auto' })
+  })
+
+  it('reads a bare tier name, and drops what is not a known value', () => {
+    expect(parseQualityChoice('medium')).toEqual({ tier: 'medium' })
+    expect(parseQualityChoice('ultra')).toEqual({ tier: 'auto' })
+    expect(parseQualityChoice('{"tier":"low","shadows":"soft","frameCap":45}')).toEqual({
+      tier: 'low',
+    })
+    expect(parseQualityChoice('[1]')).toEqual({ tier: 'auto' })
   })
 })

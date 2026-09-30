@@ -1,13 +1,18 @@
 <script setup lang="ts">
 /**
  * The site's top bar: the title (or the page's own, in the `title` slot), the page's tools in
- * the default slot, the journey and community links (in a menu on phones) and the user menu.
+ * the default slot, the journey and community links (in a menu on phones) and the user menu. A
+ * visitor's settings sit in that menu on phones, where the user menu has no room for them.
  */
 const LINKS = [
   { label: 'Journey', to: '/drives', icon: 'i-lucide-route', test: 'nav-journey' },
   { label: 'Community', to: '/community', icon: 'i-lucide-users', test: 'nav-community' },
 ]
-const menu = LINKS.map(({ label, to, icon }) => ({ label, to, icon }))
+const { loggedIn } = useUserSession()
+const menu = computed(() => [
+  ...LINKS.map(({ label, to, icon }) => ({ label, to, icon })),
+  ...(loggedIn.value ? [] : [{ label: 'Settings', to: '/settings', icon: 'i-lucide-settings' }]),
+])
 </script>
 
 <template>

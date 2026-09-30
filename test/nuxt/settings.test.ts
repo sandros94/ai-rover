@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import type { VueWrapper } from '@vue/test-utils'
 import { flushPromises } from '@vue/test-utils'
-import { clearNuxtData, useState } from '#imports'
+import { clearNuxtData, clearNuxtState, useState } from '#imports'
+import { USelect } from '#components'
 import type { AccountView } from '#shared/utils/account'
+import { SCENE_QUALITY_KEY } from '~/composables/useSceneQuality'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import SettingsPage from '~/pages/settings.vue'
 
@@ -54,6 +57,8 @@ afterEach(() => {
   useState('rover-auth-providers').value = null
   patched.length = 0
   deleted.length = 0
+  localStorage.removeItem(SCENE_QUALITY_KEY)
+  clearNuxtState(['scene-quality', 'scene-quality-read'])
 })
 
 describe('settings page', () => {
@@ -117,5 +122,45 @@ describe('settings page', () => {
       route: '/settings?error=link-conflict',
     })
     expect(wrapper.find('[data-test=link-error]').text()).toContain('same platform')
+  })
+})
+
+describe('graphics settings', () => {
+  type Page = Awaited<ReturnType<typeof mountSuspended>>
+  const select = (wrapper: Page, test: string) =>
+    wrapper
+      .findAllComponents(USelect)
+      .find((found: VueWrapper) => found.vm.$attrs['data-test'] === test)!
+
+  it('is open to visitors, with the graphics alone', async () => {
+    const wrapper = await mountSuspended(SettingsPage, { route: '/settings' })
+    expect(wrapper.find('[data-test=graphics]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=platform-github]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Linked platforms')
+  })
+
+  it('shows what the tier sets and stores the tier and the knobs chosen over it', async () => {
+    const wrapper = await mountSuspended(SettingsPage, { route: '/settings' })
+    select(wrapper, 'graphics-tier').vm.$emit('update:modelValue', 'low')
+    await flushPromises()
+    const sets = wrapper.find('[data-test=graphics-tier-sets]').text()
+    expect(sets).toContain('60 fps')
+    expect(sets).toContain('1×')
+    expect(sets).toContain('Rover only')
+    expect(sets).toContain('20 m')
+
+    select(wrapper, 'graphics-shadows').vm.$emit('update:modelValue', 'off')
+    select(wrapper, 'graphics-frame-cap').vm.$emit('update:modelValue', 'display')
+    await flushPromises()
+    expect(JSON.parse(localStorage.getItem(SCENE_QUALITY_KEY)!)).toEqual({
+      tier: 'low',
+      shadows: 'off',
+      frameCap: 'display',
+    })
+    expect(useSceneQuality().quality.value).toMatchObject({ shadows: 'off', frameCap: Infinity })
+
+    select(wrapper, 'graphics-shadows').vm.$emit('update:modelValue', 'tier')
+    await flushPromises()
+    expect(useSceneQuality().choice.value).toEqual({ tier: 'low', frameCap: 'display' })
   })
 })

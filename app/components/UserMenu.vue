@@ -34,7 +34,19 @@ const items = computed<DropdownMenuItem[]>(() =>
       <span class="hidden text-sm font-medium sm:inline">{{ user.displayName }}</span>
     </UButton>
   </UDropdownMenu>
-  <UButton v-else to="/login" icon="i-lucide-log-in" size="sm" variant="soft" aria-label="Sign in">
-    <span class="hidden sm:inline">Sign in</span>
-  </UButton>
+  <template v-else>
+    <UButton
+      to="/settings"
+      data-test="visitor-settings"
+      icon="i-lucide-settings"
+      size="sm"
+      color="neutral"
+      variant="ghost"
+      class="hidden md:inline-flex"
+      aria-label="Settings"
+    />
+    <UButton to="/login" icon="i-lucide-log-in" size="sm" variant="soft" aria-label="Sign in">
+      <span class="hidden sm:inline">Sign in</span>
+    </UButton>
+  </template>
 </template>

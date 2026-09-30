@@ -45,6 +45,7 @@ describe('user menu', () => {
     const wrapper = await mount()
     expect(wrapper.find('[data-test=user-menu]').exists()).toBe(false)
     expect(wrapper.find('a[href="/login"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test=visitor-settings]').attributes('href')).toBe('/settings')
   })
 
   it('opens on the avatar with the profile, settings and sign-out', async () => {

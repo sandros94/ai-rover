@@ -303,6 +303,7 @@ onBeforeUnmount(() => {
         :joints="armJoints"
         :environment="environment"
         :lod-distance-m="quality.roverLodM"
+        :shadows="quality.shadows !== 'off'"
         @status="emit('roverStatus', $event)"
       />
     </TresGroup>

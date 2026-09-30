@@ -210,7 +210,7 @@ describe('StopScene at a quality tier', () => {
     localStorage.setItem(SCENE_QUALITY_KEY, 'low')
     const stage = await mountScene()
     await flushPromises()
-    useSceneQuality().choice.value = 'high'
+    useSceneQuality().choice.value = { tier: 'high' }
     await flushPromises()
     const high = qualityFor('high')
     expect(tres.canvas.at(-1)).toMatchObject({ dpr: [1, high.maxDpr], shadows: true })
@@ -225,6 +225,18 @@ describe('StopScene at a quality tier', () => {
     })
     expect(stage.findComponent(RoverModel).props('lodDistanceM')).toBe(high.roverLodM)
   })
+
+  it('renders no shadow map and no caster once shadows are off, without a reload', async () => {
+    localStorage.setItem(SCENE_QUALITY_KEY, 'high')
+    const stage = await mountScene()
+    await flushPromises()
+    useSceneQuality().choice.value = { tier: 'high', shadows: 'off' }
+    await flushPromises()
+    expect(tres.canvas.at(-1)).toMatchObject({ shadows: false })
+    expect(stage.findComponent({ name: 'SceneSun' }).props('shadows')).toBe(false)
+    expect(stage.findComponent(TerrainChunks).props('casters')).toBeNull()
+    expect(stage.findComponent(RoverModel).props('shadows')).toBe(false)
+  })
 })
 
 describe('useSceneQuality', () => {
@@ -236,7 +248,7 @@ describe('useSceneQuality', () => {
   const Choice = defineComponent({
     setup() {
       const { choice, tier } = useSceneQuality()
-      return () => h('p', `${choice.value} ${tier.value}`)
+      return () => h('p', `${choice.value.tier} ${tier.value}`)
     },
   })
 
@@ -246,14 +258,17 @@ describe('useSceneQuality', () => {
     expect(choice).toBe('auto')
     expect(['high', 'medium', 'low']).toContain(tier)
 
-    useSceneQuality().choice.value = 'medium'
-    expect(localStorage.getItem(SCENE_QUALITY_KEY)).toBe('medium')
+    useSceneQuality().choice.value = { tier: 'medium', shadows: 'off' }
+    expect(JSON.parse(localStorage.getItem(SCENE_QUALITY_KEY)!)).toEqual({
+      tier: 'medium',
+      shadows: 'off',
+    })
 
     // A new page reads it back.
     clearNuxtState(['scene-quality', 'scene-quality-read'])
     expect((await mountSuspended(Choice)).text()).toBe('medium medium')
 
-    useSceneQuality().choice.value = 'auto'
+    useSceneQuality().choice.value = { tier: 'auto' }
     expect(localStorage.getItem(SCENE_QUALITY_KEY)).toBeNull()
   })
 
