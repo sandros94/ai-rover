@@ -80,6 +80,7 @@ function playback() {
     liveTime: ref(0),
     heldUntil: ref(0),
     mode: ref('live'),
+    liveStatus: shallowRef(null),
     rate: ref(1),
     paused: ref(false),
     error: shallowRef(null),

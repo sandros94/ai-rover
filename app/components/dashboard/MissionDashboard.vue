@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlaybackRate } from '#shared/utils/client'
-import { destinationObject, mapObjects, ROVER_ID } from '#shared/utils/client'
+import { destinationObject, mapObjects, ROVER_ID, roverActivity } from '#shared/utils/client'
 import type { SlopeProfile } from '#shared/utils/client/instruments'
 import { revealedAreaM2, slopeProfile, solTime } from '#shared/utils/client/instruments'
 import type { MapPoint } from '#shared/utils/mission'
@@ -20,6 +20,7 @@ import Instrument from './Instrument.vue'
 import NotMovingFlag from './NotMovingFlag.vue'
 import PlaybackControls from './PlaybackControls.vue'
 import RoundPanel from './RoundPanel.vue'
+import RoverActivityBadge from './RoverActivityBadge.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -142,6 +143,10 @@ const lagS = computed(() =>
 function onRate(rate: PlaybackRate): void {
   playback.setRate(rate)
 }
+
+const activity = computed(() =>
+  props.state ? roverActivity(props.state, playback.liveStatus.value) : null,
+)
 
 const hudPlayback = computed(() => {
   if (!playing.value || !playback.manifest.value) return null
@@ -278,6 +283,9 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
         @live="playback.goLive"
         @close-detail="mapFocus.clear"
       >
+        <template #status>
+          <RoverActivityBadge v-if="activity" :activity="activity" />
+        </template>
         <template #scene>
           <LiveStage
             :stage="stage"

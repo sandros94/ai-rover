@@ -19,7 +19,16 @@ const TIMED: Partial<Record<DriveEventType, DriveStatus>> = {
   assessing: 'assessing',
   imaging: 'imaging',
 }
-const TERMINAL: ReadonlySet<DriveEventType> = new Set(['arrived', 'blocked', 'hazard', 'stuck'])
+
+/** The events that end a drive: the reason a final `stopped` run began. */
+export type DriveEnding = 'arrived' | 'blocked' | 'hazard' | 'stuck'
+const ENDINGS: ReadonlySet<DriveEventType> = new Set<DriveEnding>([
+  'arrived',
+  'blocked',
+  'hazard',
+  'stuck',
+])
+const isEnding = (type: DriveEventType): type is DriveEnding => ENDINGS.has(type)
 
 /**
  * The run-length status track of a drive, derived from its events: `driving` from `start`, each
@@ -49,7 +58,7 @@ export function statusRuns(events: readonly DriveEvent[], since?: StatusRun | nu
     }
     if (event.type === 'start') {
       push({ t: event.t, status: 'driving' })
-    } else if (TERMINAL.has(event.type)) {
+    } else if (isEnding(event.type)) {
       resumeAt = undefined
       push({ t: event.t, status: 'stopped' })
     } else {
@@ -93,4 +102,14 @@ export function statusInForce(
   since?: StatusRun | null,
 ): StatusRun | null {
   return statusRuns(events, since).findLast((run) => run.t <= t) ?? null
+}
+
+/**
+ * The event that ended the drive at `run`, a `stopped` run, when it is among `events`; undefined
+ * for any other run or when the ending lies before the events given.
+ */
+export function endingOf(events: readonly DriveEvent[], run: StatusRun): DriveEnding | undefined {
+  if (run.status !== 'stopped') return undefined
+  for (const { t, type } of events) if (t === run.t && isEnding(type)) return type
+  return undefined
 }

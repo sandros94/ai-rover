@@ -182,9 +182,11 @@ describe('the dashboard on a settled drive whose stored manifest names a later s
       { timeout: 10_000, interval: 50 },
     )
     // The drive log ends with the arrival.
-    await wrapper.find('[data-test=panels-menu]').trigger('click')
+    await wrapper.find('[data-test=windows-menu]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    ;(document.body.querySelector('[data-test=panel-toggle-events]') as HTMLElement).click()
+    ;[...document.querySelectorAll<HTMLElement>('[role=menu] [role^=menuitem]')]
+      .find((item) => item.textContent?.trim().startsWith('Drive log'))!
+      .click()
     await flushPromises()
     const icons = wrapper
       .findAll('[data-panel=events] [data-test=event-icon]')

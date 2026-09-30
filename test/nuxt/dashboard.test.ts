@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import type { Component } from 'vue'
-import { defineComponent, h, nextTick, reactive, ref } from 'vue'
+import { defineComponent, h, nextTick, reactive, ref, shallowRef } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import { useState } from '#imports'
 import { UApp, USlider } from '#components'
+import type { LiveDriveStatus } from '#shared/utils/client'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { MissionStateJson } from '~/composables/useMissionState'
+import type { useSegmentPlayback } from '~/composables/useSegmentPlayback'
 import { MAP_VIEW_KEY } from '~/composables/useMapView'
 import { PANEL_LAYOUT_KEY } from '#shared/utils/client/hud'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
@@ -25,6 +27,13 @@ const stopKey = (index: number) =>
   `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
 
 type Submission = NonNullable<MissionStateJson['round']>['submissions'][number]
+
+/** The status at a drive's live edge, set by a test; the rest of the playback is the real one. */
+const liveStatus = shallowRef<LiveDriveStatus | null>(null)
+mockNuxtImport<typeof useSegmentPlayback>('useSegmentPlayback', (original) => (...args) => ({
+  ...original(...args),
+  liveStatus,
+}))
 
 /** Mounts inside `UApp`, which provides what tooltips need. */
 function mount(component: Component, props: Record<string, unknown>) {
@@ -196,6 +205,21 @@ const baseView = (wrapper: { find: (s: string) => { attributes: (a: string) => u
 
 const inBody = (selector: string) => document.body.querySelector(selector)
 
+/** Opens the windows menu and hands back its groups, each a list of its items. */
+async function openWindows(wrapper: Awaited<ReturnType<typeof mountDashboard>>) {
+  await wrapper.find('[data-test=windows-menu]').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  return [...document.querySelectorAll<HTMLElement>('[role=menu] [role=group]')].map((group) => [
+    ...group.querySelectorAll<HTMLElement>('[role=menuitemcheckbox], [role=menuitem]'),
+  ])
+}
+
+/** The windows menu's item named `label`. */
+const menuItem = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>('[role=menu] [role^=menuitem]')].find((item) =>
+    item.textContent?.trim().startsWith(label),
+  )
+
 beforeEach(() => {
   viewport(true)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -214,6 +238,7 @@ afterEach(() => {
   useState('ai-rover:panels').value = null
   useState('ai-rover:hud').value = { visible: true, instruments: false, vote: false }
   useMapFocus().clear()
+  liveStatus.value = null
   localStorage.clear()
   vi.restoreAllMocks()
   document.body.innerHTML = ''
@@ -377,9 +402,8 @@ describe('MissionDashboard', () => {
     expect(wrapper.find('[data-test=scene-layer] [data-test=stage]').exists()).toBe(true)
     expect(wrapper.find('[data-test=round]').exists()).toBe(true)
     expect(wrapper.find('[data-test=mission-clock]').exists()).toBe(false)
-    await wrapper.find('[data-test=panels-menu]').trigger('click')
-    await flushPromises()
-    ;(inBody('[data-test=panel-toggle-journey]') as HTMLElement).click()
+    await openWindows(wrapper)
+    menuItem('Journey')!.click()
     await flushPromises()
     expect(wrapper.find('[data-test=journey-stats]').exists()).toBe(true)
   })
@@ -450,6 +474,42 @@ describe('MissionDashboard', () => {
   })
 })
 
+describe('the rover activity badge', () => {
+  const badge = (wrapper: Awaited<ReturnType<typeof mountDashboard>>) =>
+    wrapper.find('[data-test=rover-activity]')
+
+  it('reads idle at a stop with an empty round, as a polite live region', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    expect(badge(wrapper).attributes('data-kind')).toBe('idle')
+    expect(badge(wrapper).attributes('aria-live')).toBe('polite')
+    expect(badge(wrapper).text()).toContain('Idle')
+  })
+
+  it('reads the planning phase once a pick sets the round closing', async () => {
+    const picked = state({
+      round: { ...state().round!, closesAt: '2026-09-26T09:15:00.000Z', submissions: [SUBMISSION] },
+    })
+    const wrapper = await mountDashboard({ state: picked, error: null, serverOffsetMs: 0 })
+    expect(badge(wrapper).text()).toContain('Planning phase')
+  })
+
+  it("reads the drive's status at its live edge while a drive plays", async () => {
+    const driving = state({
+      segment: {
+        id: '0192f000-0000-7000-8000-0000000000g1',
+        startedAt: '2026-09-26T09:00:00.000Z',
+        fromStopId: '0192f000-0000-7000-8000-0000000000a0',
+      },
+    } as Partial<MissionStateJson>)
+    const wrapper = await mountDashboard({ state: driving, error: null, serverOffsetMs: 0 })
+    expect(badge(wrapper).attributes('data-status')).toBe('driving')
+    liveStatus.value = { status: 'steering' }
+    await flushPromises()
+    expect(badge(wrapper).attributes('data-status')).toBe('steering')
+    expect(badge(wrapper).text()).toContain('Steering wheels')
+  })
+})
+
 describe('NotMovingFlag', () => {
   const props = {
     segmentId: '0192f000-0000-7000-8000-0000000000g1',
@@ -508,9 +568,8 @@ describe('the full-viewport layout', () => {
       expect(saved.panels?.vote?.open).toBe(false)
     })
 
-    await wrapper.find('[data-test=panels-menu]').trigger('click')
-    await flushPromises()
-    ;(inBody('[data-test=panel-toggle-vote]') as HTMLElement).click()
+    await openWindows(wrapper)
+    menuItem('Next destination')!.click()
     await flushPromises()
     expect(open()).toContain('vote')
     expect(wrapper.find('[data-panel=vote] [data-test=round]').exists()).toBe(true)
@@ -527,6 +586,7 @@ describe('the full-viewport layout', () => {
     viewport(false)
     const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
     expect(wrapper.find('[data-test=panel]').exists()).toBe(false)
+    expect(wrapper.find('[data-test=windows-menu]').exists()).toBe(false)
     expect(inBody('[data-sheet=instruments]')).toBeNull()
 
     await wrapper.find('[data-test=hud-toggle]').trigger('click')
@@ -539,6 +599,57 @@ describe('the full-viewport layout', () => {
     await wrapper.find('[data-test=vote-toggle]').trigger('click')
     await flushPromises()
     expect(inBody('[data-sheet=vote] [data-test=round]')).not.toBeNull()
+  })
+
+  it('lists every window in one menu: all at once, each on its own, and the reset', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    expect(wrapper.find('[data-test=hud-toggle]').exists()).toBe(false)
+    const groups = await openWindows(wrapper)
+    const labels = groups.map((items) => items.map((item) => item.textContent?.trim()))
+    expect(labels).toEqual([
+      ['All windows shownh'],
+      ['2D map', 'Next destination', 'Clock', 'Journey'],
+      ['Reset the layout'],
+    ])
+    expect(groups[0]![0]!.querySelector('kbd')?.textContent).toBe('h')
+    const checked = (label: string) => menuItem(label)!.getAttribute('aria-checked')
+    expect(checked('All windows')).toBe('true')
+    expect(checked('Next destination')).toBe('true')
+    expect(checked('Clock')).toBe('false')
+  })
+
+  it('hides and shows every window, toggles one, and resets the layout from the menu', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    const open = () => wrapper.findAll('[data-test=panel]').map((p) => p.attributes('data-panel'))
+    await openWindows(wrapper)
+    menuItem('All windows')!.click()
+    await flushPromises()
+    expect(open()).toEqual([])
+    expect(menuItem('All windows')!.textContent).toContain('All windows hidden')
+    expect(menuItem('All windows')!.getAttribute('aria-checked')).toBe('false')
+    menuItem('All windows')!.click()
+    await flushPromises()
+    expect(open()).toEqual(['map2d', 'vote'])
+
+    menuItem('Clock')!.click()
+    await flushPromises()
+    expect(open()).toEqual(['map2d', 'vote', 'clock'])
+    expect(menuItem('Clock')!.getAttribute('aria-checked')).toBe('true')
+    menuItem('Next destination')!.click()
+    await flushPromises()
+    expect(open()).toEqual(['map2d', 'clock'])
+
+    menuItem('Reset the layout')!.click()
+    await flushPromises()
+    expect(open()).toEqual(['map2d', 'vote'])
+  })
+
+  it('keeps h on showing or hiding every window, which the menu follows', async () => {
+    const wrapper = await mountDashboard({ state: state(), error: null, serverOffsetMs: 0 })
+    await press('h')
+    expect(wrapper.find('[data-test=panel]').exists()).toBe(false)
+    await openWindows(wrapper)
+    expect(menuItem('All windows')!.getAttribute('aria-checked')).toBe('false')
   })
 
   it('switches views with 1 and 2 and toggles the HUD with h', async () => {

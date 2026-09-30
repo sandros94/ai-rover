@@ -7,9 +7,10 @@ import type {
   SliceTrace,
   StoredSegmentManifest,
 } from '#shared/utils/drive'
-import { KEYFRAME_STRIDE } from '#shared/utils/drive'
+import { endingOf, KEYFRAME_STRIDE, statusAt } from '#shared/utils/drive'
 import type {
   DisplayClock,
+  LiveDriveStatus,
   PlaybackClock,
   PlaybackMode,
   PlaybackRate,
@@ -31,7 +32,8 @@ export interface PlayedSegment {
  * Plays a published segment in the browser: an animation-frame loop ticks the clock, polls for
  * what the playback time needs and exposes the interpolated keyframe with the stream's window up
  * to it (keyframes and events from the window's start, the totals there and the path before it)
- * and the reveals since the drive's start, and the outcome only once playback reaches it. The
+ * and the reveals since the drive's start, and the outcome only once playback reaches it.
+ * `liveStatus` is the drive's status at its live edge, wherever playback stands. The
  * stream opens where the clock does, at live, and reaches back only as far as a seek goes. A
  * segment with a new id starts over; none stops playback and clears everything.
  * Playback runs on `display` (see `useDisplayClock`), stepped only by a seek or a new segment;
@@ -71,6 +73,8 @@ export function useSegmentPlayback(
   /** Sim time of the last held keyframe; seeking past it shows nothing new. */
   const heldUntil = ref(0)
   const mode = ref<PlaybackMode>('live')
+  /** At the live edge, within what is held; null until the first window is in. */
+  const liveStatus = shallowRef<LiveDriveStatus | null>(null)
   const rate = ref<PlaybackRate>(1)
   const paused = ref(false)
   const error = shallowRef<unknown>(null)
@@ -112,9 +116,21 @@ export function useSegmentPlayback(
     const all = stream.keyframesUntil(Infinity)
     heldUntil.value = all.count ? all.data[(all.count - 1) * KEYFRAME_STRIDE]! : 0
     liveTime.value = clock.liveTimeAt(wall)
+    updateLiveStatus(stream)
     simTime.value = sim
     mode.value = clock.mode
     paused.value = clock.paused
+  }
+
+  function updateLiveStatus(held: SegmentStream): void {
+    if (!held.totals) return
+    const edge = Math.min(liveTime.value, heldUntil.value)
+    const events = held.eventsUntil(edge)
+    const run = statusAt(events, edge, held.totals.status)
+    const ending = endingOf(events, run)
+    const current = liveStatus.value
+    if (current?.status === run.status && current.ending === ending) return
+    liveStatus.value = { status: run.status, ...(ending && { ending }) }
   }
 
   function stop(): void {
@@ -136,6 +152,7 @@ export function useSegmentPlayback(
     liveTime.value = 0
     heldUntil.value = 0
     mode.value = 'live'
+    liveStatus.value = null
     paused.value = false
     error.value = null
   }
@@ -199,6 +216,7 @@ export function useSegmentPlayback(
     liveTime,
     heldUntil,
     mode,
+    liveStatus,
     rate,
     paused,
     error,

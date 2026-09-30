@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { createOdometer, driveEfficiency } from '#shared/utils/client/instruments'
-import type { DriveEvent, DriveStatus, KeyframeBlock, SliceTotals } from '#shared/utils/drive'
+import type { DriveEvent, KeyframeBlock, SliceTotals } from '#shared/utils/drive'
 import { KEYFRAME_FIELDS, statusAt } from '#shared/utils/drive'
 import { ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
 
@@ -33,14 +33,6 @@ const efficiency = computed(() =>
     maxSpeedMps: props.maxSpeedMps,
   }),
 )
-const STATUS_ICON: Record<DriveStatus, string> = {
-  driving: 'i-lucide-navigation',
-  steering: 'i-lucide-arrow-left-right',
-  turning: 'i-lucide-rotate-cw',
-  assessing: 'i-lucide-scan-search',
-  imaging: 'i-lucide-camera',
-  stopped: 'i-lucide-circle-pause',
-}
 /** What the rover is doing at the playback time, so a stop never reads as a fault. */
 const status = computed(() => {
   const run = statusAt(props.events, t.value, props.totals?.status)
@@ -50,7 +42,7 @@ const status = computed(() => {
     label = `turning ${Math.round(Math.abs(run.angleDeg))}°`
   if (run.status === 'imaging' && run.endsAt !== undefined)
     label = `imaging stop ${Math.max(0, Math.ceil(run.endsAt - t.value))} s`
-  return { status: run.status, label, icon: STATUS_ICON[run.status] }
+  return { status: run.status, label, icon: DRIVE_STATUS_ICON[run.status] }
 })
 
 /** Bars in cm/s, the scale ending a fifth past the cap. */

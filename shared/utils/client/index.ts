@@ -92,3 +92,5 @@ export {
   roverStatus,
   sameMapObject,
 } from './map-objects'
+export type { LiveDriveStatus, RoverActivity, RoverActivitySource } from './rover-activity'
+export { roverActivity } from './rover-activity'
