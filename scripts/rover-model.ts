@@ -57,7 +57,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions'
 import { prune } from '@gltf-transform/functions'
 import draco3d from 'draco3dgltf'
 import type { Surface } from './rover-model/atlas'
-import { bakeAtlases } from './rover-model/atlas'
+import { bakeAtlases, pinEncoder } from './rover-model/atlas'
 import { fitRigid } from './rover-model/fit'
 import type { Solid } from './rover-model/ghost'
 import { meshOf, moved, trianglesOf, wheel } from './rover-model/ghost'
@@ -1027,6 +1027,7 @@ const src =
 mkdirSync(src, { recursive: true })
 const work = mkdtempSync(join(src, 'build-'))
 await ensureSources(src)
+console.log(`textures: ${pinEncoder()}`)
 
 const built: { variant: Variant; out: string }[] = []
 for (const variant of VARIANTS) {
