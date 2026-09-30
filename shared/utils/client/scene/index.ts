@@ -11,7 +11,7 @@ export {
   reliefLight,
   reliefRgb,
   rgbHex,
-  ROVER_TONES,
+  ROVER_PAINT,
   SCENE_COLORS,
   SEEN_STOPS,
   srgbToLinear,
@@ -41,9 +41,22 @@ export {
   recolourChunkMesh,
   refogChunkMesh,
 } from './terrain-mesh'
-export type { PartShape, PartTone, Quat, RoverPart } from './rover-parts'
-export { flatFrame, framePlacement, fromTo, roverParts } from './rover-parts'
+export type { Quat } from './placement'
+export { flatFrame, framePlacement, fromTo } from './placement'
 export type { RigNode, RigTransforms } from './rover-rig'
+export type { MotionLimits, MotionProfile } from './motion-profile'
+export { motionProfile } from './motion-profile'
+export {
+  ARM_JOINT_MOTION,
+  ARM_LEGS,
+  ARM_NIGHT,
+  ARM_SEQUENCE_S,
+  ARM_UNSTOW,
+  armPoseAlong,
+  armPoseAt,
+  armSequenceSeconds,
+  turretLampLevel,
+} from './night-arm'
 export { DIFFERENTIAL_RATIO, RIG_JOINTS, rigTransforms, ROVER_RIG_NODES } from './rover-rig'
 export type { OverlayMesh } from './overlays'
 export { drapePath, groundDisc, ribbonMesh } from './overlays'
@@ -67,6 +80,7 @@ export {
   MARS_OBLIQUITY_DEG,
   SCENE_LS_DEG,
   skyLighting,
+  sunCrossings,
   sunPosition,
 } from './sun'
 export type { SceneDevice, SceneQuality, SceneTier } from './quality'

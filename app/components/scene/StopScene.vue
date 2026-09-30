@@ -8,11 +8,12 @@ if (import.meta.client) installAgXLook()
 <script setup lang="ts">
 import type { TresContext } from '@tresjs/core'
 import { TresCanvas } from '@tresjs/core'
-import type { ToneMapping, WebGLRenderer } from 'three'
+import type { Texture, ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
 import type { GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
+  armPoseAt,
   framePacer,
   framePlacement,
   fullModelLedger,
@@ -22,10 +23,10 @@ import {
   SCENE_COLORS,
   skyLighting,
   sunPosition,
+  turretLampLevel,
 } from '#shared/utils/client/scene'
 import type { KeyframeBlock } from '#shared/utils/drive'
-import type { ResolvedRoverGeometry } from '#shared/utils/rover'
-import type { RoverVariant } from '~/composables/useRoverVariant'
+import type { RoverModelStatus } from '~/utils/rover-model'
 import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
 import GoalMarkers from './GoalMarkers.vue'
@@ -34,6 +35,7 @@ import RoverModel from './RoverModel.vue'
 import type { Pickable } from './ScenePicker.vue'
 import ScenePicker from './ScenePicker.vue'
 import SceneAtmosphere from './SceneAtmosphere.vue'
+import SceneEnvironment from './SceneEnvironment.vue'
 import SceneSky from './SceneSky.vue'
 import SceneSun from './SceneSun.vue'
 import TerrainChunks from './TerrainChunks.vue'
@@ -43,7 +45,6 @@ const props = withDefaults(
   defineProps<{
     /** The 19 keyframe values at the playback time. */
     frame: Float32Array
-    geometry?: ResolvedRoverGeometry
     /** The stop disk's chunks; without any, the rover stands on a flat grid at its own height. */
     chunks?: { chunk: TerrainChunk }[]
     /** Height span of the disk for the colour ramp; required with `chunks`. */
@@ -66,8 +67,6 @@ const props = withDefaults(
     sight?: Uint8Array
     /** The stop's survey: ground beyond it is not drawn, and a thin ring marks its edge. */
     survey?: { center: { x: number; y: number }; radius: number }
-    /** The rover to draw; by default the JPL model, the procedural one while it loads or if it fails. */
-    roverVariant?: RoverVariant
     /** The open round's goals, on the ground, flagged. */
     goals?: readonly { id: string; x: number; y: number; z: number }[]
     /** What the pointer can inspect; without any, nothing is picked. */
@@ -85,7 +84,6 @@ const props = withDefaults(
     toneMapping?: ToneMapping
   }>(),
   {
-    geometry: undefined,
     chunks: () => [],
     heightRange: () => ({ min: 0, max: 1 }),
     heightAt: undefined,
@@ -99,7 +97,6 @@ const props = withDefaults(
     fog: undefined,
     sight: undefined,
     survey: undefined,
-    roverVariant: undefined,
     goals: () => [],
     pickables: () => [],
     focusedId: null,
@@ -112,8 +109,8 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** The rover drawn changed: the procedural one, or a JPL model once loaded. */
-  roverReady: [info: { variant: RoverVariant; triangles: number; loadMs: number }]
+  /** What the rover is drawn as changed; see `RoverModelStatus`. */
+  roverStatus: [status: RoverModelStatus]
   /** The mouse is over an object, or none. */
   hover: [id: string | null, client: { x: number; y: number }]
   /** A tap or click on an object, or on none. */
@@ -153,8 +150,11 @@ const currentStop = computed(() => props.stops.find((stop) => stop.current))
 /** The sun at the scene's time, and the light, sky and exposure that go with it. */
 const sun = computed(() => sunPosition(props.solFraction))
 const lighting = computed(() => skyLighting(sun.value.elevationDeg))
-/** The turret lamp comes on as the sun sets and is full once it is 3° below the horizon. */
-const lamp = computed(() => Math.min(1, Math.max(0, -sun.value.elevationDeg / 3)))
+/** The sky as the rover's metals and glass reflect it. */
+const environment = shallowRef<Texture | null>(null)
+const lamp = computed(() => turretLampLevel(sun.value.elevationDeg))
+/** After sunset the arm unstows to raise the lamp over the front deck, and stows again after sunrise. */
+const armJoints = computed(() => armPoseAt(props.solFraction))
 /**
  * Haze, sky at the horizon and unseen ground in one colour, the sky's horizon at the sun's
  * elevation whatever the page's colour mode, so what is too far to make out and what has not been
@@ -239,6 +239,11 @@ onBeforeUnmount(() => {
   >
     <SceneAtmosphere :color="atmosphere" :near="HAZE.near" :far="HAZE.far" />
     <SceneSky :direction="sun.direction" :lighting="lighting" />
+    <SceneEnvironment
+      :direction="sun.direction"
+      :lighting="lighting"
+      @change="environment = $event"
+    />
     <SceneSun
       :direction="sun.direction"
       :lighting="lighting"
@@ -276,7 +281,6 @@ onBeforeUnmount(() => {
       v-if="deaths.length > 0"
       :deaths="deaths"
       :height-at="heightAt"
-      :geometry="geometry"
       :radius-m="deathRadiusM"
       :focused-id="focusedId"
       :ledger="ledger"
@@ -290,12 +294,12 @@ onBeforeUnmount(() => {
     />
     <RoverModel
       :frame="frame"
-      :geometry="geometry"
-      :variant="roverVariant"
       :ledger="ledger"
       :lamp="lamp"
+      :joints="armJoints"
+      :environment="environment"
       :lod-distance-m="quality.roverLodM"
-      @ready="emit('roverReady', $event)"
+      @status="emit('roverStatus', $event)"
     />
     <ScenePicker
       v-if="pickables.length > 0"

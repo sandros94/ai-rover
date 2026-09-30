@@ -1,3 +1,5 @@
+export type { ArmNode, ArmPose } from './arm'
+export { ARM_JOINTS, ARM_STOWED } from './arm'
 export type { RoverErrorCode } from './errors'
 export { RoverError } from './errors'
 export type {

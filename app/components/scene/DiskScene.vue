@@ -8,6 +8,7 @@ import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import type { StopFog } from '~/composables/useStopFog'
+import type { RoverModelStatus } from '~/utils/rover-model'
 import FloatingObjectCard from '~/components/inspect/FloatingObjectCard.vue'
 import type { Pickable } from './ScenePicker.vue'
 import StopScene from './StopScene.vue'
@@ -243,6 +244,9 @@ const focusTarget = computed(() => {
   return object && { x: object.x, y: object.y, z: standAt(object) + 1 }
 })
 
+/** What the rover is drawn as: when nothing can be, the scene says so. */
+const roverStatus = shallowRef<RoverModelStatus>('loading')
+
 const hovered = shallowRef<{ id: string; client: { x: number; y: number } } | null>(null)
 const hoveredObject = computed(() => find(hovered.value?.id))
 
@@ -293,7 +297,15 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :focus-key="mapFocus.seq.value"
       @hover="onHover"
       @tap="onTap"
+      @rover-status="roverStatus = $event"
     />
+    <p
+      v-if="roverStatus === 'unavailable'"
+      data-test="rover-unavailable"
+      class="absolute bottom-2 left-2 rounded-md bg-default/80 px-2 py-1 text-xs text-muted"
+    >
+      Rover model unavailable
+    </p>
     <div class="absolute right-2 bottom-20 flex flex-col gap-1">
       <UButton
         data-test="recenter"

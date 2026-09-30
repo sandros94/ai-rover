@@ -42,6 +42,10 @@ export interface PlaygroundEntry {
   title: string
   group: 'instrument' | 'scene' | 'card'
   component: () => Promise<{ default: Component }>
+  /**
+   * What it needs from the frame. Without any, the entry runs on its own clock: the frame loads
+   * no fixture, shows no scrubber and passes it no props.
+   */
   needs: PlaygroundNeed[]
   /** The component's props from the frame's context; without it, {@link PLAYGROUND_PROPS}. */
   bind?: (context: PlaygroundContext) => Record<string, unknown>
@@ -164,6 +168,24 @@ export const PLAYGROUND_ENTRIES: PlaygroundEntry[] = [
       import('../components/playground/RoverModel3D.vue'),
     (c) => ({ frame: c.frame }),
   ),
+  {
+    id: 'rover-joints',
+    title: 'Rover joints (3D)',
+    group: 'scene',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/RoverJoints3D.vue'),
+    needs: [],
+  },
+  {
+    id: 'rover-motion',
+    title: 'Rover motion (3D)',
+    group: 'scene',
+    component: () =>
+      // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
+      import('../components/playground/RoverMotion3D.vue'),
+    needs: [],
+  },
   {
     id: 'stop-map',
     title: 'Stop map',

@@ -4,12 +4,18 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { CustomToneMapping, PCFShadowMap, ShaderChunk, SRGBColorSpace } from 'three'
 import {
+  ARM_NIGHT,
+  ARM_SEQUENCE_S,
+  armPoseAlong,
   chunksFromGrid,
   flatFrame,
   qualityFor,
   skyLighting,
+  sunCrossings,
   sunPosition,
 } from '#shared/utils/client/scene'
+import { MARS_SOL_SECONDS } from '#shared/utils/client/instruments'
+import { ARM_STOWED } from '#shared/utils/rover'
 import { SCENE_QUALITY_KEY } from '~/composables/useSceneQuality'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import StopStage from '~/components/map/StopStage.vue'
@@ -70,7 +76,13 @@ vi.mock('~/components/scene/FollowCamera.vue', async () => {
 })
 vi.mock('~/utils/rover-model', () => ({
   loadRoverModel: () => Promise.reject(new Error('no model in tests')),
+  applyEnvironment: () => {},
 }))
+// Prefiltering the sky for reflections needs a WebGL renderer.
+vi.mock('~/components/scene/SceneEnvironment.vue', async () => {
+  const vue = await import('vue')
+  return { default: vue.defineComponent({ name: 'SceneEnvironment', render: () => null }) }
+})
 
 /** The scene on a one-chunk disk, the rover resting in its middle. */
 function mountScene() {
@@ -126,12 +138,45 @@ describe('StopStage in 3D', () => {
     // The scene filled three's custom tone mapping slot with AgX before anything compiled.
     expect(ShaderChunk.tonemapping_pars_fragment).toContain('agxLook( color )')
 
+    // No rover model loads here: the scene draws without one, and says so.
+    expect(stage.find('[data-test=rover-unavailable]').text()).toBe('Rover model unavailable')
+
     // The first frame takes the automatic exposure at once.
     for (const callback of tres.beforeRender) callback({ delta: 1 / 60 })
     expect(tres.renderer.toneMappingExposure).toBeCloseTo(
       skyLighting(sunPosition(solFraction).elevationDeg).exposure,
       9,
     )
+  })
+
+  it('unstows the arm into its night pose once the sun is down, and stows it by day', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const armAt = async (solFraction: number) => {
+      const stage = await mountSuspended(StopStage, {
+        props: {
+          view: '3d',
+          terrain: { grid: grid(65), origin: { i: 0, j: 0 } },
+          seen: new Uint8Array(65 * 65).fill(1),
+          chunkVertices: 65,
+          heightAt: () => 0,
+          loading: { loaded: 1, total: 1, error: null },
+          center: { x: 32, y: 32 },
+          radius: 32,
+          rover: { x: 32, y: 32, headingRad: 0 },
+          solFraction,
+        },
+      })
+      await flushPromises()
+      return stage.findComponent(RoverModel).props('joints') as Record<string, number>
+    }
+    const { set } = sunCrossings()
+    expect(await armAt(0.4)).toMatchObject(ARM_STOWED)
+    const night = await armAt(set + (ARM_SEQUENCE_S + 1) / MARS_SOL_SECONDS)
+    for (const [node, value] of Object.entries(ARM_NIGHT)) expect(night[node]).toBeCloseTo(value, 9)
+    // Halfway through the unstow, at the sequence's halfway point.
+    const half = await armAt(set + ARM_SEQUENCE_S / 2 / MARS_SOL_SECONDS)
+    const along = armPoseAlong(ARM_SEQUENCE_S / 2)
+    for (const [node, value] of Object.entries(along)) expect(half[node]).toBeCloseTo(value, 3)
   })
 })
 

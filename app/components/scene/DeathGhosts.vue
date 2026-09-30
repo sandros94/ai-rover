@@ -2,7 +2,6 @@
 import { Group, Mesh, MeshBasicMaterial } from 'three'
 import { flatFrame, groundDisc, SCENE_COLORS } from '#shared/utils/client/scene'
 import type { FullModelLedger } from '#shared/utils/client/scene'
-import type { ResolvedRoverGeometry } from '#shared/utils/rover'
 import { overlayGeometry } from '~/utils/scene-geometry'
 import RoverModel from './RoverModel.vue'
 
@@ -11,14 +10,13 @@ const props = withDefaults(
     /** Where the rover died, facing its last heading; `z` is the ground there. */
     deaths: { x: number; y: number; z: number; headingRad: number; id?: string }[]
     heightAt?: (x: number, y: number) => number | undefined
-    geometry?: ResolvedRoverGeometry
     /** Radius of the red circle on the ground, metres. */
     radiusM?: number
     /** The focused death: its ghost gains the full model. */
     focusedId?: string | null
     ledger?: FullModelLedger
   }>(),
-  { heightAt: undefined, geometry: undefined, radiusM: 3, focusedId: null, ledger: undefined },
+  { heightAt: undefined, radiusM: 3, focusedId: null, ledger: undefined },
 )
 
 const frames = computed(() => props.deaths.map((death) => flatFrame(death)))
@@ -71,7 +69,6 @@ onBeforeUnmount(() => {
       v-for="(frame, k) in frames"
       :key="deaths[k]!.id ?? k"
       :frame="frame"
-      :geometry="geometry"
       :detailed="deaths[k]!.id !== undefined && deaths[k]!.id === focusedId"
       :ledger="ledger"
       ghost

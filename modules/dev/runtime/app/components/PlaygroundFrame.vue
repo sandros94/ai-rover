@@ -24,6 +24,8 @@ const props = defineProps<{ entry: PlaygroundEntry }>()
 const SPEEDS = [1, 10, 60, 200]
 
 const view = defineAsyncComponent(props.entry.component)
+/** An entry that needs nothing from the frame runs on its own clock, without a fixture. */
+const standalone = props.entry.needs.length === 0
 const route = useRoute()
 const fixtures = ref<string[]>([])
 const selected = computed(() =>
@@ -107,6 +109,7 @@ watch(playing, (on) => {
 
 // Client-only: typed arrays do not survive the SSR payload.
 onMounted(async () => {
+  if (standalone) return
   fixtures.value = await $fetch<string[]>('/api/_dev/fixtures')
   watch(selected, load, { immediate: true })
 })
@@ -118,47 +121,50 @@ onBeforeUnmount(() => cancelAnimationFrame(raf))
     <header class="flex flex-wrap items-center gap-3 border-b border-default px-4 py-2">
       <ULink to="/_dev/playground" class="font-medium">Playground</ULink>
       <span class="text-muted">/ {{ entry.title }}</span>
-      <USelect
-        :model-value="selected"
-        :items="fixtures"
-        :loading="loading"
-        class="w-32"
-        aria-label="Fixture"
-        @update:model-value="select"
-      />
-      <UButton
-        :icon="playing ? 'i-lucide-pause' : 'i-lucide-play'"
-        :disabled="!record"
-        :aria-label="playing ? 'Pause' : 'Play'"
-        @click="playing = !playing"
-      />
-      <UFieldGroup>
+      <template v-if="!standalone">
+        <USelect
+          :model-value="selected"
+          :items="fixtures"
+          :loading="loading"
+          class="w-32"
+          aria-label="Fixture"
+          @update:model-value="select"
+        />
         <UButton
-          v-for="rate in SPEEDS"
-          :key="rate"
-          :variant="rate === speed ? 'solid' : 'outline'"
-          color="neutral"
-          @click="speed = rate"
-        >
-          {{ rate }}×
-        </UButton>
-      </UFieldGroup>
-      <USlider
-        v-model="t"
-        :min="0"
-        :max="duration"
-        :step="0.1"
-        :disabled="!record"
-        class="min-w-48 flex-1"
-      />
-      <span class="font-mono text-sm">
-        <span class="readout min-w-[6ch]">{{ t.toFixed(1) }}</span> /
-        <span class="readout min-w-[6ch]">{{ duration.toFixed(1) }}</span> s ·
-        <span class="readout min-w-[4ch]">{{ events.length }}</span> events
-      </span>
+          :icon="playing ? 'i-lucide-pause' : 'i-lucide-play'"
+          :disabled="!record"
+          :aria-label="playing ? 'Pause' : 'Play'"
+          @click="playing = !playing"
+        />
+        <UFieldGroup>
+          <UButton
+            v-for="rate in SPEEDS"
+            :key="rate"
+            :variant="rate === speed ? 'solid' : 'outline'"
+            color="neutral"
+            @click="speed = rate"
+          >
+            {{ rate }}×
+          </UButton>
+        </UFieldGroup>
+        <USlider
+          v-model="t"
+          :min="0"
+          :max="duration"
+          :step="0.1"
+          :disabled="!record"
+          class="min-w-48 flex-1"
+        />
+        <span class="font-mono text-sm">
+          <span class="readout min-w-[6ch]">{{ t.toFixed(1) }}</span> /
+          <span class="readout min-w-[6ch]">{{ duration.toFixed(1) }}</span> s ·
+          <span class="readout min-w-[4ch]">{{ events.length }}</span> events
+        </span>
+      </template>
     </header>
     <main class="flex-1 p-6">
-      <UAlert v-if="error" color="error" :title="error" />
+      <component :is="view" v-if="standalone" />
+      <UAlert v-else-if="error" color="error" :title="error" />
       <div v-else-if="bound" :class="{ 'max-w-2xl': entry.group === 'instrument' }">
         <component :is="view" v-bind="bound" />
       </div>

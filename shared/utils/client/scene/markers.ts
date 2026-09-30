@@ -1,6 +1,6 @@
 import type { Point3 } from '../../rover/kinematics'
-import type { Quat } from './rover-parts'
-import { fromTo } from './rover-parts'
+import type { Quat } from './placement'
+import { fromTo } from './placement'
 
 type Planar = { x: number; y: number }
 
