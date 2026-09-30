@@ -106,9 +106,17 @@ describe('StopMap', () => {
       },
     })
     const cone = wrapper.find('[data-test=view-cone]')
-    expect(cone.find('polygon').attributes('points')).toBe(
-      '216.0,216.0 216.0,184.0 360.0,136.0 360.0,264.0',
-    )
+    // A short wedge from the apex along the far corners' directions, 34 px long, not the view.
+    const wedge = cone
+      .find('polygon')
+      .attributes('points')!
+      .split(' ')
+      .map((pair) => pair.split(',').map(Number) as [number, number])
+    expect(wedge).toHaveLength(3)
+    expect(wedge[0]).toEqual([168, 200])
+    for (const [x, y] of wedge.slice(1)) expect(Math.hypot(x - 168, y - 200)).toBeCloseTo(34, 6)
+    expect(wedge[1]![0]).toBeCloseTo(wedge[2]![0], 6)
+    expect(wedge[1]![1] + wedge[2]![1]).toBeCloseTo(400, 6)
     expect(cone.find('[data-test=view-cone-apex]').attributes()).toMatchObject({
       cx: '168',
       cy: '200',
