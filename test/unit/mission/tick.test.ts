@@ -23,7 +23,10 @@ import type { JourneyStore } from '#server/utils/journey/store'
 import {
   decodeSlice,
   decodeTrace,
+  DEFAULT_SLICE_SECONDS,
   DriveError,
+  parseStoredSegmentManifest,
+  segmentManifestKey,
   segmentSliceKey,
   segmentTraceKey,
 } from '#shared/utils/drive'
@@ -52,8 +55,8 @@ vi.setConfig({ testTimeout: 60_000 })
 const queries: string[] = []
 /** Top-level transactions, Jev requests and CDN priming requests, in the order they happened. */
 const events: ('begin' | 'end' | 'jev' | 'prime' | 'put')[] = []
-/** Runs before every blob write of a mission's store, with the key written. */
-let onPut: ((key: string) => unknown) | undefined
+/** Runs before every blob write of a mission's store, with the key and, but for JSON, the bytes. */
+let onPut: ((key: string, bytes?: Uint8Array) => unknown) | undefined
 afterEach(() => {
   onPut = undefined
 })
@@ -63,7 +66,7 @@ function hooked(store: JourneyStore): JourneyStore {
   return {
     ...store,
     putImmutable: async (key, bytes, options) => {
-      await onPut?.(key)
+      await onPut?.(key, bytes)
       return store.putImmutable(key, bytes, options)
     },
     putJson: async (key, value) => {
@@ -556,6 +559,45 @@ describe('the mission lock', () => {
       roundId: m.round.id,
       winnerSubmissionId: second.submission!.id,
     })
+  })
+
+  it('leaves a close prepared by two ticks at once in the same bytes, started by the one committing it', async () => {
+    const m = await landed()
+    await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
+    const first = at(T0, 6 * MINUTE)
+    // The later tick prepares the close first; the earlier one runs whole as it starts publishing.
+    const later = new Date(first.getTime() + 96_800)
+    const written = new Map<string, Uint8Array[]>()
+    let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
+    let raced = false
+    onPut = async (key, bytes) => {
+      if (!key.startsWith('segments/')) return
+      if (!raced) {
+        raced = true
+        meanwhile = await m.tick(first)
+      }
+      written.set(key, [...(written.get(key) ?? []), bytes!])
+    }
+    const tick = await m.tick(later)
+
+    expect(meanwhile?.started).toMatchObject({ startedAt: first })
+    expect(tick.started).toBeNull()
+    const segment = (await getDrivingSegment(db, m.missionId))!
+    expect(segment.id).toBe(meanwhile!.started!.segmentId)
+    expect(segment.startedAt).toEqual(first)
+    const slices = (await m.store.listKeys(`segments/${segment.id}/slices/`)).length
+    expect(segment.endsAt.getTime()).toBe(first.getTime() + slices * DEFAULT_SLICE_SECONDS * 1000)
+
+    // Both published: a blob both found missing was written twice, the same bytes each time.
+    expect([...written.values()].some((writes) => writes.length > 1)).toBe(true)
+    for (const [key, writes] of written) {
+      for (const bytes of writes) expect([key, bytes]).toEqual([key, writes[0]])
+    }
+    const manifestKey = segmentManifestKey(segment.id)
+    expect(written.get(manifestKey)).toHaveLength(1)
+    const stored = await m.store.getJson(manifestKey)
+    expect(stored).not.toHaveProperty('startedAt')
+    expect(parseStoredSegmentManifest(stored).segmentId).toBe(segment.id)
   })
 
   it('applies nothing when another tick settled the drive while this one prepared it', async () => {

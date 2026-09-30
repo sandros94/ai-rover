@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   computeStopDisk,
   createRevealedMask,
@@ -160,11 +160,10 @@ describe('publishSegment', () => {
   const { slices, traces } = sliceRecord(record)
   const segment = encodeSegment(record)
 
-  it('writes the slices and traces before the manifest, which parses with its id and start time', async () => {
+  it('writes the slices and traces before the manifest, which parses with its id and no start time', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    const startedAt = 1_790_000_000_000
-    const result = await publishSegment(store, { segment, segmentId: 'seg-1', startedAt })
+    const result = await publishSegment(store, { segment, segmentId: 'seg-1' })
     expect(result.manifestKey).toBe(segmentManifestKey('seg-1'))
     expect(blobs.writes.at(-1)).toBe(segmentManifestKey('seg-1'))
     expect(new Set(blobs.writes.slice(0, -1))).toEqual(
@@ -175,9 +174,10 @@ describe('publishSegment', () => {
         ]),
       ),
     )
-    const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
-    expect(manifest.segmentId).toBe('seg-1')
-    expect(manifest.startedAt).toBe(startedAt)
+    const raw = await store.getJson(segmentManifestKey('seg-1'))
+    expect(raw).not.toHaveProperty('startedAt')
+    const manifest = parseStoredSegmentManifest(raw)
+    expect(manifest).toEqual({ ...segment.manifest, segmentId: 'seg-1' })
     expect(manifest.start).toEqual(start)
     expect(manifest.goal).toEqual(goal)
     const last = decodeSlice(
@@ -187,18 +187,47 @@ describe('publishSegment', () => {
     const trace = decodeTrace((await store.getInflated(segmentTraceKey('seg-1', 2)))!)
     expect(trace).toEqual(traces[2])
     expect(result.written).toHaveLength(2 * slices.length + 1)
-    // The drive ends when its last slice is released.
-    expect(result.endsAt).toBe(startedAt + slices.length * manifest.sliceSeconds * 1000)
+    expect(result.sliceCount).toBe(slices.length)
+  })
+
+  it('writes byte-identical blobs, the manifest included, whenever and however often it runs', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const stores = [new MemoryBlobs(), new MemoryBlobs()]
+      vi.setSystemTime(Date.UTC(2026, 8, 30, 17, 32, 7, 190))
+      await publishSegment(createJourneyStore({ store: stores[0] }), {
+        segment,
+        segmentId: 'seg-1',
+      })
+      vi.setSystemTime(Date.UTC(2026, 8, 30, 17, 33, 43, 972))
+      await publishSegment(createJourneyStore({ store: stores[1] }), {
+        segment,
+        segmentId: 'seg-1',
+      })
+      const [a, b] = stores.map((blobs) => blobs.blobs)
+      expect([...b!.keys()].sort()).toEqual([...a!.keys()].sort())
+      for (const [key, blob] of a!) {
+        expect([key, new Uint8Array(b!.get(key)!.data)]).toEqual([key, new Uint8Array(blob.data)])
+        expect([key, b!.get(key)!.metadata]).toEqual([key, blob.metadata])
+      }
+
+      // A second run over the first store finds everything there and writes nothing.
+      stores[0]!.writes.length = 0
+      const again = await publishSegment(createJourneyStore({ store: stores[0] }), {
+        segment,
+        segmentId: 'seg-1',
+      })
+      expect(stores[0]!.writes).toEqual([])
+      expect(again.skipped).toHaveLength(2 * slices.length + 1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it(`keeps at most ${PUT_CONCURRENCY} slices in flight`, async () => {
     expect(slices.length).toBeGreaterThan(PUT_CONCURRENCY)
     const blobs = new CountingBlobs()
-    await publishSegment(createJourneyStore({ store: blobs }), {
-      segment,
-      segmentId: 'seg-1',
-      startedAt: 0,
-    })
+    await publishSegment(createJourneyStore({ store: blobs }), { segment, segmentId: 'seg-1' })
     expect(blobs.maxInFlight).toBeLessThanOrEqual(PUT_CONCURRENCY)
     expect(blobs.maxInFlight).toBeGreaterThan(1)
   })
@@ -206,7 +235,7 @@ describe('publishSegment', () => {
   it('run again after being cut short, writes only the missing blobs, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    await publishSegment(store, { segment, segmentId: 'seg-1', startedAt: 0 })
+    await publishSegment(store, { segment, segmentId: 'seg-1' })
     const lost = [
       segmentSliceKey('seg-1', 3),
       segmentSliceKey('seg-1', 7),
@@ -214,25 +243,19 @@ describe('publishSegment', () => {
     ]
     for (const key of [...lost, segmentManifestKey('seg-1')]) blobs.blobs.delete(key)
     blobs.writes.length = 0
-    const result = await publishSegment(store, { segment, segmentId: 'seg-1', startedAt: 5000 })
+    const result = await publishSegment(store, { segment, segmentId: 'seg-1' })
     // Slices are written in parallel, in any order; the manifest comes after all of them.
     expect(blobs.writes.slice(0, -1).sort()).toEqual([...lost].sort())
     expect(blobs.writes.at(-1)).toBe(segmentManifestKey('seg-1'))
     expect(result.skipped).toHaveLength(2 * slices.length - 3)
-    // The manifest carries the start of the run that wrote it last.
-    const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
-    expect(manifest.startedAt).toBe(5000)
   })
 
-  it('refuses a bad segment id or start time before writing anything', async () => {
+  it('refuses a bad segment id before writing anything', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    await expect(
-      publishSegment(store, { segment, segmentId: '../x', startedAt: 0 }),
-    ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
-    await expect(
-      publishSegment(store, { segment, segmentId: 'ok', startedAt: Number.NaN }),
-    ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    await expect(publishSegment(store, { segment, segmentId: '../x' })).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    })
     expect(blobs.writes).toEqual([])
   })
 })

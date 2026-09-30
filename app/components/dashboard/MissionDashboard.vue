@@ -65,10 +65,9 @@ const playing = computed(() => {
 })
 
 const display = useDisplayClock(() => props.serverOffsetMs)
-const playback = useSegmentPlayback(() => playing.value?.id, {
+const playback = useSegmentPlayback(playing, {
   display,
   serverOffsetMs: () => props.serverOffsetMs,
-  endsAt: () => playing.value?.endsAt,
 })
 
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)

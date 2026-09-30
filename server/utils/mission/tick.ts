@@ -32,7 +32,12 @@ import { contentSegmentId, encodeSegment, publishSegment, publishStop } from '..
 import type { EncodedSegment } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
 import type { SegmentRecord } from '#shared/utils/drive'
-import { DEFAULT_SLICE_SECONDS, driveSegment, DriveError } from '#shared/utils/drive'
+import {
+  DEFAULT_SLICE_SECONDS,
+  driveSegment,
+  DriveError,
+  sliceReleaseAt,
+} from '#shared/utils/drive'
 import {
   backstopSlice,
   rankSubmissions,
@@ -175,8 +180,9 @@ interface PreparedClose {
 /** A winner's drive as published: the segment row names these. */
 interface PublishedDrive {
   segmentId: string
-  endsAt: Date
   manifestKey: string
+  sliceCount: number
+  sliceSeconds: number
   outcome: SegmentRecord['outcome']
 }
 
@@ -508,7 +514,7 @@ async function prepareClose(
     }
     const drive = await prepareDrive(record, { mission, roundId: open.id })
     run.step('close-simulate')
-    const published = await publishDrive(store, { drive, now })
+    const published = await publishDrive(store, drive)
     run.step('close-publish')
     return {
       roundId: open.id,
@@ -611,21 +617,21 @@ async function prepareDrive(
   return { segmentId, segment, outcome: record.outcome }
 }
 
-/** Publishes a prepared drive starting at `now`. */
-async function publishDrive(
-  store: JourneyStore,
-  options: { drive: PreparedDrive; now: Date },
-): Promise<PublishedDrive> {
-  const { drive, now } = options
+/**
+ * Publishes a prepared drive. Its blobs hold nothing of the run publishing them, so every tick
+ * preparing the same close writes the same bytes, and only the one that commits the segment row
+ * says when the drive starts.
+ */
+async function publishDrive(store: JourneyStore, drive: PreparedDrive): Promise<PublishedDrive> {
   const published = await publishSegment(store, {
     segment: drive.segment,
     segmentId: drive.segmentId,
-    startedAt: now.getTime(),
   })
   return {
     segmentId: drive.segmentId,
-    endsAt: new Date(published.endsAt),
     manifestKey: published.manifestKey,
+    sliceCount: published.sliceCount,
+    sliceSeconds: drive.segment.manifest.sliceSeconds,
     outcome: drive.outcome,
   }
 }
@@ -645,7 +651,7 @@ async function start(
     submissionId: winner.id,
     fromStopId: round.fromStopId,
     startedAt: now,
-    endsAt: drive.endsAt,
+    endsAt: new Date(sliceReleaseAt(now.getTime(), drive.sliceCount - 1, drive.sliceSeconds)),
     manifestKey: drive.manifestKey,
     outcome: drive.outcome,
   })

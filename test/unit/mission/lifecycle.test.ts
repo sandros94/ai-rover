@@ -114,7 +114,8 @@ describe('an idle rover and the grace window', () => {
     const manifest = parseStoredSegmentManifest(
       await m.store.getJson(segmentManifestKey(segment.id)),
     )
-    expect(manifest).toMatchObject({ segmentId: segment.id, startedAt: now.getTime() })
+    expect(manifest.segmentId).toBe(segment.id)
+    expect(await m.store.getJson(segmentManifestKey(segment.id))).not.toHaveProperty('startedAt')
     const slices = (await m.store.listKeys(`segments/${segment.id}/slices/`)).length
     expect(slices).toBeGreaterThan(0)
     expect(await m.store.has(segmentSliceKey(segment.id, slices - 1))).toBe(true)

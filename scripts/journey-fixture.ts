@@ -45,7 +45,7 @@ export const JOURNEY_FIXTURE = Object.freeze({
   start: Object.freeze({ x: 0, y: 0, headingRad: 0 }),
   goal: Object.freeze({ x: 25, y: 15 }),
   segmentId: 'fixture-mars-0',
-  /** 2026-09-26T12:00:00Z. */
+  /** The start a segment row would give the drive, 2026-09-26T12:00:00Z; not stored. */
   startedAt: Date.UTC(2026, 8, 26, 12),
 })
 
@@ -63,7 +63,7 @@ export interface JourneyFixture {
 }
 
 export function buildJourneyFixture(): JourneyFixture {
-  const { seed, missionId, stopIndex, radius, start, goal, segmentId, startedAt } = JOURNEY_FIXTURE
+  const { seed, missionId, stopIndex, radius, start, goal, segmentId } = JOURNEY_FIXTURE
   const world = defineWorld({ seed })
   const disk = computeStopDisk(world, { center: { x: start.x, y: start.y }, radius })
   const mask = revealDisk(createRevealedMask(world), disk)
@@ -75,7 +75,7 @@ export function buildJourneyFixture(): JourneyFixture {
     goal: { ...goal },
   })
   const { manifest, slices, traces } = sliceRecord(record)
-  const segmentManifest: StoredSegmentManifest = { ...manifest, segmentId, startedAt }
+  const segmentManifest: StoredSegmentManifest = { ...manifest, segmentId }
 
   const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
   const files = new Map<string, Uint8Array>()

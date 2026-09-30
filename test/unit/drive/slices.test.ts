@@ -242,7 +242,7 @@ describe('segment manifest schema', () => {
         'INVALID_RECORD',
       )
     }
-    const stored = { ...plain, version: 1, stride: 19, segmentId: 'seg-1', startedAt: 1 }
+    const stored = { ...plain, version: 1, stride: 19, segmentId: 'seg-1' }
     expect(parseStoredSegmentManifest(stored).stride).toBe(19)
     expect(driveErrorOf(() => parseStoredSegmentManifest({ ...stored, stride: 23 }))?.code).toBe(
       'INVALID_RECORD',
@@ -260,9 +260,7 @@ describe('segment manifest schema', () => {
   })
 
   it('reads a stored manifest from before plans carried the fog goal and the drive estimate', () => {
-    const stored = JSON.parse(
-      JSON.stringify({ ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }),
-    )
+    const stored = JSON.parse(JSON.stringify({ ...manifest, segmentId: 'seg-1' }))
     delete stored.plan.metrics.goalInFog
     delete stored.plan.metrics.estimatedDriveS
     const parsed = parseStoredSegmentManifest(stored)
@@ -271,13 +269,24 @@ describe('segment manifest schema', () => {
     expect(parsed.plan.metrics.pathLengthM).toBe(manifest.plan.metrics.pathLengthM)
   })
 
-  it('stores the segment id and start time alongside', () => {
-    const stored = { ...manifest, segmentId: 'seg-1', startedAt: 1_700_000_000_000 }
+  it('stores the segment id alongside, and no start time', () => {
+    const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1' }
     expect(parseStoredSegmentManifest(JSON.parse(JSON.stringify(stored)))).toEqual(stored)
     expect(driveErrorOf(() => parseStoredSegmentManifest(manifest))?.code).toBe('INVALID_RECORD')
     expect(
       driveErrorOf(() => parseStoredSegmentManifest({ ...stored, segmentId: '../x' }))?.code,
     ).toBe('INVALID_RECORD')
+  })
+
+  it('reads an older stored manifest carrying a start time, and drops it', () => {
+    const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1' }
+    const older = JSON.parse(JSON.stringify({ ...stored, startedAt: 1_790_000_096_800 }))
+    const parsed = parseStoredSegmentManifest(older)
+    expect(parsed).toEqual(stored)
+    expect(parsed).not.toHaveProperty('startedAt')
+    expect(driveErrorOf(() => parseStoredSegmentManifest({ ...older, startedAt: -1 }))?.code).toBe(
+      'INVALID_RECORD',
+    )
   })
 })
 
@@ -505,7 +514,7 @@ describe('trace block format v1', () => {
 
 describe('release gate', () => {
   const startedAt = Date.UTC(2026, 8, 25, 12)
-  const stored: StoredSegmentManifest = { ...manifest, segmentId: 'seg-1', startedAt }
+  const stored = { startedAt, sliceSeconds: manifest.sliceSeconds }
 
   it('releases slice k at the end of its window, startedAt + (k + 1) · sliceSeconds', () => {
     expect(sliceReleaseAt(startedAt, 0, 30)).toBe(startedAt + 30_000)

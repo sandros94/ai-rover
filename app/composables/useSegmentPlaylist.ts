@@ -12,9 +12,11 @@ import { createPlaylist, createPlaylistClock, createSegmentStream } from '#share
 import { useJourneyClient } from './useJourneyClient'
 import { useStopTerrain } from './useStopTerrain'
 
-/** What a playlist needs of each settled segment: its manifest's id, duration and stop left. */
+/** What a playlist needs of each settled segment: its id, start, duration, end and stop left. */
 export interface PlaylistSegment {
   id: string
+  /** The segment's start, its row's: the clock its slices were released on. */
+  startedAt: string | Date
   /** Sim seconds of the whole drive, from the settled drive: the public manifest omits it. */
   durationS: number
   /** When its last slice was released. */
@@ -99,6 +101,7 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
         entry.stream = createSegmentStream({
           client,
           manifest: loaded,
+          startedAt: new Date(segments[k]!.startedAt).getTime(),
           endsAt: new Date(segments[k]!.endedAt).getTime(),
         })
       })

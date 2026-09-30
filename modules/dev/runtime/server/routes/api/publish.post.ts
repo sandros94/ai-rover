@@ -21,12 +21,12 @@ const BodySchema = v.object({
   seed: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
   goal: v.object({ x: finite, y: finite }),
   segmentId: v.pipe(v.string(), v.regex(SEGMENT_ID)),
-  startedAtOffsetS: v.optional(finite, 0),
 })
 
 /**
  * Stop 0 at the origin of world `seed` and one segment from there to `goal`, published to the
- * journey store with `startedAt = now + startedAtOffsetS`.
+ * journey store, with what was written and how long each step took. No segment row names the
+ * segment, so the journey route serves its manifest and none of its slices or traces.
  */
 export default defineHandler(async (event) => {
   const body = await readValidatedBody(event, BodySchema, {
@@ -66,13 +66,8 @@ export default defineHandler(async (event) => {
     const stop = await time('publishStopMs', () =>
       publishStop(store, { world, disk, mask, missionId: SMOKE_MISSION_ID, stopIndex: 0 }),
     )
-    const startedAt = Math.round(Date.now() + body.startedAtOffsetS * 1000)
     const segment = await time('publishSegmentMs', () =>
-      publishSegment(store, {
-        segment: encodeSegment(record),
-        segmentId: body.segmentId,
-        startedAt,
-      }),
+      publishSegment(store, { segment: encodeSegment(record), segmentId: body.segmentId }),
     )
     const chunks = stop.written.filter((w) => w.key.includes('/chunks/'))
     const maskBlobs = stop.written.filter((w) => w.key.includes('/revealed/'))
@@ -80,7 +75,6 @@ export default defineHandler(async (event) => {
     return {
       stopManifestKey: stop.manifestKey,
       segmentManifestKey: segment.manifestKey,
-      startedAt: new Date(startedAt).toISOString(),
       durationS: record.outcome.durationS,
       skippedChunks: stop.skipped.length,
       keys: [...stop.written, ...segment.written].map((w) => w.key),

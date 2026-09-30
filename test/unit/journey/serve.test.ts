@@ -4,6 +4,7 @@ import {
   decodeTraceBlock,
   driveSegment,
   encodeTraceBlock,
+  segmentManifestKey,
   segmentSliceKey,
   segmentTraceBlockKey,
   segmentTraceKey,
@@ -30,11 +31,13 @@ const { traces } = sliceRecord(record)
 const startedAt = 1_790_000_000_000
 const releaseAt = (k: number) => sliceReleaseAt(startedAt, k, 30)
 
+/** Segment `seg-1` published, its row starting at `startedAt`; no other segment has a row. */
 async function published() {
   const store = createJourneyStore({ store: new MemoryBlobs() })
-  await publishSegment(store, { segment: encodeSegment(record), segmentId: 'seg-1', startedAt })
+  await publishSegment(store, { segment: encodeSegment(record), segmentId: 'seg-1' })
+  const startOf = async (segmentId: string) => (segmentId === 'seg-1' ? startedAt : null)
   const serve = (key: string, now: number, acceptEncoding: string | null = null) =>
-    serveJourney(store, key, { now, acceptEncoding })
+    serveJourney(store, key, { now, acceptEncoding, startOf })
   return { store, serve }
 }
 
@@ -110,5 +113,38 @@ describe('serveJourney', () => {
     expect((await serve(segmentSliceKey('seg-1', 3), releaseAt(3) - 1)).status).toBe(404)
     expect((await serve(segmentSliceKey('seg-1', 3), releaseAt(3))).status).toBe(200)
     expect((await serve(segmentTraceKey('seg-1', 3), releaseAt(3) - 1)).status).toBe(404)
+  })
+
+  it("releases from the row's start whatever start a stored manifest carries", async () => {
+    const { store, serve } = await published()
+    const key = segmentManifestKey('seg-1')
+    const stored = (await store.getJson(key)) as Record<string, unknown>
+    await store.putJson(key, { ...stored, startedAt: startedAt + 96_800 })
+    const last = traces.length - 1
+    for (const k of [0, last]) {
+      expect((await serve(segmentSliceKey('seg-1', k), releaseAt(k))).status).toBe(200)
+      expect((await serve(segmentTraceKey('seg-1', k), releaseAt(k))).status).toBe(200)
+    }
+    expect((await serve(segmentTraceBlockKey('seg-1', 0), releaseAt(TRACE_BLOCK - 1))).status).toBe(
+      200,
+    )
+    const early = await serve(segmentSliceKey('seg-1', last), releaseAt(last) - 1)
+    expect(early.headers.get('x-release-at')).toBe(new Date(releaseAt(last)).toISOString())
+  })
+
+  it('serves a segment without a row its manifest and none of its slices, traces or blocks', async () => {
+    const { store, serve } = await published()
+    await publishSegment(store, { segment: encodeSegment(record), segmentId: 'orphan' })
+    const late = releaseAt(10 * TRACE_BLOCK)
+    for (const key of [
+      segmentSliceKey('orphan', 0),
+      segmentTraceKey('orphan', 0),
+      segmentTraceBlockKey('orphan', 0),
+    ]) {
+      const response = await serve(key, late)
+      expect(response.status).toBe(404)
+      expect(response.headers.get('x-release-at')).toBeNull()
+    }
+    expect((await serve(segmentManifestKey('orphan'), late)).status).toBe(200)
   })
 })

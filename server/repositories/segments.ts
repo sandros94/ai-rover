@@ -72,6 +72,21 @@ export async function getSegment(db: DB, segmentId: string): Promise<Segment> {
   return row
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * When segment `segmentId` started, the one start its slices are released and played from; null
+ * when no segment has that id, which is so of any id that is not a UUID.
+ */
+export async function getSegmentStart(db: DB, segmentId: string): Promise<Date | null> {
+  if (!UUID.test(segmentId)) return null
+  const [row] = await db
+    .select({ startedAt: segment.startedAt })
+    .from(segment)
+    .where(eq(segment.id, segmentId))
+  return row?.startedAt ?? null
+}
+
 /** The mission's unsettled segment, at most one; its outcome is private, so keep this server-side. */
 export async function getDrivingSegment(db: DB, missionId: string): Promise<Segment | undefined> {
   const [row] = await db

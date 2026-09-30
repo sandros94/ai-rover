@@ -2,14 +2,12 @@ import { hash } from 'unsecure/hash'
 import type { SegmentManifest, SegmentRecord, StoredSegmentManifest } from '#shared/utils/drive'
 import {
   assertSegmentId,
-  DriveError,
   encodeSlice,
   encodeTrace,
   segmentManifestKey,
   segmentSliceKey,
   segmentTraceKey,
   sliceRecord,
-  sliceReleaseAt,
 } from '#shared/utils/drive'
 import type { Chunk, RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import {
@@ -109,24 +107,20 @@ export async function contentSegmentId(segment: EncodedSegment, scope: string): 
 }
 
 /**
- * Publishes an encoded segment as time-gated slices and traces, each served once its slice's
- * window has passed, then its manifest stamped with the segment id and wall-clock start (epoch
- * milliseconds). A blob already stored under the id is skipped; the manifest is always written,
- * last, so a reader that finds it finds every slice and trace. `endsAt` is the release time of
- * the last slice, epoch milliseconds: the drive's public end.
+ * Publishes an encoded segment as slices and traces, then its manifest stamped with the segment
+ * id, last, so a reader that finds the manifest finds every slice and trace. Every blob is pure
+ * content: publishing the same segment again, from any run at any time, writes the same bytes, so
+ * a blob already stored under the id is skipped. When the drive starts is the segment row's, and
+ * the journey route serves each slice and trace once its window since that start has passed.
+ * `sliceCount` is the number of slices, which with the row's start gives the drive's public end
+ * (see `sliceReleaseAt`).
  */
 export async function publishSegment(
   store: JourneyStore,
-  options: { segment: EncodedSegment; segmentId: string; startedAt: number },
-): Promise<{ manifestKey: string; written: PutResult[]; skipped: string[]; endsAt: number }> {
-  const { segment, segmentId, startedAt } = options
+  options: { segment: EncodedSegment; segmentId: string },
+): Promise<{ manifestKey: string; written: PutResult[]; skipped: string[]; sliceCount: number }> {
+  const { segment, segmentId } = options
   assertSegmentId(segmentId)
-  if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
-    throw new DriveError(
-      'INVALID_INPUT',
-      `publishSegment: startedAt is ${startedAt}; pass whole epoch milliseconds.`,
-    )
-  }
   const { written, skipped } = await putAll(store, [
     ...segment.slices.map((bytes, index) => ({
       key: segmentSliceKey(segmentId, index),
@@ -139,10 +133,16 @@ export async function publishSegment(
       contentType: BINARY,
     })),
   ])
-  const stored: StoredSegmentManifest = { ...segment.manifest, segmentId, startedAt }
+  const stored: StoredSegmentManifest = { ...segment.manifest, segmentId }
   const manifestKey = segmentManifestKey(segmentId)
-  written.push(await store.putJson(manifestKey, stored))
-  const { sliceSeconds } = segment.manifest
-  const endsAt = sliceReleaseAt(startedAt, segment.slices.length - 1, sliceSeconds)
-  return { manifestKey, written, skipped, endsAt }
+  const last = await putAll(store, [
+    {
+      key: manifestKey,
+      bytes: () => new TextEncoder().encode(JSON.stringify(stored)),
+      contentType: 'application/json',
+    },
+  ])
+  written.push(...last.written)
+  skipped.push(...last.skipped)
+  return { manifestKey, written, skipped, sliceCount: segment.slices.length }
 }

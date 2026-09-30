@@ -8,9 +8,9 @@ import {
   sliceGate,
 } from '#shared/utils/drive'
 import type { JourneyFixture } from '../../../scripts/journey-fixture'
-import { buildJourneyFixture } from '../../../scripts/journey-fixture'
+import { buildJourneyFixture, JOURNEY_FIXTURE } from '../../../scripts/journey-fixture'
 
-export { JOURNEY_FIXTURE } from '../../../scripts/journey-fixture'
+export { JOURNEY_FIXTURE }
 
 const RECORDS = new URL('../../fixtures/records/', import.meta.url)
 
@@ -32,14 +32,22 @@ export function readRecord(key: string): Uint8Array | undefined {
 
 /**
  * A `fetch` serving `test/fixtures/records/` the way `/journey/{key}` does, already inflated:
- * unknown keys and unreleased slices, traces and trace blocks (at `now()`, epoch ms) answer 404, the latter with
- * `x-release-at`. `override` answers first when it returns a response for a key. Every requested
- * URL is appended to `calls`.
+ * unknown keys and unreleased slices, traces and trace blocks (at `now()`, epoch ms, counted from
+ * `startedAt`, the segment row's start) answer 404, the latter with `x-release-at`. `override`
+ * answers first when it returns a response for a key. Every requested URL is appended to `calls`.
  */
 export function recordsFetch(
-  options: { now?: () => number; override?: (key: string) => Response | undefined } = {},
+  options: {
+    now?: () => number
+    startedAt?: number
+    override?: (key: string) => Response | undefined
+  } = {},
 ): { fetch: (input: string) => Promise<Response>; calls: string[] } {
-  const { now = () => Number.MAX_SAFE_INTEGER, override } = options
+  const {
+    now = () => Number.MAX_SAFE_INTEGER,
+    startedAt = JOURNEY_FIXTURE.startedAt,
+    override,
+  } = options
   const calls: string[] = []
   const notFound = (headers: Record<string, string> = {}) =>
     new Response(null, { status: 404, headers })
@@ -55,7 +63,7 @@ export function recordsFetch(
       if (!manifest) return notFound()
       const stored = parseStoredSegmentManifest(JSON.parse(new TextDecoder().decode(manifest)))
       const last = parsed.kind === 'segment-trace-block' ? parsed.to : parsed.index
-      const gate = sliceGate(stored, last, now())
+      const gate = sliceGate({ startedAt, sliceSeconds: stored.sliceSeconds }, last, now())
       if (!gate.released) {
         return notFound({ 'x-release-at': new Date(gate.releaseAt).toISOString() })
       }
