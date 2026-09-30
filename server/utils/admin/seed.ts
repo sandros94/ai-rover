@@ -1,17 +1,14 @@
-import { sql } from 'drizzle-orm'
-import { defineHandler, HTTPError } from 'nitro/h3'
+import { defineHandler, HTTPError, readBody } from 'nitro/h3'
 import * as v from 'valibot'
-import { mission } from '../../database/schema'
 import { createMissionAtStop } from '../mission/create'
 import { httpErrorOf } from '../mission/http'
 import { BAD_INPUT } from '../mission/validation'
 import type { AdminContext } from './access'
-import { noStore, PLATFORM, readAdminBody } from './access'
+import { noStore, PLATFORM, requireAdmin } from './access'
 
 const finite = v.pipe(v.number(), v.finite())
 
 const SeedBody = v.object({
-  token: v.string(),
   /** World seed; default `mars`. */
   seed: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)), 'mars'),
   /** Stop 0, world metres; default the origin. */
@@ -26,41 +23,23 @@ export interface SeedAnswer {
   worldHash: string
 }
 
-/** `GET /api/admin/status`: whether an admin token is configured, and nothing else. */
-export function defineAdminStatusHandlerWith(context: AdminContext) {
-  return defineHandler((event) => {
-    noStore(event)
-    return { configured: context.token() !== '' }
-  })
-}
-
 /**
- * `POST /api/admin/seed`: lands the first mission at `{ x, y }` of the world `seed`, with the
- * default world and rules. Refuses as {@link readAdminBody} does, and answers 409 once any
- * mission exists: there is no reset here.
+ * `POST /api/admin/seed`: lands a mission at `{ x, y }` of the world `seed`, with the default
+ * world and rules. Answers 404 to anyone but an admin, and 409 (`MISSION_ACTIVE`) while a
+ * mission is active: the landing itself refuses then.
  */
 export function defineAdminSeedHandlerWith(context: AdminContext) {
   return defineHandler(async (event) => {
     noStore(event)
-    const body = await readAdminBody(event, context)
-    const parsed = v.safeParse(SeedBody, body)
+    await requireAdmin(event, context)
+    const parsed = v.safeParse(SeedBody, (await readBody<unknown>(event)) ?? {})
     if (!parsed.success) throw new HTTPError(BAD_INPUT.onError(parsed))
     const { seed, x, y } = parsed.output
-
-    const db = context.db()
     try {
-      const landed = await db.transaction(async (tx) => {
-        // Serialises landings, so two at once cannot both find the database empty.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('rover-mission-landing'))`)
-        const [existing] = await tx.select({ id: mission.id }).from(mission).limit(1)
-        if (existing) {
-          throw new HTTPError({
-            status: 409,
-            message: `A mission already exists (${existing.id}); seeding lands only the first.`,
-            body: { missionId: existing.id },
-          })
-        }
-        return createMissionAtStop(tx, { store: context.store(), seed, at: { x, y } })
+      const landed = await createMissionAtStop(context.db(), {
+        store: context.store(),
+        seed,
+        at: { x, y },
       })
       event.res.status = 201
       return {
@@ -74,9 +53,6 @@ export function defineAdminSeedHandlerWith(context: AdminContext) {
     }
   })
 }
-
-/** {@link defineAdminStatusHandlerWith} over the platform's configuration. */
-export const defineAdminStatusHandler = () => defineAdminStatusHandlerWith(PLATFORM)
 
 /** {@link defineAdminSeedHandlerWith} over the platform's configuration, database and blobs. */
 export const defineAdminSeedHandler = () => defineAdminSeedHandlerWith(PLATFORM)

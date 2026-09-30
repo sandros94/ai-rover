@@ -1,12 +1,14 @@
+import { sql } from 'drizzle-orm'
 import { uuidv7 } from 'unsecure/uuid'
 import type { DB } from '../../database/db'
 import type { Mission, Round, Stop } from '../../database/schema'
-import { createMission, setCurrentStop } from '../../repositories/missions'
+import { createMission, getActiveMission, setCurrentStop } from '../../repositories/missions'
 import { openRound } from '../../repositories/rounds'
 import { createStop } from '../../repositories/stops'
 import { primeStop } from '../journey/prime'
 import { publishStop } from '../journey/publish'
 import type { JourneyStore } from '../journey/store'
+import { LifecycleError } from './errors'
 import type { MissionRules } from '#shared/utils/mission'
 import { DEFAULT_MISSION_RULES, landingMask } from '#shared/utils/mission'
 import type { WorldConfig } from '#shared/utils/terrain'
@@ -33,14 +35,28 @@ export interface MissionAtStop {
   published: Awaited<ReturnType<typeof publishStop>>
 }
 
+/** Refuses with `MISSION_ACTIVE` while a mission is active. */
+async function assertNoActiveMission(db: DB): Promise<void> {
+  const active = await getActiveMission(db)
+  if (active) {
+    throw new LifecycleError(
+      'MISSION_ACTIVE',
+      `Mission ${active.id} is active; another lands only once none is.`,
+    )
+  }
+}
+
 /**
- * Lands a mission: publishes stop 0 (its disk, the viewshed from it as the first revealed mask,
- * its manifest), then creates the mission, stop 0 made current and round 0 open from it and
- * anchored on it, in one transaction. Blobs go first so a stop row never names a blob that is not
- * there; once the rows are written the stop is primed in the CDN, without waiting for it.
+ * Lands a mission while none is active, and refuses with `MISSION_ACTIVE` otherwise: publishes
+ * stop 0 (its disk, the viewshed from it as the first revealed mask, its manifest), then creates
+ * the mission, stop 0 made current and round 0 open from it and anchored on it, in one
+ * transaction. Blobs go first so a stop row never names a blob that is not there; once the rows
+ * are written the stop is primed in the CDN, without waiting for it.
  */
 export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Promise<MissionAtStop> {
   const { store, seed, at, now = new Date() } = input
+  // Checked again inside the transaction, which decides; this one spares the blobs of a refusal.
+  await assertNoActiveMission(db)
   const config = { world: input.world ?? {}, rules: input.rules ?? DEFAULT_MISSION_RULES }
   const world = defineWorld({ seed, ...config.world })
   const hash = worldHash(world)
@@ -50,6 +66,9 @@ export async function createMissionAtStop(db: DB, input: NewMissionAtStop): Prom
   const published = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
 
   const landed = await db.transaction(async (tx) => {
+    // Serialises landings, so two at once cannot both find no mission active.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('rover-mission-landing'))`)
+    await assertNoActiveMission(tx)
     await createMission(tx, {
       id: missionId,
       seed,

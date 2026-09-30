@@ -1,7 +1,7 @@
-import { count } from 'drizzle-orm'
+import { count, eq } from 'drizzle-orm'
 import type { DB } from '#server/database/db'
 import type { StoredJudgment } from '#server/database/schema'
-import { schema } from '#server/database/schema'
+import { mission, schema } from '#server/database/schema'
 import { createUser } from '#server/repositories/users'
 import type { JevClient, SubmissionJudgment } from '#server/utils/jev/client'
 import type { JourneyStore } from '#server/utils/journey/store'
@@ -74,6 +74,14 @@ export function fakeJev(
 
 export async function users(db: DB, ...names: string[]) {
   return Promise.all(names.map((displayName) => createUser(db, { displayName })))
+}
+
+/**
+ * Ends every active mission, so the next landing finds none: the tests of a file land a mission
+ * per case in one database.
+ */
+export async function endMissions(db: DB): Promise<void> {
+  await db.update(mission).set({ status: 'ended' }).where(eq(mission.status, 'active'))
 }
 
 /** Row count of every table, to compare before and after an operation. */

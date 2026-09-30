@@ -27,5 +27,4 @@ export {
 } from './not-moving'
 export type { ExplorationParts, ExplorationWeights, MissionHistory } from './exploration'
 export { drivenPath, explorationParts, explorationValue, POCKET_PATH_RADIUS_M } from './exploration'
-export type { ChainSegment, ChainStop } from './masks'
-export { landingMask, placeReveals, reachedMask, rebuildStopMasks } from './masks'
+export { landingMask, reachedMask } from './masks'

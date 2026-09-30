@@ -10,7 +10,17 @@ import { publicMissionState } from '#server/utils/mission/state'
 import { submitGoal } from '#server/utils/mission/submit'
 import { tickMission } from '#server/utils/mission/tick'
 import { failAt, forced } from './forced'
-import { at, createTestDb, fakeJev, memoryStore, MINUTE, SMALL_RULES, T0, users } from './helpers'
+import {
+  at,
+  createTestDb,
+  endMissions,
+  fakeJev,
+  memoryStore,
+  MINUTE,
+  SMALL_RULES,
+  T0,
+  users,
+} from './helpers'
 
 vi.mock('#shared/utils/drive/segment', async (original) =>
   (await import('./forced')).forcedDriveSegment(original),
@@ -25,6 +35,7 @@ afterAll(() => close())
 
 async function landed() {
   const { store } = memoryStore()
+  await endMissions(db)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',

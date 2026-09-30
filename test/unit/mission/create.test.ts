@@ -5,10 +5,11 @@ import { getOpenRound } from '#server/repositories/rounds'
 import { listRoundSubmissions } from '#server/repositories/submissions'
 import { listStops } from '#server/repositories/stops'
 import { createMissionAtStop } from '#server/utils/mission/create'
+import { LifecycleError } from '#server/utils/mission/errors'
 import { tickMission } from '#server/utils/mission/tick'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import { parseStopManifest } from '#shared/utils/terrain'
-import { createTestDb, fakeJev, memoryStore, T0, tableCounts } from './helpers'
+import { createTestDb, endMissions, fakeJev, memoryStore, T0, tableCounts } from './helpers'
 
 let db: DB
 let close: () => Promise<void>
@@ -18,6 +19,7 @@ afterAll(() => close())
 describe('createMissionAtStop', () => {
   it('lands stop 0, makes it current and opens round 0 with no submissions', async () => {
     const { store, blobs } = memoryStore()
+    await endMissions(db)
     const { mission, stop, round, published } = await createMissionAtStop(db, {
       store,
       seed: 'mars',
@@ -63,6 +65,7 @@ describe('createMissionAtStop', () => {
 
   it('leaves nothing for a tick to do', async () => {
     const { store, blobs } = memoryStore()
+    await endMissions(db)
     const { mission } = await createMissionAtStop(db, {
       store,
       seed: 'mars',
@@ -77,5 +80,15 @@ describe('createMissionAtStop', () => {
     expect(await tableCounts(db)).toEqual(before)
     expect(blobs.writes).toHaveLength(writes)
     expect((await getMission(db, mission.id)).currentStopId).toBe(mission.currentStopId)
+  })
+
+  it('refuses as MISSION_ACTIVE while a mission is active, writing nothing', async () => {
+    const { store, blobs } = memoryStore()
+    const before = await tableCounts(db)
+    const landing = createMissionAtStop(db, { store, seed: 'gale', at: { x: 5, y: 5 } })
+    await expect(landing).rejects.toBeInstanceOf(LifecycleError)
+    await expect(landing).rejects.toHaveProperty('code', 'MISSION_ACTIVE')
+    expect(await tableCounts(db)).toEqual(before)
+    expect(blobs.writes).toEqual([])
   })
 })

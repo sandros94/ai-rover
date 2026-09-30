@@ -48,6 +48,7 @@ import { forced, stopShortAt } from './forced'
 import {
   at,
   createTestDb,
+  endMissions,
   fakeJev,
   memoryStore,
   MINUTE,
@@ -117,6 +118,7 @@ type Judge = NonNullable<Parameters<typeof fakeJev>[0]>
 
 async function landed(judge: Judge = () => ({})) {
   const store = hooked(memoryStore().store)
+  await endMissions(db)
   const created = await createMissionAtStop(db, {
     store,
     seed: 'mars',

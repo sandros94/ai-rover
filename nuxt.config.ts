@@ -33,8 +33,11 @@ export default defineNuxtConfig({
      * or a random secret of at least 32 characters the key is derived from.
      */
     sessionKey: '',
-    /** Unlocks `/admin` and `POST /api/admin/seed`, from `NUXT_ADMIN_TOKEN`; empty disables them. */
-    adminToken: '',
+    /**
+     * The identities that may use `/admin`, from `NUXT_ADMIN_IDENTITIES`: a comma list of
+     * `provider:subject` keys; empty allows nobody.
+     */
+    adminIdentities: '',
     oauth: {
       /** Comma list of origins sign-in may redirect to, from `NUXT_OAUTH_ORIGINS`. */
       origins: '',

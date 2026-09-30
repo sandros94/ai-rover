@@ -7,6 +7,8 @@ export interface AccountView {
   primaryProvider: AuthProvider | null
   identities: {
     provider: AuthProvider
+    /** The provider's stable account id: with `provider`, the identity's key. */
+    subject: string
     displayName: string
     avatarUrl: string | null
     handle: string | null

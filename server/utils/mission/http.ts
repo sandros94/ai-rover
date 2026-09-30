@@ -34,7 +34,12 @@ const STATUS: Record<string, Record<string, number>> = {
     USER_GONE: 401,
     BUSY: 503,
   },
-  LifecycleError: { NO_ACTIVE_MISSION: 404, NO_OPEN_ROUND: 409, MISSION_PAUSED: 423 },
+  LifecycleError: {
+    NO_ACTIVE_MISSION: 404,
+    MISSION_ACTIVE: 409,
+    NO_OPEN_ROUND: 409,
+    MISSION_PAUSED: 423,
+  },
   MissionError: { INVALID_INPUT: 400 },
   NavError: { INVALID_INPUT: 422, OUT_OF_DISK: 422 },
   TerrainError: { OUT_OF_BOUNDS: 422 },

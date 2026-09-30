@@ -12,6 +12,7 @@ import SettingsPage from '~/pages/settings.vue'
 const ID = '0192f000-0000-7000-8000-00000000000a'
 const identity = (provider: 'github' | 'discord', displayName: string) => ({
   provider,
+  subject: provider === 'github' ? '583231' : '80351110224678912',
   displayName,
   avatarUrl: null,
   handle: displayName.toLowerCase(),
