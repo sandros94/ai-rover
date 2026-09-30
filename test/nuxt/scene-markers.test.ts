@@ -23,7 +23,7 @@ describe('TrailLayer', () => {
 
   it('draws one post and one head per stop, the current head in the accent', async () => {
     const wrapper = await mountSuspended(TrailLayer, {
-      props: { stops, heightAt: (x: number) => x / 10 },
+      props: { stops, groundAt: (x: number) => x / 10 },
     })
     const root = rootOf(wrapper)
     const posts = byName(root, 'posts')!

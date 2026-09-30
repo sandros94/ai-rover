@@ -8,7 +8,7 @@ import type {
   MapObject,
   RoverObject,
 } from '#shared/utils/client'
-import { fogSurface, gridHeightAt, ROVER_ID } from '#shared/utils/client'
+import { drawnHeightAt, fogSurface, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/scene'
 import type { MapPoint } from '#shared/utils/mission'
@@ -189,14 +189,19 @@ watch(
   { immediate: true },
 )
 
-/** Height of the ground as drawn: overlays crossing unseen ground follow the fog, not what it hides. */
-const drawnHeightAt = computed(() => {
-  const current = chunkFog.value
-  if (!current) return props.heightAt
-  const place = { ...props.terrain.grid, origin: props.terrain.origin }
-  return (x: number, y: number) =>
-    gridHeightAt(current.surface.heights, place, x, y) ?? props.heightAt(x, y)
+/**
+ * Height of the ground as drawn, which everything standing on it stands on: the rover at rest,
+ * the ghosts, the flags, the stop markers, the route and the survey's ring; over unseen ground
+ * that is the fog, not what it hides, and beyond the disk `heightAt`. A new function whenever
+ * the drawn ground changes, a chunk arriving or the fog redrawn, so each is placed again and the
+ * scene, drawn on demand, drawn again.
+ */
+const groundAt = computed(() => {
+  const drawn = drawnHeightAt(props.terrain, chunkFog.value?.surface.heights)
+  return (x: number, y: number) => drawn(x, y) ?? props.heightAt(x, y)
 })
+/** Where `p` stands, on the ground as drawn; at 0 while no ground there is in. */
+const standAt = (p: MapPoint) => groundAt.value(p.x, p.y) ?? 0
 
 /** Fixed for the disk, so colours do not shift as the rover moves or ground arrives. */
 let measured: { grid: HeightGrid; range: { min: number; max: number } } | undefined
@@ -216,25 +221,13 @@ const heightRange = computed(() => {
   return measured.range
 })
 
-const groundAt = (p: MapPoint) => props.heightAt(p.x, p.y) ?? 0
-
-/** At rest the rover stands on the ground in so far: read again as the ground arrives. */
-const frame = computed(() => {
-  if (props.frame) return props.frame
-  const { rest, terrain } = props
-  const z = gridHeightAt(
-    terrain.grid.heights,
-    { ...terrain.grid, origin: terrain.origin },
-    rest.x,
-    rest.y,
-  )
-  return flatFrame({ ...rest, z: z ?? groundAt(rest) })
-})
+/** At rest the rover stands on the ground as drawn. */
+const frame = computed(() => props.frame ?? flatFrame({ ...props.rest, z: standAt(props.rest) }))
 const ghosts = computed(() =>
   props.deaths.map((d) => ({
     x: d.x,
     y: d.y,
-    z: groundAt(d),
+    z: standAt(d),
     headingRad: d.headingRad ?? Math.PI / 4,
     ...(d.id === undefined ? {} : { id: d.id }),
   })),
@@ -245,11 +238,8 @@ const ghosts = computed(() =>
 const goals = computed(() =>
   props.objects
     .filter((o) => o.kind === 'submission')
-    .map((o) => ({ id: o.id, x: o.x, y: o.y, z: groundAt(o) })),
+    .map((o) => ({ id: o.id, x: o.x, y: o.y, z: standAt(o) })),
 )
-/** Where an object stands: the destination's flag on the ground as drawn, like the route. */
-const standAt = (o: MapObject) =>
-  o.kind === 'destination' ? (drawnHeightAt.value(o.x, o.y) ?? 0) : groundAt(o)
 /** Changes only when the rover becomes inspectable or stops being: not with every frame. */
 const roverInspectable = computed(() => props.roverObject !== undefined && props.grounded)
 const pickables = computed((): Pickable[] => [
@@ -314,7 +304,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :fog="chunkFog"
       :sight="props.fog?.sight"
       :survey="survey"
-      :drawn-height-at="drawnHeightAt"
+      :ground-at="groundAt"
       :goals="goals"
       :pickables="pickables"
       :focused-id="mapFocus.focused.value"
