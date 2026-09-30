@@ -346,7 +346,7 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
           />
         </template>
         <template #panel-map2d>
-          <LiveStage :stage="stage" view="2d" />
+          <LiveStage :stage="stage" view="2d" :progress="false" />
         </template>
         <template #panel-vote>
           <div class="space-y-3 p-3">

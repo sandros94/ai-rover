@@ -338,7 +338,7 @@ const instrumentProps = computed(() => ({
       />
     </template>
     <template #panel-map2d>
-      <LiveStage :stage="readStage" view="2d" />
+      <LiveStage :stage="readStage" view="2d" :progress="false" />
     </template>
     <template #panel-segment>
       <section :key="drive.id" class="space-y-2 p-3" data-test="segment" aria-label="This segment">

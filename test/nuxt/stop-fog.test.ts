@@ -33,10 +33,12 @@ vi.mock('~/components/map/StopMap.vue', async () => {
     default: vue.defineComponent({
       name: 'StopMap',
       props: { fog: { type: Object, default: undefined } },
-      setup: (props) => () => {
-        handed.map.push((props.fog as StopFog | undefined)?.sight)
-        return vue.h('div', { 'data-test': 'map' })
-      },
+      setup:
+        (props, { slots }) =>
+        () => {
+          handed.map.push((props.fog as StopFog | undefined)?.sight)
+          return vue.h('div', { 'data-test': 'map' }, slots.default?.())
+        },
     }),
   }
 })
@@ -208,6 +210,41 @@ describe('the fog on the dashboard', () => {
     expect(distinct(handed.scene)).toEqual(new Set(computed))
     expect(handed.map.at(-1)).toBe(computed.at(-1))
     expect(handed.scene.at(-1)).toBe(computed.at(-1))
+  })
+})
+
+describe('the terrain loading on the dashboard', () => {
+  it('shows one progress indicator for the scene and the 2D map panel while chunks arrive', async () => {
+    // The stop's manifest arrives; its chunks never do.
+    vi.stubGlobal('fetch', async (input: string) => {
+      const key = input.replace(/^\/journey\//, '')
+      if (key.startsWith('terrain/') || key.endsWith('.pack'))
+        return new Promise<Response>(() => {})
+      const bytes = files.get(key)
+      return bytes
+        ? new Response(bytes as Uint8Array<ArrayBuffer>)
+        : new Response(null, { status: 404 })
+    })
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(MissionDashboard, { state: state(), error: null, serverOffsetMs: 0 }),
+          }),
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-panel=map2d] [data-test=map]').exists()).toBe(true)
+      expect(wrapper.find('[data-test=terrain-progress]').text()).toMatch(
+        /Loading terrain 0 \/ \d+/,
+      )
+    })
+    await flushPromises()
+    const shown = wrapper.findAll('[data-test=terrain-progress]')
+    expect(shown).toHaveLength(1)
+    expect(wrapper.find('[data-panel=map2d] [data-test=terrain-progress]').exists()).toBe(false)
   })
 })
 

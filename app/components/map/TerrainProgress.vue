@@ -6,6 +6,7 @@ defineProps<{ ready: boolean; loaded: number; total: number; error: unknown }>()
 <template>
   <div
     v-if="!ready"
+    data-test="terrain-progress"
     class="absolute inset-x-4 bottom-4 space-y-1 rounded-md bg-(--ui-bg)/80 p-2 text-xs"
   >
     <p v-if="error" class="text-error">The terrain did not load: {{ String(error) }}</p>

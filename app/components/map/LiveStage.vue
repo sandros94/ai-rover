@@ -11,11 +11,14 @@ import type { MapViewMode } from '~/composables/useMapView'
 /**
  * A stage whose props are read here, where it is drawn: they change every animation frame while
  * a drive plays, and reading them in a page would redraw the page, its panels and its slots.
- * Listeners (`pick`, `hover`) pass through to the stage.
+ * Listeners (`pick`, `hover`) pass through to the stage. `progress: false` leaves the terrain's
+ * loading progress to another stage of the same stop.
  */
-defineProps<{ stage: () => StageProps; view: MapViewMode }>()
+withDefaults(defineProps<{ stage: () => StageProps; view: MapViewMode; progress?: boolean }>(), {
+  progress: true,
+})
 </script>
 
 <template>
-  <StopStage v-bind="stage()" :view="view" />
+  <StopStage v-bind="stage()" :view="view" :progress="progress" />
 </template>

@@ -45,6 +45,11 @@ const props = withDefaults(
     chunkVertices?: number
     heightAt: (x: number, y: number) => number | undefined
     loading: { loaded: number; total: number; error: unknown }
+    /**
+     * Whether this stage shows the terrain's loading progress; false for a stage beside another
+     * of the same stop and loader, which shows it for both.
+     */
+    progress?: boolean
     center: MapPoint
     radius: number
     /**
@@ -83,6 +88,7 @@ const props = withDefaults(
     reveals: () => [],
     fog: undefined,
     chunkVertices: undefined,
+    progress: true,
     mastHeight: undefined,
     trail: () => [],
     plan: () => [],
@@ -154,7 +160,7 @@ const fog = computed(() => props.fog ?? own.value)
       @hover="emit('hover', $event)"
       @pick="emit('pick', $event)"
     >
-      <TerrainProgress :ready="!!terrain" v-bind="loading" />
+      <TerrainProgress v-if="progress" :ready="!!terrain" v-bind="loading" />
     </StopMap>
     <DiskScene
       v-else-if="(ground ?? terrain) && chunkVertices"
@@ -176,10 +182,10 @@ const fog = computed(() => props.fog ?? own.value)
       :lighting="{ solFraction }"
     />
     <div v-else :class="['relative', BLANK]">
-      <TerrainProgress :ready="false" v-bind="loading" />
+      <TerrainProgress v-if="progress" :ready="false" v-bind="loading" />
     </div>
     <TerrainProgress
-      v-if="view !== '2d' && ground && chunkVertices"
+      v-if="progress && view !== '2d' && ground && chunkVertices"
       :ready="!!terrain"
       v-bind="loading"
     />
