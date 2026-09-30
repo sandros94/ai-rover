@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { LinearToneMapping } from 'three'
 import { useRoute, useScenePassTiming, useSceneQuality, useStopFog } from '#imports'
-import { createTerrainSampler, destinationObject } from '#shared/utils/client'
+import { createTerrainSampler, destinationObject, drivenPath } from '#shared/utils/client'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
@@ -119,6 +119,7 @@ const stops = computed(() => {
   return [...earlier, { x: start.x, y: start.y, current: true }]
 })
 const rest = computed(() => ({ ...props.record.start }))
+const driven = computed(() => drivenPath(props.record.keyframes))
 /** The flag at the route's end, inspectable as the live map's: hover for its card, click to focus. */
 const objects = computed(() => {
   const { start } = props.record
@@ -191,7 +192,7 @@ const deaths = computed(() => {
           :height-at="heightAt"
           :frame="frame"
           :rest="rest"
-          :keyframes="record.keyframes"
+          :driven="driven"
           :t="t"
           :route="record.plan.polyline"
           :stops="stops"

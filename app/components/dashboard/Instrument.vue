@@ -34,7 +34,12 @@ export const DRIVE_GROUPS: readonly InstrumentGroup[] = [
 
 <script setup lang="ts">
 import type { RevealGroup, RoundSubmission, SlopeProfile } from '#shared/utils/client/instruments'
-import type { DriveEvent, KeyframeBlock, PublishedPlanMetrics } from '#shared/utils/drive'
+import type {
+  DriveEvent,
+  KeyframeBlock,
+  PublishedPlanMetrics,
+  SliceTotals,
+} from '#shared/utils/drive'
 import type { MissionRules } from '#shared/utils/mission'
 import EventFeed from '~/components/instruments/EventFeed.vue'
 import type { JourneyTally } from '~/components/instruments/JourneyStats.vue'
@@ -60,8 +65,12 @@ withDefaults(
     group: InstrumentGroup
     drive?: {
       frame: Float32Array
+      /** The loaded keyframes up to `t`, which may start mid-drive at `totals`. */
       keyframes: KeyframeBlock
+      totals?: SliceTotals
+      /** Events from the keyframes' first up to `t`. */
       events: DriveEvent[]
+      /** Reveal groups from the drive's start up to `t`. */
       reveals: RevealGroup[]
       /** Playback sim time, seconds. */
       t: number
@@ -121,12 +130,14 @@ withDefaults(
     :frame="drive.frame"
     :events="drive.events"
     :keyframes="drive.keyframes"
+    :totals="drive.totals"
     :mission-before-m="drive.missionBeforeM"
   />
   <SlipGauge
     v-else-if="group === 'slip' && drive"
     data-test="slip-gauge"
     :keyframes="drive.keyframes"
+    :totals="drive.totals"
     :t="drive.t"
   />
   <EventFeed

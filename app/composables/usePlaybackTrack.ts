@@ -1,4 +1,6 @@
-import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
+import type { DrivenPoint } from '#shared/utils/client'
+import { drivenPath } from '#shared/utils/client'
+import { KEYFRAME_FIELDS, latestRoute } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { useSegmentPlayback } from './useSegmentPlayback'
 
@@ -8,6 +10,8 @@ export type PlaybackSource = Pick<
   | 'manifest'
   | 'frame'
   | 'keyframes'
+  | 'totals'
+  | 'pathBefore'
   | 'events'
   | 'reveals'
   | 'heldReveals'
@@ -21,8 +25,6 @@ export type PlaybackSource = Pick<
 
 /** Instrument updates per second: enough to read, cheap next to the map's per-frame overlay. */
 export const INSTRUMENT_HZ = 10
-/** Most points of the driven path drawn; longer drives are thinned evenly. */
-export const DRIVEN_POINTS = 400
 
 const X = KEYFRAME_FIELDS.indexOf('x')
 const Y = KEYFRAME_FIELDS.indexOf('y')
@@ -35,14 +37,17 @@ const SPEED = KEYFRAME_FIELDS.indexOf('speed')
 /**
  * What the map and the instruments read from a playing segment: a snapshot sampled at
  * {@link INSTRUMENT_HZ}, the rover at the playback frame (the one layer that moves every frame),
- * the route followed at the playback time, the path driven so far, and the rover's speed and
- * share of the opening plan's path driven, at the snapshot's rate.
+ * the route followed at the playback time, the path driven so far (the traces' light path before
+ * the loaded window, its keyframes within), and the rover's speed and share of the opening plan's
+ * path driven, at the snapshot's rate.
  */
 export function usePlaybackTrack(playback: PlaybackSource) {
   const snapshot = useThrottled(
     () => ({
       frame: playback.frame.value,
       keyframes: playback.keyframes.value,
+      totals: playback.totals.value,
+      pathBefore: playback.pathBefore.value,
       events: playback.events.value,
       reveals: playback.reveals.value,
       heldReveals: playback.heldReveals.value,
@@ -68,29 +73,19 @@ export function usePlaybackTrack(playback: PlaybackSource) {
     }
   })
 
-  /** The latest replan's route, else the opening plan. */
-  const plan = computed<MapPoint[]>(() => {
-    const replan = snapshot.value.events.findLast(
-      (e) => e.type === 'replan' && Array.isArray(e.details?.polyline),
-    )
-    if (replan) return replan.details!.polyline as MapPoint[]
-    return playback.manifest.value?.plan.polyline ?? []
-  })
+  /** The latest replan's route, else the one in force at the window's start, else the opening plan. */
+  const plan = computed<MapPoint[]>(
+    () =>
+      latestRoute(snapshot.value.events) ??
+      snapshot.value.totals?.route ??
+      playback.manifest.value?.plan.polyline ??
+      [],
+  )
 
-  const driven = computed<MapPoint[]>(() => {
-    const block = snapshot.value.keyframes
-    if (!block || block.count < 2) return []
-    const step = Math.max(1, Math.ceil(block.count / DRIVEN_POINTS))
-    const points: MapPoint[] = []
-    for (let k = 0; k < block.count; k += step) {
-      points.push({
-        x: block.data[k * KEYFRAME_STRIDE + X]!,
-        y: block.data[k * KEYFRAME_STRIDE + Y]!,
-      })
-    }
-    const last = (block.count - 1) * KEYFRAME_STRIDE
-    points.push({ x: block.data[last + X]!, y: block.data[last + Y]! })
-    return points
+  const driven = computed<DrivenPoint[]>(() => {
+    const { keyframes, pathBefore } = snapshot.value
+    const points = drivenPath(keyframes, pathBefore)
+    return points.length < 2 ? [] : points
   })
 
   const motion = computed(() => {

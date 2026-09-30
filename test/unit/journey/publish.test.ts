@@ -15,10 +15,12 @@ import {
 } from '#shared/utils/terrain'
 import {
   decodeSlice,
+  decodeTrace,
   driveSegment,
   parseStoredSegmentManifest,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceKey,
   sliceRecord,
 } from '#shared/utils/drive'
 import { createJourneyStore, PUT_CONCURRENCY, putAll } from '#server/utils/journey/store'
@@ -155,10 +157,10 @@ describe('publishSegment', () => {
   const start = { x: 0, y: 0, headingRad: 0 }
   const goal = { x: 40, y: 30 }
   const { record } = driveSegment(world, { disk, revealed: mask, start, goal })
-  const { slices } = sliceRecord(record)
+  const { slices, traces } = sliceRecord(record)
   const segment = encodeSegment(record)
 
-  it('writes the slices before the manifest, which parses with its id and start time', async () => {
+  it('writes the slices and traces before the manifest, which parses with its id and start time', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     const startedAt = 1_790_000_000_000
@@ -166,7 +168,12 @@ describe('publishSegment', () => {
     expect(result.manifestKey).toBe(segmentManifestKey('seg-1'))
     expect(blobs.writes.at(-1)).toBe(segmentManifestKey('seg-1'))
     expect(new Set(blobs.writes.slice(0, -1))).toEqual(
-      new Set(slices.map((s) => segmentSliceKey('seg-1', s.index))),
+      new Set(
+        slices.flatMap((s) => [
+          segmentSliceKey('seg-1', s.index),
+          segmentTraceKey('seg-1', s.index),
+        ]),
+      ),
     )
     const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
     expect(manifest.segmentId).toBe('seg-1')
@@ -177,7 +184,9 @@ describe('publishSegment', () => {
       (await store.getInflated(segmentSliceKey('seg-1', slices.length - 1)))!,
     )
     expect(last.outcome).toEqual(record.outcome)
-    expect(result.written).toHaveLength(slices.length + 1)
+    const trace = decodeTrace((await store.getInflated(segmentTraceKey('seg-1', 2)))!)
+    expect(trace).toEqual(traces[2])
+    expect(result.written).toHaveLength(2 * slices.length + 1)
     // The drive ends when its last slice is released.
     expect(result.endsAt).toBe(startedAt + slices.length * manifest.sliceSeconds * 1000)
   })
@@ -194,18 +203,22 @@ describe('publishSegment', () => {
     expect(blobs.maxInFlight).toBeGreaterThan(1)
   })
 
-  it('run again after being cut short, writes only the missing slices, then the manifest', async () => {
+  it('run again after being cut short, writes only the missing blobs, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
     await publishSegment(store, { segment, segmentId: 'seg-1', startedAt: 0 })
-    const lost = [3, 7].map((index) => segmentSliceKey('seg-1', index))
+    const lost = [
+      segmentSliceKey('seg-1', 3),
+      segmentSliceKey('seg-1', 7),
+      segmentTraceKey('seg-1', 7),
+    ]
     for (const key of [...lost, segmentManifestKey('seg-1')]) blobs.blobs.delete(key)
     blobs.writes.length = 0
     const result = await publishSegment(store, { segment, segmentId: 'seg-1', startedAt: 5000 })
     // Slices are written in parallel, in any order; the manifest comes after all of them.
     expect(blobs.writes.slice(0, -1).sort()).toEqual([...lost].sort())
     expect(blobs.writes.at(-1)).toBe(segmentManifestKey('seg-1'))
-    expect(result.skipped).toHaveLength(slices.length - 2)
+    expect(result.skipped).toHaveLength(2 * slices.length - 3)
     // The manifest carries the start of the run that wrote it last.
     const manifest = parseStoredSegmentManifest(await store.getJson(segmentManifestKey('seg-1')))
     expect(manifest.startedAt).toBe(5000)
@@ -248,5 +261,7 @@ describe('a prepared drive', () => {
     expect(await contentSegmentId(segment, 'round-2')).not.toBe(id)
     const cut = { ...segment, slices: segment.slices.slice(0, -1) }
     expect(await contentSegmentId(cut, 'round-1')).not.toBe(id)
+    const traced = { ...segment, traces: segment.traces.slice(0, -1) }
+    expect(await contentSegmentId(traced, 'round-1')).not.toBe(id)
   })
 })

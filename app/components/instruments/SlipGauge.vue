@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { createOdometer, slipOverLastMetre } from '#shared/utils/client/instruments'
-import type { KeyframeBlock } from '#shared/utils/drive'
+import type { KeyframeBlock, SliceTotals } from '#shared/utils/drive'
 import { DEFAULT_SLIP_MODEL } from '#shared/utils/drive'
 
 const props = withDefaults(
   defineProps<{
     keyframes: KeyframeBlock
+    /** The drive's totals at the keyframes' first; without them the keyframes start the drive. */
+    totals?: SliceTotals
     /** Playback sim time, seconds. */
     t: number
     /** Slip at or above this counts toward getting stuck. */
     stuckAbove?: number
   }>(),
-  { stuckAbove: DEFAULT_SLIP_MODEL.stuckAbove },
+  { totals: undefined, stuckAbove: DEFAULT_SLIP_MODEL.stuckAbove },
 )
 
-const odometer = computed(() => createOdometer(props.keyframes))
+const odometer = computed(() => createOdometer(props.keyframes, props.totals))
 const last = computed(() => slipOverLastMetre(odometer.value, props.t))
 const level = computed(() =>
   last.value.slip >= props.stuckAbove

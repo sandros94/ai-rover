@@ -1,5 +1,6 @@
 import type { KeyframeBlock } from '../../drive/keyframes'
-import { KEYFRAME_FIELDS } from '../../drive/keyframes'
+import { frameOdometry, SLIP_WINDOW_M } from '../../drive/odometry'
+import type { SliceTotals } from '../../drive/slices'
 import type { ResolvedRoverGeometry } from '../../rover/geometry'
 import { DEFAULT_ROVER_GEOMETRY } from '../../rover/geometry'
 import { ROVER_MAX_SPEED_MPS } from '../../rover/speed'
@@ -13,61 +14,78 @@ export interface OdometerReading {
 }
 
 export interface Odometer {
+  /** The reading at sim time `t`, clamped to the frames. */
   at(t: number): OdometerReading
-  /** The earliest sim time at which `actualM` reached `metres`; 0 below the first frame. */
-  timeAtDistance(metres: number): number
+  /**
+   * The reading where the ground distance first reached `metres`, interpolated from the frame
+   * before; the first reading below it and the last above.
+   */
+  atDistance(metres: number): OdometerReading
 }
 
-const X = KEYFRAME_FIELDS.indexOf('x')
-const Y = KEYFRAME_FIELDS.indexOf('y')
-const ML = KEYFRAME_FIELDS.indexOf('spinML')
-const MR = KEYFRAME_FIELDS.indexOf('spinMR')
-
 /**
- * Odometry of a keyframe block. Ground distance sums the planar steps between frames, which are
- * centimetres apart at rover speed. Commanded distance is the mean middle-wheel rotation times the
- * radius: the middle wheels sit on the axle through the turn centre, so a turn in place spins them
- * equal and opposite, and on an arc their mean speed is the body's.
+ * Odometry of a keyframe block (see `frameOdometry`) as readings over sim time. A block from
+ * mid-drive continues `totals`, the drive's at its first frame, and reads back through their
+ * slip trail before it; without them the block starts the drive. Commanded distance is the
+ * middle-wheel rotation times the radius.
  */
 export function createOdometer(
   keyframes: KeyframeBlock,
+  totals?: Pick<SliceTotals, 'groundM' | 'wheelRad' | 'slipTrail'>,
   geometry: ResolvedRoverGeometry = DEFAULT_ROVER_GEOMETRY,
 ): Odometer {
-  const { data, count, stride, hz } = keyframes
-  const actual = new Float64Array(count)
-  const commanded = new Float64Array(count)
+  const { data, count, stride } = keyframes
   const r = geometry.wheelRadius
-  const spin0 = count > 0 ? (data[ML]! + data[MR]!) / 2 : 0
-  for (let k = 0; k < count; k++) {
-    const f = k * stride
-    if (k > 0) {
-      const p = f - stride
-      actual[k] =
-        actual[k - 1]! + Math.hypot(data[f + X]! - data[p + X]!, data[f + Y]! - data[p + Y]!)
-    }
-    commanded[k] = ((data[f + ML]! + data[f + MR]!) / 2 - spin0) * r
-  }
-  const lerp = (series: Float64Array, t: number): number => {
-    if (count === 0) return 0
-    const u = Math.max(0, Math.min(count - 1, t * hz))
-    const k = Math.min(count - 2, Math.floor(u))
-    if (k < 0) return series[0]!
-    return series[k]! + (series[k + 1]! - series[k]!) * (u - k)
-  }
+  const from = totals ?? { groundM: 0, wheelRad: 0, slipTrail: [] }
+  const { groundM, wheelRad } = frameOdometry(keyframes, from)
+  // The trail, then the frames: ground and wheel rotation by distance.
+  const trail = from.slipTrail
+  const n = trail.length + count
+  const ground = new Float64Array(n)
+  const wheel = new Float64Array(n)
+  trail.forEach(([g, w], k) => {
+    ground[k] = from.groundM - g
+    wheel[k] = from.wheelRad - w
+  })
+  ground.set(groundM, trail.length)
+  wheel.set(wheelRad, trail.length)
+  const start = { actualM: from.groundM, commandedM: from.wheelRad * r }
+  const reading = (k: number, u: number): OdometerReading => ({
+    actualM: ground[k]! + (u === 0 ? 0 : (ground[k + 1]! - ground[k]!) * u),
+    commandedM: (wheel[k]! + (u === 0 ? 0 : (wheel[k + 1]! - wheel[k]!) * u)) * r,
+  })
   return {
-    at: (t) => ({ actualM: lerp(actual, t), commandedM: lerp(commanded, t) }),
-    timeAtDistance(metres) {
+    at(t) {
+      if (count === 0) return start
+      // Frames with time ≤ t.
       let lo = 0
-      let hi = count - 1
-      if (count === 0 || metres <= actual[0]!) return 0
-      if (metres >= actual[hi]!) return hi / hz
-      while (hi - lo > 1) {
+      let hi = count
+      while (lo < hi) {
         const mid = (lo + hi) >> 1
-        if (actual[mid]! < metres) lo = mid
+        if (data[mid * stride]! <= t) lo = mid + 1
         else hi = mid
       }
-      const span = actual[hi]! - actual[lo]!
-      return (lo + (span > 0 ? (metres - actual[lo]!) / span : 0)) / hz
+      if (lo === 0) return reading(trail.length, 0)
+      if (lo === count) return reading(n - 1, 0)
+      const k = lo - 1
+      const t0 = data[k * stride]!
+      const t1 = data[lo * stride]!
+      return reading(trail.length + k, (t - t0) / (t1 - t0))
+    },
+    atDistance(metres) {
+      if (n === 0) return start
+      if (metres <= ground[0]!) return reading(0, 0)
+      if (metres >= ground[n - 1]!) return reading(n - 1, 0)
+      // The first entry at or past `metres`, and the one before it.
+      let lo = 0
+      let hi = n - 1
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1
+        if (ground[mid]! < metres) lo = mid
+        else hi = mid
+      }
+      const span = ground[hi]! - ground[lo]!
+      return reading(lo, span > 0 ? (metres - ground[lo]!) / span : 0)
     },
   }
 }
@@ -91,10 +109,10 @@ export function driveEfficiency(options: {
 export function slipOverLastMetre(
   odometer: Odometer,
   t: number,
-  windowM = 1,
+  windowM = SLIP_WINDOW_M,
 ): { actualM: number; commandedM: number; slip: number } {
   const now = odometer.at(t)
-  const from = odometer.at(odometer.timeAtDistance(Math.max(0, now.actualM - windowM)))
+  const from = odometer.atDistance(Math.max(0, now.actualM - windowM))
   const actualM = now.actualM - from.actualM
   const commandedM = now.commandedM - from.commandedM
   return { actualM, commandedM, slip: commandedM > 0 ? Math.max(0, 1 - actualM / commandedM) : 0 }

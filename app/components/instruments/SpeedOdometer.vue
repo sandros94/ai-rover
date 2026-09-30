@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { createOdometer, driveEfficiency } from '#shared/utils/client/instruments'
-import type { DriveEvent, DriveStatus, KeyframeBlock } from '#shared/utils/drive'
+import type { DriveEvent, DriveStatus, KeyframeBlock, SliceTotals } from '#shared/utils/drive'
 import { KEYFRAME_FIELDS, statusAt } from '#shared/utils/drive'
 import { ROVER_MAX_SPEED_MPS } from '#shared/utils/rover'
 
@@ -8,21 +8,23 @@ const props = withDefaults(
   defineProps<{
     /** The 23 keyframe values at the playback time. */
     frame: Float32Array
-    /** Events up to the playback time. */
+    /** Events up to the playback time, from the keyframes' first on. */
     events: DriveEvent[]
     /** The segment's keyframes so far, for the odometers. */
     keyframes: KeyframeBlock
+    /** The drive's totals at the keyframes' first; without them the keyframes start the drive. */
+    totals?: SliceTotals
     /** Ground distance of the journey before this segment, metres. */
     missionBeforeM?: number
     /** The commanded cap the bars and efficiency measure against. */
     maxSpeedMps?: number
   }>(),
-  { missionBeforeM: 0, maxSpeedMps: ROVER_MAX_SPEED_MPS },
+  { totals: undefined, missionBeforeM: 0, maxSpeedMps: ROVER_MAX_SPEED_MPS },
 )
 
 const t = computed(() => props.frame[KEYFRAME_FIELDS.indexOf('t')]!)
 const speed = computed(() => props.frame[KEYFRAME_FIELDS.indexOf('speed')]!)
-const odometer = computed(() => createOdometer(props.keyframes))
+const odometer = computed(() => createOdometer(props.keyframes, props.totals))
 const reading = computed(() => odometer.value.at(t.value))
 const efficiency = computed(() =>
   driveEfficiency({
@@ -41,7 +43,7 @@ const STATUS_ICON: Record<DriveStatus, string> = {
 }
 /** What the rover is doing at the playback time, so a stop never reads as a fault. */
 const status = computed(() => {
-  const run = statusAt(props.events, t.value)
+  const run = statusAt(props.events, t.value, props.totals?.status)
   let label: string = run.status
   if (run.status === 'steering') label = 'steering wheels'
   if (run.status === 'turning' && run.angleDeg !== undefined)

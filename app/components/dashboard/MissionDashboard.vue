@@ -118,6 +118,7 @@ const drive = computed(() => {
   return {
     frame: s.frame,
     keyframes: s.keyframes,
+    totals: s.totals,
     events: s.events,
     reveals: s.reveals,
     t: s.t,
@@ -155,7 +156,6 @@ const track: MapTrack = {
   driven,
   reveals: fogReveals,
   frame: playback.frame,
-  keyframes: computed(() => snapshot.value.keyframes),
   t: computed(() => snapshot.value.t),
   motion,
   // The sun of the moment a drive shows while it plays, else of now.

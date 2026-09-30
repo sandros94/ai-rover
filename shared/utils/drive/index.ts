@@ -50,7 +50,22 @@ export {
 export type { Move, ProfileLimits, ProfileSample } from './profile'
 export { moveAt, peakRate, planMove, rampAt, rampDistance, rampDurationS } from './profile'
 export type { DriveStatus, StatusRun } from './status'
-export { statusAt, statusRuns } from './status'
+export { statusAt, statusInForce, statusRuns } from './status'
+export type { Odometry } from './odometry'
+export { frameOdometry, SLIP_WINDOW_M } from './odometry'
+export type { SliceTrace } from './traces'
+export {
+  decodeTrace,
+  decodeTraceBlock,
+  encodeTrace,
+  encodeTraceBlock,
+  TRACE_BLOCK,
+  TRACE_BLOCK_FORMAT_VERSION,
+  TRACE_BLOCK_HEADER_BYTES,
+  TRACE_FORMAT_VERSION,
+  TRACE_HEADER_BYTES,
+  TRACE_PATH_SECONDS,
+} from './traces'
 export type { JourneyKey } from './keys'
 export {
   assertSegmentId,
@@ -59,17 +74,22 @@ export {
   SEGMENT_ID,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceBlockKey,
+  segmentTraceKey,
 } from './keys'
 export type {
   PublishedPlanMetrics,
   SegmentManifest,
   SegmentSlice,
+  SliceTotals,
   StoredSegmentManifest,
+  WrittenSlice,
 } from './slices'
 export {
   DEFAULT_SLICE_SECONDS,
   decodeSlice,
   encodeSlice,
+  latestRoute,
   parseSegmentManifest,
   parseStoredSegmentManifest,
   SEGMENT_MANIFEST_VERSION,
@@ -79,5 +99,6 @@ export {
   sliceGate,
   sliceRecord,
   sliceReleaseAt,
+  sliceTotals,
   StoredSegmentManifestSchema,
 } from './slices'

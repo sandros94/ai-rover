@@ -2,7 +2,8 @@ import type {
   DriveEvent,
   DriveOutcome,
   KeyframeBlock,
-  SegmentSlice,
+  SliceTotals,
+  SliceTrace,
   StoredSegmentManifest,
 } from '#shared/utils/drive'
 import { KEYFRAME_STRIDE } from '#shared/utils/drive'
@@ -28,7 +29,7 @@ export interface PlaylistSegment {
  * so the disk switches at each stop without a wait. Playback holds where the data held ends and
  * goes on when more arrives.
  *
- * The current segment's frame, keyframes, events and reveals read like `useSegmentPlayback`'s,
+ * The current segment's frame, window and reveals read like `useSegmentPlayback`'s,
  * so the same track and instruments draw either; `time` and `duration` are the playlist's own.
  * The segment list is fixed for the composable's life: remount for another.
  */
@@ -52,9 +53,11 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
   const manifest = shallowRef<StoredSegmentManifest>()
   const frame = shallowRef<Float32Array>()
   const keyframes = shallowRef<KeyframeBlock>()
+  const totals = shallowRef<SliceTotals>()
+  const pathBefore = shallowRef<Float32Array>(new Float32Array(0))
   const events = shallowRef<DriveEvent[]>([])
-  const reveals = shallowRef<SegmentSlice['reveals']>([])
-  const heldReveals = shallowRef<SegmentSlice['reveals']>([])
+  const reveals = shallowRef<SliceTrace['reveals']>([])
+  const heldReveals = shallowRef<SliceTrace['reveals']>([])
   const outcome = shallowRef<DriveOutcome>()
   /** Sim time within the playing segment. */
   const simTime = ref(0)
@@ -124,13 +127,6 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
 
   function step(): void {
     const wall = now()
-    for (const entry of entries.values()) {
-      if (entry.stream && !entry.stream.done) {
-        entry.stream.poll(wall).catch((caught: unknown) => {
-          error.value = caught
-        })
-      }
-    }
     const from = playlist.locate(clock.time).segmentIndex
     const t = clock.tick(wall, playlist.heldUntil(from, held))
     const { segmentIndex: k, simTime: sim } = playlist.locate(t)
@@ -143,6 +139,12 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
       prefetchStop(segments[ahead]!.from.index)
     }
     for (const key of entries.keys()) if (Math.abs(key - k) > 1) entries.delete(key)
+    // The playing segment opens where playback stands; its neighbours are entered at their start.
+    for (const [key, { stream }] of entries) {
+      stream?.poll(wall, key === k ? sim : 0).catch((caught: unknown) => {
+        error.value = caught
+      })
+    }
 
     if (k !== shown) {
       const before = shown
@@ -158,6 +160,8 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
     manifest.value = entry.manifest
     frame.value = stream?.frameAt(sim)
     keyframes.value = stream?.keyframesUntil(sim)
+    totals.value = stream?.totals
+    pathBefore.value = stream?.pathBefore ?? new Float32Array(0)
     if (stream) {
       const nextEvents = stream.eventsUntil(sim)
       if (nextEvents.length !== events.value.length) events.value = nextEvents
@@ -209,6 +213,8 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
     manifest,
     frame,
     keyframes,
+    totals,
+    pathBefore,
     events,
     reveals,
     heldReveals,

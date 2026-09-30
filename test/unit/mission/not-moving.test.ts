@@ -80,7 +80,7 @@ describe('backstopSlice', () => {
 
 describe('truncateRecord and stallEnding', () => {
   const record = syntheticRecord({ stopAfterS: 1200, durationS: 3600 })
-  const original = sliceRecord(record).slices
+  const { slices: original, traces: originalTraces } = sliceRecord(record)
 
   it('keeps every slice before the cut and ends in a failure one slice later', () => {
     const truncated = truncateRecord(record, {
@@ -88,9 +88,10 @@ describe('truncateRecord and stallEnding', () => {
       sliceSeconds: S,
       reason: 'no-progress',
     })
-    const { slices } = sliceRecord(truncated)
+    const { slices, traces } = sliceRecord(truncated)
     expect(slices).toHaveLength(71)
     expect(slices.slice(0, 70)).toEqual(original.slice(0, 70))
+    expect(traces.slice(0, 70)).toEqual(originalTraces.slice(0, 70))
     const last = slices[70]!
     expect(last.outcome).toMatchObject({
       kind: 'failed',
@@ -107,18 +108,19 @@ describe('truncateRecord and stallEnding', () => {
     expect(last.events).toEqual([
       { t: 2100, type: 'stuck', x: 120, y: 0, details: { reasons: ['no-progress'] } },
     ])
-    expect(last.reveals).toEqual([])
+    expect(traces[70]!.reveals).toEqual([])
+    expect(last.totals.groundM).toBeCloseTo(120, 3)
   })
 
-  it('builds the same final slice from the released slices alone', () => {
-    const fromRecord = sliceRecord(
+  it('builds the same final slice and trace from the released slices alone', () => {
+    const cut = sliceRecord(
       truncateRecord(record, { sliceIndex: 60, sliceSeconds: S, reason: 'flagged-not-moving' }),
-    ).slices[60]
-    const fromReleased = stallEnding(framesOf(original.slice(0, 60)), {
-      sliceIndex: 60,
-      sliceSeconds: S,
-      reason: 'flagged-not-moving',
-    })
-    expect(fromReleased).toEqual(fromRecord)
+    )
+    const released = original.slice(0, 60)
+    const fromReleased = stallEnding(
+      { keyframes: framesOf(released), events: released.flatMap((s) => s.events) },
+      { sliceIndex: 60, sliceSeconds: S, reason: 'flagged-not-moving' },
+    )
+    expect(fromReleased).toEqual({ slice: cut.slices[60], trace: cut.traces[60] })
   })
 })
