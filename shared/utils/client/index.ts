@@ -1,6 +1,6 @@
 export type { ClientErrorCode } from './errors'
 export { ClientError } from './errors'
-export type { FetchLike, JourneyClient, SliceResult } from './journey'
+export type { FetchLike, JourneyClient, Released } from './journey'
 export { createJourneyClient } from './journey'
 export type { ChunkCache, ChunkGeometry } from './chunks'
 export {
@@ -17,7 +17,9 @@ export type { PlaybackClock, PlaybackMode, PlaybackRate } from './playback'
 export { createPlaybackClock, DEFAULT_LIVE_MARGIN_SECONDS, PLAYBACK_RATES } from './playback'
 export type { Playlist, PlaylistClock } from './playlist'
 export { createPlaylist, createPlaylistClock, PLAYLIST_PREFETCH_AT } from './playlist'
-export type { SegmentStream } from './segment-stream'
+export type { DrivenPoint } from './driven'
+export { DRIVEN_POINTS, drivenPath } from './driven'
+export type { SegmentStream, SliceWindow } from './segment-stream'
 export {
   createSegmentStream,
   DEFAULT_SLICE_CONCURRENCY,

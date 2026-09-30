@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DriveEvent } from '#shared/utils/drive'
-import { statusAt, statusRuns } from '#shared/utils/drive'
+import { statusAt, statusInForce, statusRuns } from '#shared/utils/drive'
 
 const ev = (t: number, type: DriveEvent['type'], details?: DriveEvent['details']): DriveEvent => ({
   t,
@@ -87,5 +87,39 @@ describe('statusAt', () => {
   it('works on the events released so far: a stop still running reads as that stop', () => {
     expect(statusAt(events.slice(0, 2), 60).status).toBe('imaging')
     expect(statusAt(events.slice(0, 2), 120).status).toBe('driving')
+  })
+})
+
+describe('statusInForce and a track begun mid-drive', () => {
+  const events = [
+    ev(0, 'start'),
+    ev(0, 'turning', { angleDeg: 35, durationS: 12 }),
+    ev(50, 'imaging', { durationS: 30 }),
+    ev(64, 'slip', { slip: 0.4 }),
+    ev(95, 'steering', { durationS: 4 }),
+    ev(95, 'turning', { angleDeg: -20, durationS: 8 }),
+    ev(200, 'blocked', { reasons: ['goal-unreachable'] }),
+  ]
+
+  it('is null before the start, then the run the earlier events leave at t', () => {
+    expect(statusInForce([], 0)).toBeNull()
+    const before = (t: number) => events.filter((e) => e.t < t)
+    expect(statusInForce(before(60), 60)).toEqual({ t: 50, status: 'imaging', endsAt: 80 })
+    expect(statusInForce(before(90), 90)).toEqual({ t: 80, status: 'driving' })
+    expect(statusInForce(before(250), 250)).toEqual({ t: 200, status: 'stopped' })
+  })
+
+  it('continues from the run in force exactly as the whole track does', () => {
+    for (const cut of [1, 30, 60, 90, 95, 97, 150, 210]) {
+      const since = statusInForce(
+        events.filter((e) => e.t < cut),
+        cut,
+      )
+      const rest = events.filter((e) => e.t >= cut)
+      for (const t of [cut, cut + 1, 79.9, 80, 96, 99, 103, 104, 199, 200, 300]) {
+        if (t < cut) continue
+        expect(statusAt(rest, t, since), `cut ${cut}, t ${t}`).toEqual(statusAt(events, t))
+      }
+    }
   })
 })

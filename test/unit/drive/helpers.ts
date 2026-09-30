@@ -7,7 +7,7 @@ import {
   traversableMask,
 } from '#shared/utils/terrain'
 import type { RoverPose } from '#shared/utils/rover'
-import type { SegmentRecord } from '#shared/utils/drive'
+import type { SegmentRecord, SegmentSlice, SliceTrace } from '#shared/utils/drive'
 import { DriveError, KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
 
 /** The DriveError thrown by `fn`, or undefined when it throws nothing or something else. */
@@ -116,4 +116,49 @@ export function poseOfFrame(f: Float32Array): RoverPose {
     differentialRad: f[F.rockerL]!,
     bellyClearanceM: 0,
   }
+}
+
+/**
+ * `slice` as slice formats 1 and 2 wrote it, `reveals` inline and no totals: 19-value frames
+ * (no steering) for version 1, 23-value frames for version 2.
+ */
+export function encodeLegacySlice(
+  slice: Pick<SegmentSlice, 'index' | 'keyframes' | 'events' | 'outcome'>,
+  reveals: SliceTrace['reveals'],
+  version: 1 | 2,
+): Uint8Array {
+  const { index, keyframes, events, outcome } = slice
+  const stride = version === 1 ? 19 : KEYFRAME_STRIDE
+  const frames = keyframes.length / KEYFRAME_STRIDE
+  const json = new TextEncoder().encode(
+    JSON.stringify({
+      events,
+      reveals: reveals.map(({ t, vertices }) => ({ t, count: vertices.length })),
+      ...(outcome ? { outcome } : {}),
+    }),
+  )
+  const vertices = reveals.flatMap((r) => Array.from(r.vertices))
+  const header = 23
+  const bytes = new Uint8Array(header + frames * stride * 4 + json.byteLength + vertices.length * 4)
+  const view = new DataView(bytes.buffer)
+  bytes.set(new TextEncoder().encode('JRSL'), 0)
+  view.setUint8(4, version)
+  view.setUint32(6, index, true)
+  view.setUint32(10, frames, true)
+  view.setUint32(14, json.byteLength, true)
+  view.setUint32(18, vertices.length, true)
+  view.setUint8(22, outcome ? 1 : 0)
+  let offset = header
+  for (let f = 0; f < frames; f++) {
+    for (let k = 0; k < stride; k++, offset += 4) {
+      view.setFloat32(offset, keyframes[f * KEYFRAME_STRIDE + k]!, true)
+    }
+  }
+  bytes.set(json, offset)
+  offset += json.byteLength
+  for (const vertex of vertices) {
+    view.setUint32(offset, vertex, true)
+    offset += 4
+  }
+  return bytes
 }

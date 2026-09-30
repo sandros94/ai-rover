@@ -3,7 +3,8 @@ import type {
   DriveEvent,
   DriveOutcome,
   KeyframeBlock,
-  SegmentSlice,
+  SliceTotals,
+  SliceTrace,
   StoredSegmentManifest,
 } from '#shared/utils/drive'
 import { KEYFRAME_STRIDE } from '#shared/utils/drive'
@@ -19,9 +20,11 @@ import { useJourneyClient } from './useJourneyClient'
 
 /**
  * Plays a published segment in the browser: an animation-frame loop ticks the clock, polls for
- * released slices and exposes the interpolated keyframe with the keyframes, events and reveals
- * so far, and the outcome only once playback reaches it. A new `segmentId` starts over; none
- * stops playback and clears everything.
+ * what the playback time needs and exposes the interpolated keyframe with the stream's window up
+ * to it (keyframes and events from the window's start, the totals there and the path before it)
+ * and the reveals since the drive's start, and the outcome only once playback reaches it. The
+ * stream opens where the clock does, at live, and reaches back only as far as a seek goes. A new
+ * `segmentId` starts over; none stops playback and clears everything.
  * Playback runs on `display` (see `useDisplayClock`), stepped only by a seek or a new segment;
  * slice requests run on the browser's clock plus `serverOffsetMs` (server minus browser clock, see
  * `useMissionState`), the server's release times. `endsAt`, the end of a drive already settled
@@ -39,10 +42,14 @@ export function useSegmentPlayback(
   const manifest = shallowRef<StoredSegmentManifest>()
   const frame = shallowRef<Float32Array>()
   const keyframes = shallowRef<KeyframeBlock>()
+  /** The drive's totals at the keyframes' first. */
+  const totals = shallowRef<SliceTotals>()
+  /** The drive's path before the keyframes' first: `t, x, y, z` per point. */
+  const pathBefore = shallowRef<Float32Array>(new Float32Array(0))
   const events = shallowRef<DriveEvent[]>([])
-  const reveals = shallowRef<SegmentSlice['reveals']>([])
+  const reveals = shallowRef<SliceTrace['reveals']>([])
   /** Every reveal group held, reached or not: what the whole drive will have revealed so far. */
-  const heldReveals = shallowRef<SegmentSlice['reveals']>([])
+  const heldReveals = shallowRef<SliceTrace['reveals']>([])
   const outcome = shallowRef<DriveOutcome>()
   const simTime = ref(0)
   /** The live edge: the latest sim time playback may show. */
@@ -67,11 +74,13 @@ export function useSegmentPlayback(
     if (!clock || !stream) return
     const wall = display.now()
     const sim = clock.tick(wall)
-    stream.poll(serverNow()).catch((caught: unknown) => {
+    stream.poll(serverNow(), sim).catch((caught: unknown) => {
       error.value = caught
     })
     frame.value = stream.frameAt(sim)
     keyframes.value = stream.keyframesUntil(sim)
+    totals.value = stream.totals
+    pathBefore.value = stream.pathBefore
     const nextEvents = stream.eventsUntil(sim)
     if (nextEvents.length !== events.value.length) events.value = nextEvents
     const nextReveals = stream.revealsUntil(sim)
@@ -95,6 +104,8 @@ export function useSegmentPlayback(
     manifest.value = undefined
     frame.value = undefined
     keyframes.value = undefined
+    totals.value = undefined
+    pathBefore.value = new Float32Array(0)
     events.value = []
     reveals.value = []
     heldReveals.value = []
@@ -152,6 +163,8 @@ export function useSegmentPlayback(
     manifest,
     frame,
     keyframes,
+    totals,
+    pathBefore,
     events,
     reveals,
     heldReveals,

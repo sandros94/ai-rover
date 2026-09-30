@@ -10,7 +10,7 @@ import type { TresContext } from '@tresjs/core'
 import { TresCanvas } from '@tresjs/core'
 import type { Texture, ToneMapping, WebGLRenderer } from 'three'
 import { CustomToneMapping, GridHelper, PCFShadowMap, SRGBColorSpace } from 'three'
-import type { GridRect } from '#shared/utils/client'
+import type { DrivenPoint, GridRect } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import {
   armPoseAt,
@@ -25,7 +25,6 @@ import {
   sunPosition,
   turretLampLevel,
 } from '#shared/utils/client/scene'
-import type { KeyframeBlock } from '#shared/utils/drive'
 import type { RoverModelStatus } from '~/utils/rover-model'
 import DeathGhosts from './DeathGhosts.vue'
 import FollowCamera from './FollowCamera.vue'
@@ -54,7 +53,8 @@ const props = withDefaults(
     drawnHeightAt?: (x: number, y: number) => number | undefined
     /** The stops shown, the one the rover stands at or left from `current`. */
     stops?: { x: number; y: number; current?: boolean }[]
-    keyframes?: KeyframeBlock
+    /** The path driven, drawn up to `t`. */
+    driven?: DrivenPoint[]
     /** Sim seconds, for the path driven so far. */
     t?: number
     route?: { x: number; y: number }[]
@@ -89,7 +89,7 @@ const props = withDefaults(
     heightAt: undefined,
     drawnHeightAt: undefined,
     stops: () => [],
-    keyframes: undefined,
+    driven: () => [],
     t: 0,
     route: () => [],
     deaths: () => [],
@@ -276,7 +276,7 @@ onBeforeUnmount(() => {
       :color="SCENE_COLORS.survey"
     />
     <RouteLine v-if="route.length > 1" :route="route" :height-at="drawnHeightAt ?? heightAt" />
-    <TrailLayer :stops="stops" :keyframes="keyframes" :t="t" :height-at="heightAt" />
+    <TrailLayer :stops="stops" :driven="driven" :t="t" :height-at="heightAt" />
     <DeathGhosts
       v-if="deaths.length > 0"
       :deaths="deaths"

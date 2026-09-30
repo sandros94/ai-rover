@@ -12,8 +12,8 @@ const IMMUTABLE = 'public, max-age=31536000, immutable'
 
 /**
  * Journey blobs through the CDN, deflated as stored and cached forever; a client that does not
- * accept deflate gets them inflated, cached as its own variant. A segment slice is refused,
- * uncached, until wall-clock passes the end of its window (see `sliceReleaseAt`).
+ * accept deflate gets them inflated, cached as its own variant. A segment slice and its trace are
+ * refused, uncached, until wall-clock passes the end of the slice's window (see `sliceReleaseAt`).
  */
 export default defineHandler(async (event) => {
   const key = getRouterParam(event, 'key') ?? ''
@@ -21,7 +21,7 @@ export default defineHandler(async (event) => {
   if (!parsed) return notFound()
 
   const store = createJourneyStore()
-  if (parsed.kind === 'segment-slice') {
+  if (parsed.kind === 'segment-slice' || parsed.kind === 'segment-trace') {
     const manifest = await store.getJson(segmentManifestKey(parsed.segmentId))
     if (manifest === null) return notFound()
     const gate = sliceGate(parseStoredSegmentManifest(manifest), parsed.index, Date.now())

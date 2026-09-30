@@ -4,8 +4,10 @@ import {
   assertSegmentId,
   DriveError,
   encodeSlice,
+  encodeTrace,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceKey,
   sliceRecord,
   sliceReleaseAt,
 } from '#shared/utils/drive'
@@ -76,28 +78,28 @@ export interface EncodedSegment {
   manifest: SegmentManifest
   /** Slice `n`'s bytes at index `n`. */
   slices: Uint8Array[]
+  /** Slice `n`'s trace at index `n`. */
+  traces: Uint8Array[]
 }
 
 export function encodeSegment(record: SegmentRecord): EncodedSegment {
-  const { manifest, slices } = sliceRecord(record)
-  return { manifest, slices: slices.map(encodeSlice) }
+  const { manifest, slices, traces } = sliceRecord(record)
+  return { manifest, slices: slices.map(encodeSlice), traces: traces.map(encodeTrace) }
 }
 
 /**
  * A segment id naming `segment`'s content within `scope`: a UUID (version 8) from the SHA-256 of
- * the scope, the manifest and every slice. The same content in the same scope always gets the
- * same id, so its slices, keyed by that id, never change once stored.
+ * the scope, the manifest, every slice and every trace. The same content in the same scope always
+ * gets the same id, so its blobs, keyed by that id, never change once stored.
  */
 export async function contentSegmentId(segment: EncodedSegment, scope: string): Promise<string> {
   const head = new TextEncoder().encode(JSON.stringify([scope, segment.manifest]))
-  const bytes = new Uint8Array(
-    segment.slices.reduce((sum, slice) => sum + slice.byteLength, head.byteLength),
-  )
-  bytes.set(head)
-  let offset = head.byteLength
-  for (const slice of segment.slices) {
-    bytes.set(slice, offset)
-    offset += slice.byteLength
+  const parts = [head, ...segment.slices, ...segment.traces]
+  const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.byteLength, 0))
+  let offset = 0
+  for (const part of parts) {
+    bytes.set(part, offset)
+    offset += part.byteLength
   }
   const digest = await hash(bytes, { returnAs: 'bytes' })
   digest[6] = (digest[6]! & 0x0f) | 0x80
@@ -107,11 +109,11 @@ export async function contentSegmentId(segment: EncodedSegment, scope: string): 
 }
 
 /**
- * Publishes an encoded segment as time-gated slices, each served once its window has passed,
- * then its manifest stamped with the segment id and wall-clock start (epoch milliseconds). A
- * slice already stored under the id is skipped; the manifest is always written, last, so a reader
- * that finds it finds every slice. `endsAt` is the release time of the last slice, epoch
- * milliseconds: the drive's public end.
+ * Publishes an encoded segment as time-gated slices and traces, each served once its slice's
+ * window has passed, then its manifest stamped with the segment id and wall-clock start (epoch
+ * milliseconds). A blob already stored under the id is skipped; the manifest is always written,
+ * last, so a reader that finds it finds every slice and trace. `endsAt` is the release time of
+ * the last slice, epoch milliseconds: the drive's public end.
  */
 export async function publishSegment(
   store: JourneyStore,
@@ -125,14 +127,18 @@ export async function publishSegment(
       `publishSegment: startedAt is ${startedAt}; pass whole epoch milliseconds.`,
     )
   }
-  const { written, skipped } = await putAll(
-    store,
-    segment.slices.map((bytes, index) => ({
+  const { written, skipped } = await putAll(store, [
+    ...segment.slices.map((bytes, index) => ({
       key: segmentSliceKey(segmentId, index),
       bytes: () => bytes,
       contentType: BINARY,
     })),
-  )
+    ...segment.traces.map((bytes, index) => ({
+      key: segmentTraceKey(segmentId, index),
+      bytes: () => bytes,
+      contentType: BINARY,
+    })),
+  ])
   const stored: StoredSegmentManifest = { ...segment.manifest, segmentId, startedAt }
   const manifestKey = segmentManifestKey(segmentId)
   written.push(await store.putJson(manifestKey, stored))

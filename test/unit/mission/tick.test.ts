@@ -20,7 +20,13 @@ import { httpErrorOf } from '#server/utils/mission/http'
 import { tickMission } from '#server/utils/mission/tick'
 import { stopPrimeKeys } from '#server/utils/journey/prime'
 import type { JourneyStore } from '#server/utils/journey/store'
-import { decodeSlice, DriveError, segmentSliceKey } from '#shared/utils/drive'
+import {
+  decodeSlice,
+  decodeTrace,
+  DriveError,
+  segmentSliceKey,
+  segmentTraceKey,
+} from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
 import { memoryJevCache } from '../jev/helpers'
 import { forced, stopShortAt } from './forced'
@@ -447,9 +453,13 @@ describe('a drive that stops moving', () => {
     })
     const last = decodeSlice((await m.store.getInflated(segmentSliceKey(m.driving.id, 60)))!)
     expect(last.outcome).toEqual(voided.outcome)
-    expect(await m.store.has(segmentSliceKey(m.driving.id, 59))).toBe(true)
-    expect(await m.store.has(segmentSliceKey(m.driving.id, 61))).toBe(false)
-    expect(await m.store.has(segmentSliceKey(m.driving.id, 119))).toBe(false)
+    const lastTrace = decodeTrace((await m.store.getInflated(segmentTraceKey(m.driving.id, 60)))!)
+    expect(lastTrace).toMatchObject({ index: 60, reveals: [] })
+    for (const keyOf of [segmentSliceKey, segmentTraceKey]) {
+      expect(await m.store.has(keyOf(m.driving.id, 59))).toBe(true)
+      expect(await m.store.has(keyOf(m.driving.id, 61))).toBe(false)
+      expect(await m.store.has(keyOf(m.driving.id, 119))).toBe(false)
+    }
 
     const settled = await m.tick(voided.endsAt)
     expect(settled.settled).toEqual({ segmentId: m.driving.id, status: 'failed' })

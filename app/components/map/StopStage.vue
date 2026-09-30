@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import type { GroundView, MapObject, PreviewResult, RoverObject } from '#shared/utils/client'
-import type { KeyframeBlock } from '#shared/utils/drive'
+import type {
+  DrivenPoint,
+  GroundView,
+  MapObject,
+  PreviewResult,
+  RoverObject,
+} from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
 import type { GridCell, HeightGrid } from '#shared/utils/terrain'
 import type { MapViewMode } from '~/composables/useMapView'
@@ -51,12 +56,12 @@ const props = withDefaults(
     /** The stops shown, the one the rover stands at or left from `current`. */
     trail?: (MapPoint & { current?: boolean })[]
     plan?: MapPoint[]
-    driven?: MapPoint[]
+    /** The path driven so far, drawn on both views. */
+    driven?: DrivenPoint[]
     deaths?: MapPoint[]
     deathRadiusM?: number
-    /** For the 3D rover and path: the playback frame, the keyframes reached, the sim time. */
+    /** For the 3D rover and path: the playback frame and the sim time. */
     frame?: Float32Array
-    keyframes?: KeyframeBlock
     t?: number
     submissions?: { id: string; goal: MapPoint; mine?: boolean }[]
     highlightId?: string | null
@@ -85,7 +90,6 @@ const props = withDefaults(
     deaths: () => [],
     deathRadiusM: 30,
     frame: undefined,
-    keyframes: undefined,
     t: 0,
     submissions: () => [],
     highlightId: null,
@@ -161,7 +165,7 @@ const fog = computed(() => props.fog ?? own.value)
       :height-at="heightAt"
       :frame="frame"
       :rest="rover"
-      :keyframes="keyframes"
+      :driven="driven"
       :t="t"
       :route="plan"
       :stops="trail"

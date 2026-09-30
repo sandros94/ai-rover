@@ -66,6 +66,8 @@ function playback() {
     manifest: shallowRef(),
     frame,
     keyframes: shallowRef(),
+    totals: shallowRef(),
+    pathBefore: shallowRef(new Float32Array(0)),
     events: shallowRef([]),
     reveals: shallowRef([]),
     heldReveals: shallowRef([]),

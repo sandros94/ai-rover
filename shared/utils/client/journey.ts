@@ -1,6 +1,8 @@
 import type { SegmentSlice, StoredSegmentManifest } from '../drive/slices'
 import { decodeSlice, parseStoredSegmentManifest } from '../drive/slices'
-import { segmentManifestKey, segmentSliceKey } from '../drive/keys'
+import type { SliceTrace } from '../drive/traces'
+import { decodeTrace } from '../drive/traces'
+import { segmentManifestKey, segmentSliceKey, segmentTraceKey } from '../drive/keys'
 import type { Chunk } from '../terrain/chunk'
 import { decodeChunk } from '../terrain/encode'
 import type { StopManifest } from '../terrain/manifest'
@@ -20,9 +22,9 @@ import { ClientError } from './errors'
 /** The part of `fetch` the client uses: a URL in, a `Response` out. */
 export type FetchLike = (input: string) => Promise<Response>
 
-/** A slice as the server answers for it. Closed set. */
-export type SliceResult =
-  | { status: 'ready'; slice: SegmentSlice }
+/** A slice, or its trace, as the server answers for it. Closed set. */
+export type Released<T> =
+  | { status: 'ready'; value: T }
   /** Not released yet; `releaseAt` is the server's release time, epoch milliseconds. */
   | { status: 'not-yet'; releaseAt: number }
   /** No such slice: past the segment's end, or an unknown segment. */
@@ -39,7 +41,8 @@ export interface JourneyClient {
    */
   getStopPack(missionId: string, stopIndex: number): Promise<AsyncIterable<Chunk> | null>
   getSegmentManifest(segmentId: string): Promise<StoredSegmentManifest>
-  getSlice(segmentId: string, sliceIndex: number): Promise<SliceResult>
+  getSlice(segmentId: string, sliceIndex: number): Promise<Released<SegmentSlice>>
+  getTrace(segmentId: string, sliceIndex: number): Promise<Released<SliceTrace>>
 }
 
 /**
@@ -107,6 +110,36 @@ export function createJourneyClient(
     }
   }
 
+  /** A time-gated blob of slice `sliceIndex`: 404 with `x-release-at` until it is released. */
+  async function released<T extends { index: number }>(
+    key: string,
+    sliceIndex: number,
+    what: string,
+    decoder: (bytes: Uint8Array) => T,
+  ): Promise<Released<T>> {
+    const response = await request(key)
+    if (response.status === 404) {
+      const header = response.headers.get('x-release-at')
+      if (header === null) return { status: 'missing' }
+      const releaseAt = Date.parse(header)
+      if (!Number.isFinite(releaseAt)) {
+        throw new ClientError(
+          'DECODE',
+          `${what} "${key}" is not released, but its x-release-at "${header}" is not a date.`,
+        )
+      }
+      return { status: 'not-yet', releaseAt }
+    }
+    const value = decode(key, what, await bytesOf(key, response), decoder)
+    if (value.index !== sliceIndex) {
+      throw new ClientError(
+        'DECODE',
+        `${what} "${key}" holds slice ${value.index}; the store is inconsistent.`,
+      )
+    }
+    return { status: 'ready', value }
+  }
+
   const json = (bytes: Uint8Array): unknown =>
     JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
 
@@ -171,29 +204,10 @@ export function createJourneyClient(
       return manifest
     },
 
-    async getSlice(segmentId, sliceIndex) {
-      const key = segmentSliceKey(segmentId, sliceIndex)
-      const response = await request(key)
-      if (response.status === 404) {
-        const header = response.headers.get('x-release-at')
-        if (header === null) return { status: 'missing' }
-        const releaseAt = Date.parse(header)
-        if (!Number.isFinite(releaseAt)) {
-          throw new ClientError(
-            'DECODE',
-            `Slice "${key}" is not released, but its x-release-at "${header}" is not a date.`,
-          )
-        }
-        return { status: 'not-yet', releaseAt }
-      }
-      const slice = decode(key, 'Slice', await bytesOf(key, response), decodeSlice)
-      if (slice.index !== sliceIndex) {
-        throw new ClientError(
-          'DECODE',
-          `Slice "${key}" holds slice ${slice.index}; the store is inconsistent.`,
-        )
-      }
-      return { status: 'ready', slice }
-    },
+    getSlice: async (segmentId, sliceIndex) =>
+      released(segmentSliceKey(segmentId, sliceIndex), sliceIndex, 'Slice', decodeSlice),
+
+    getTrace: async (segmentId, sliceIndex) =>
+      released(segmentTraceKey(segmentId, sliceIndex), sliceIndex, 'Trace', decodeTrace),
   }
 }

@@ -26,7 +26,7 @@ export function readRecord(key: string): Uint8Array | undefined {
 
 /**
  * A `fetch` serving `test/fixtures/records/` the way `/journey/{key}` does, already inflated:
- * unknown keys and unreleased slices (at `now()`, epoch ms) answer 404, the latter with
+ * unknown keys and unreleased slices and traces (at `now()`, epoch ms) answer 404, the latter with
  * `x-release-at`. `override` answers first when it returns a response for a key. Every requested
  * URL is appended to `calls`.
  */
@@ -44,7 +44,7 @@ export function recordsFetch(
     if (custom) return custom
     const parsed = parseJourneyKey(key)
     if (!parsed) return notFound()
-    if (parsed.kind === 'segment-slice') {
+    if (parsed.kind === 'segment-slice' || parsed.kind === 'segment-trace') {
       const manifest = readRecord(`segments/${parsed.segmentId}/manifest.json`)
       if (!manifest) return notFound()
       const stored = parseStoredSegmentManifest(JSON.parse(new TextDecoder().decode(manifest)))

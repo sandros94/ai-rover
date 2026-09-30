@@ -112,6 +112,7 @@ const instruments = computed(() => {
   return {
     frame: s.frame,
     keyframes: s.keyframes,
+    totals: s.totals,
     events: s.events,
     reveals: s.reveals,
     t: s.t,
@@ -167,7 +168,6 @@ const stage = computed((): StageProps => ({
   deaths: deathObjects.value,
   deathRadiusM: rules.value.failureZone.destinationRadiusM,
   frame: playback.frame.value,
-  keyframes: snapshot.value.keyframes,
   t: snapshot.value.t,
   // The sun as it stood at that moment of the drive.
   solFraction: solTime(

@@ -3,12 +3,19 @@
  * itself. `record-journey-fixture.ts` writes it, and the client tests rebuild it to compare the
  * served blobs against the record they came from.
  */
-import type { SegmentRecord, SegmentSlice, StoredSegmentManifest } from '#shared/utils/drive'
+import type {
+  SegmentRecord,
+  SliceTrace,
+  StoredSegmentManifest,
+  WrittenSlice,
+} from '#shared/utils/drive'
 import {
   driveSegment,
   encodeSlice,
+  encodeTrace,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceKey,
   sliceRecord,
 } from '#shared/utils/drive'
 import type { RevealedMask, StopDisk, StopManifestV3, World } from '#shared/utils/terrain'
@@ -27,7 +34,7 @@ import {
 
 /**
  * A 60 m survey keeps the disk, margin included, to the sixteen chunks around the origin, so
- * every blob the manifest names is on disk; a 30 m drive keeps the slices near 210 KB.
+ * every blob the manifest names is on disk; a 30 m drive keeps the slices and traces near 225 KB.
  * Production uses a 500 m survey, which would weigh megabytes.
  */
 export const JOURNEY_FIXTURE = Object.freeze({
@@ -49,7 +56,8 @@ export interface JourneyFixture {
   stopManifest: StopManifestV3
   record: SegmentRecord
   segmentManifest: StoredSegmentManifest
-  slices: SegmentSlice[]
+  slices: WrittenSlice[]
+  traces: SliceTrace[]
   /** Journey key → bytes as the route serves them once inflated. */
   files: Map<string, Uint8Array>
 }
@@ -66,7 +74,7 @@ export function buildJourneyFixture(): JourneyFixture {
     start: { ...start },
     goal: { ...goal },
   })
-  const { manifest, slices } = sliceRecord(record)
+  const { manifest, slices, traces } = sliceRecord(record)
   const segmentManifest: StoredSegmentManifest = { ...manifest, segmentId, startedAt }
 
   const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
@@ -77,6 +85,7 @@ export function buildJourneyFixture(): JourneyFixture {
   files.set(stopManifest.revealedKey, encodeRevealedMask(mask))
   files.set(stopManifestKey(missionId, stopIndex), json(stopManifest))
   for (const slice of slices) files.set(segmentSliceKey(segmentId, slice.index), encodeSlice(slice))
+  for (const trace of traces) files.set(segmentTraceKey(segmentId, trace.index), encodeTrace(trace))
   files.set(segmentManifestKey(segmentId), json(segmentManifest))
-  return { world, disk, mask, stopManifest, record, segmentManifest, slices, files }
+  return { world, disk, mask, stopManifest, record, segmentManifest, slices, traces, files }
 }

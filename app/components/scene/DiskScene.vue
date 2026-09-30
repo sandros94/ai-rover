@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import type { ToneMapping } from 'three'
-import type { FogSurface, GridRect, GroundView, MapObject, RoverObject } from '#shared/utils/client'
+import type {
+  DrivenPoint,
+  FogSurface,
+  GridRect,
+  GroundView,
+  MapObject,
+  RoverObject,
+} from '#shared/utils/client'
 import { fogSurface, gridHeightAt, ROVER_ID } from '#shared/utils/client'
 import type { ChunkFog, TerrainChunk } from '#shared/utils/client/scene'
 import { chunkFromGrid, chunksFromGrid, flatFrame } from '#shared/utils/client/scene'
-import type { KeyframeBlock } from '#shared/utils/drive'
 import type { MapPoint } from '#shared/utils/mission'
 import type { HeightGrid } from '#shared/utils/terrain'
 import type { StopFog } from '~/composables/useStopFog'
@@ -40,7 +46,8 @@ const props = withDefaults(
     /** The 23 keyframe values at the playback time; without a drive the rover rests at `rest`. */
     frame?: Float32Array
     rest: { x: number; y: number; headingRad: number }
-    keyframes?: KeyframeBlock
+    /** The path driven, drawn up to `t`. */
+    driven?: DrivenPoint[]
     /** Sim seconds, for the path driven so far. */
     t?: number
     route?: MapPoint[]
@@ -66,7 +73,7 @@ const props = withDefaults(
     fog: undefined,
     survey: undefined,
     frame: undefined,
-    keyframes: undefined,
+    driven: () => [],
     t: 0,
     route: () => [],
     stops: () => [],
@@ -281,7 +288,7 @@ function onTap(id: string | null, pointerType: string, client: { x: number; y: n
       :height-range="heightRange"
       :height-at="heightAt"
       :stops="stops"
-      :keyframes="keyframes"
+      :driven="driven"
       :t="t"
       :route="route"
       :deaths="ghosts"

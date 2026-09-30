@@ -1,7 +1,13 @@
 import type { Mission, Segment, Stop } from '../../database/schema'
 import type { JourneyStore } from '../journey/store'
-import type { SegmentSlice } from '#shared/utils/drive'
-import { decodeSlice, parseStoredSegmentManifest, segmentSliceKey } from '#shared/utils/drive'
+import type { SegmentSlice, SliceTrace } from '#shared/utils/drive'
+import {
+  decodeSlice,
+  decodeTrace,
+  parseStoredSegmentManifest,
+  segmentSliceKey,
+  segmentTraceKey,
+} from '#shared/utils/drive'
 import type { RevealedMask, StopDisk, World } from '#shared/utils/terrain'
 import { computeStopDisk, decodeRevealedMask, defineWorld, worldHash } from '#shared/utils/terrain'
 import { LifecycleError } from './errors'
@@ -67,7 +73,8 @@ export async function loadRevealedMask(
 
 /**
  * Every vertex a segment's record revealed (disk-grid indices of its from-stop's disk), read back
- * from its published slices: the record is not kept anywhere else.
+ * from its published traces, or its slices for a manifest before version 3: the record is not
+ * kept anywhere else.
  */
 export async function loadRecordReveals(
   store: JourneyStore,
@@ -75,13 +82,31 @@ export async function loadRecordReveals(
 ): Promise<number[]> {
   const manifest = await store.getJson(segment.manifestKey)
   if (manifest === null) throw notPublished(segment.id, segment.manifestKey)
-  const { sliceSeconds } = parseStoredSegmentManifest(manifest)
+  const { sliceSeconds, version } = parseStoredSegmentManifest(manifest)
   // The last slice is released at the segment's end, one slice length after it starts.
   const count = Math.round(
     (segment.endsAt.getTime() - segment.startedAt.getTime()) / (sliceSeconds * 1000),
   )
-  const slices = await loadSlices(store, segment, { from: 0, to: count })
-  return slices.flatMap((slice) => slice.reveals.flatMap((reveal) => Array.from(reveal.vertices)))
+  const range = { from: 0, to: count }
+  const groups =
+    version >= 3
+      ? (await loadTraces(store, segment, range)).flatMap((trace) => trace.reveals)
+      : (await loadSlices(store, segment, range)).flatMap((slice) => slice.reveals ?? [])
+  return groups.flatMap((reveal) => Array.from(reveal.vertices))
+}
+
+/** Traces `from … to − 1` of a published segment, in order. */
+export async function loadTraces(
+  store: JourneyStore,
+  segment: Pick<Segment, 'id'>,
+  options: { from: number; to: number },
+): Promise<SliceTrace[]> {
+  return loadRange(options, async (index) => {
+    const key = segmentTraceKey(segment.id, index)
+    const bytes = await store.getInflated(key)
+    if (!bytes) throw notPublished(segment.id, key)
+    return decodeTrace(bytes)
+  })
 }
 
 /** Slices `from … to − 1` of a published segment, in order. */
@@ -90,15 +115,20 @@ export async function loadSlices(
   segment: Pick<Segment, 'id'>,
   options: { from: number; to: number },
 ): Promise<SegmentSlice[]> {
+  return loadRange(options, async (index) => {
+    const key = segmentSliceKey(segment.id, index)
+    const bytes = await store.getInflated(key)
+    if (!bytes) throw notPublished(segment.id, key)
+    return decodeSlice(bytes)
+  })
+}
+
+function loadRange<T>(
+  options: { from: number; to: number },
+  load: (index: number) => Promise<T>,
+): Promise<T[]> {
   const { from, to } = options
-  return Promise.all(
-    Array.from({ length: Math.max(0, to - from) }, async (_, k) => {
-      const key = segmentSliceKey(segment.id, from + k)
-      const bytes = await store.getInflated(key)
-      if (!bytes) throw notPublished(segment.id, key)
-      return decodeSlice(bytes)
-    }),
-  )
+  return Promise.all(Array.from({ length: Math.max(0, to - from) }, (_, k) => load(from + k)))
 }
 
 function notPublished(segmentId: string, key: string): LifecycleError {

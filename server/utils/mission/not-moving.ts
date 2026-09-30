@@ -7,10 +7,12 @@ import type { JourneyStore } from '../journey/store'
 import type { KeyframeBlock, SegmentSlice } from '#shared/utils/drive'
 import {
   encodeSlice,
+  encodeTrace,
   KEYFRAME_STRIDE,
   parseJourneyKey,
   parseStoredSegmentManifest,
   segmentSliceKey,
+  segmentTraceKey,
   sliceReleaseAt,
 } from '#shared/utils/drive'
 import type { MissionRules } from '#shared/utils/mission'
@@ -64,9 +66,9 @@ export async function notMovingStanding(
 
 /**
  * Fails the playing drive as not moving when the flags within the window reach the quorum and
- * the slices released at `now` (`0 … n − 1`) show under `progressM` over the window: slice `n`,
- * not yet out, is rewritten to end the drive where the rover stands, every later slice is
- * deleted, and the segment now ends at slice `n`'s release with the failure, settled then like
+ * the slices released at `now` (`0 … n − 1`) show under `progressM` over the window: slice `n`
+ * and its trace, not yet out, are rewritten to end the drive where the rover stands, every later
+ * slice and trace is deleted, and the segment now ends at slice `n`'s release with the failure, settled then like
  * any other. Nothing public changes before that release. Nothing happens when the drive already
  * ends with slice `n`, as after an earlier call. The blobs go first: a failure after them leaves
  * the row playing, and the next tick, seeing the same flags and the same released slices until
@@ -112,21 +114,24 @@ export async function failIfNotMoving(
   if (progress === null || progress >= rules.notMoving.progressM) return false
 
   const earlier = await loadSlices(store, driving, { from: 0, to: first })
-  const ending = stallEnding(framesOf([...earlier, ...recent], keyframeHz), {
-    sliceIndex: released,
-    sliceSeconds,
-    reason: 'flagged-not-moving',
-  })
-  await store.putImmutable(segmentSliceKey(driving.id, released), encodeSlice(ending), {
-    contentType: 'application/octet-stream',
-  })
+  const all = [...earlier, ...recent]
+  const ending = stallEnding(
+    { keyframes: framesOf(all, keyframeHz), events: all.flatMap((slice) => slice.events) },
+    { sliceIndex: released, sliceSeconds, reason: 'flagged-not-moving' },
+  )
+  const binary = { contentType: 'application/octet-stream' }
+  await store.putImmutable(segmentSliceKey(driving.id, released), encodeSlice(ending.slice), binary)
+  await store.putImmutable(segmentTraceKey(driving.id, released), encodeTrace(ending.trace), binary)
   for (const key of await store.listKeys(`segments/${driving.id}/`)) {
     const parsed = parseJourneyKey(key)
-    if (parsed?.kind === 'segment-slice' && parsed.index > released) await store.delete(key)
+    const later =
+      (parsed?.kind === 'segment-slice' || parsed?.kind === 'segment-trace') &&
+      parsed.index > released
+    if (later) await store.delete(key)
   }
   await endSegmentEarly(tx, driving.id, {
     endsAt: new Date(next),
-    outcome: ending.outcome,
+    outcome: ending.slice.outcome,
     now,
   })
   return true

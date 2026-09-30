@@ -1,7 +1,11 @@
 import type { KeyframeBlock } from '../drive/keyframes'
 import { interpolatePose, KEYFRAME_STRIDE } from '../drive/keyframes'
+import { frameOdometry } from '../drive/odometry'
 import type { DriveEvent, DriveOutcome, SegmentRecord } from '../drive/segment'
-import type { SegmentSlice } from '../drive/slices'
+import type { WrittenSlice } from '../drive/slices'
+import { latestRoute, sliceTotals } from '../drive/slices'
+import { statusInForce } from '../drive/status'
+import type { SliceTrace } from '../drive/traces'
 import { MissionError } from './errors'
 import type { MissionRules } from './rules'
 
@@ -64,16 +68,17 @@ export function backstopSlice(
 
 /**
  * The slice that ends a drive failed as not moving once slices `0 … sliceIndex − 1` are out,
- * `released` being their frames: the rover stands where the last of them left it, one frame at
- * the slice's start with no speed, a `stuck` event, and the failure. Its ground distance is the
- * sum of the released frames' steps.
+ * `released` being their frames and events: the rover stands where the last of them left it, one
+ * frame at the slice's start with no speed, a `stuck` event, and the failure, with the totals the
+ * released slices leave and a trace holding that one frame. Its ground distance is the sum of the
+ * released frames' steps.
  */
 export function stallEnding(
-  released: KeyframeBlock,
+  released: { keyframes: KeyframeBlock; events: readonly DriveEvent[] },
   options: { sliceIndex: number; sliceSeconds: number; reason: NotMovingReason },
-): SegmentSlice & { outcome: DriveOutcome } {
+): { slice: WrittenSlice & { outcome: DriveOutcome }; trace: SliceTrace } {
   const { sliceIndex, sliceSeconds, reason } = options
-  const { count, data } = released
+  const { count, data } = released.keyframes
   if (count === 0) {
     throw new MissionError(
       'INVALID_INPUT',
@@ -101,12 +106,24 @@ export function stallEnding(
   const headingRad = Math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
   const reasons = [reason]
   const stuck: DriveEvent = { t, type: 'stuck', x, y, details: { reasons } }
+  const frames = new Float32Array((count + 1) * S)
+  frames.set(data.subarray(0, count * S))
+  frames.set(last, count * S)
+  const before = released.events.filter((e) => e.t < t)
+  const totals = sliceTotals(
+    frameOdometry({ ...released.keyframes, count: count + 1, data: frames }),
+    count,
+    { status: statusInForce(before, t), route: latestRoute(before) },
+  )
   return {
-    index: sliceIndex,
-    keyframes: last,
-    events: [stuck],
-    reveals: [],
-    outcome: { kind: 'failed', reasons, distanceM, durationS: t, endPose: { x, y, headingRad } },
+    slice: {
+      index: sliceIndex,
+      keyframes: last,
+      events: [stuck],
+      totals,
+      outcome: { kind: 'failed', reasons, distanceM, durationS: t, endPose: { x, y, headingRad } },
+    },
+    trace: { index: sliceIndex, reveals: [], path: last.slice(0, 4) },
   }
 }
 
@@ -123,7 +140,7 @@ export function truncateRecord(
   let frames = 0
   while (frames < keyframes.count && keyframes.data[frames * KEYFRAME_STRIDE]! < cut) frames++
   const kept = prefix(keyframes, frames)
-  const ending = stallEnding(kept, options)
+  const { slice: ending } = stallEnding({ keyframes: kept, events: record.events }, options)
   const data = new Float32Array((frames + 1) * KEYFRAME_STRIDE)
   data.set(kept.data)
   data.set(ending.keyframes, frames * KEYFRAME_STRIDE)

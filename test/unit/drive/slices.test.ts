@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { computeStopDisk, defineWorld } from '#shared/utils/terrain'
-import type { DriveEvent, SegmentSlice, StoredSegmentManifest } from '#shared/utils/drive'
+import type {
+  DriveEvent,
+  SegmentSlice,
+  SliceTrace,
+  StoredSegmentManifest,
+  WrittenSlice,
+} from '#shared/utils/drive'
 import {
   DEFAULT_SLICE_SECONDS,
   decodeSlice,
+  decodeTrace,
   driveSegment,
   encodeSlice,
+  encodeTrace,
+  frameOdometry,
   KEYFRAME_STRIDE,
   MAX_SLICE_INDEX,
   parseJourneyKey,
@@ -13,12 +22,15 @@ import {
   parseStoredSegmentManifest,
   segmentManifestKey,
   segmentSliceKey,
+  segmentTraceKey,
   SLICE_HEADER_BYTES,
   sliceGate,
   sliceRecord,
   sliceReleaseAt,
+  TRACE_HEADER_BYTES,
+  TRACE_PATH_SECONDS,
 } from '#shared/utils/drive'
-import { driveErrorOf, revealedAfterStop } from './helpers'
+import { driveErrorOf, encodeLegacySlice, revealedAfterStop } from './helpers'
 
 const world = defineWorld({ seed: 'mars' })
 const disk = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 500 })
@@ -31,9 +43,9 @@ const { record } = driveSegment(world, {
   goal,
   revealRadiusM: 50,
 })
-const { manifest, slices } = sliceRecord(record)
+const { manifest, slices, traces } = sliceRecord(record)
 
-function concat(parts: SegmentSlice[]) {
+function concat(parts: SegmentSlice[], traced: SliceTrace[] = []) {
   const keyframes = new Float32Array(parts.reduce((n, s) => n + s.keyframes.length, 0))
   let offset = 0
   for (const s of parts) {
@@ -43,7 +55,7 @@ function concat(parts: SegmentSlice[]) {
   return {
     keyframes,
     events: parts.flatMap((s) => s.events),
-    reveals: parts.flatMap((s) => s.reveals),
+    reveals: traced.flatMap((t) => t.reveals),
     outcomes: parts.flatMap((s) => (s.outcome ? [s.outcome] : [])),
   }
 }
@@ -59,25 +71,90 @@ describe('sliceRecord on seed mars, 150 m', () => {
     slices.forEach((s, k) => expect(s.index).toBe(k))
   })
 
-  it('reproduces keyframes, events, reveals and outcome when concatenated', () => {
-    const joined = concat(slices)
+  it('reproduces keyframes, events and outcome from the slices, the reveals from the traces', () => {
+    expect(traces.filter((t) => t.reveals.length > 0).length).toBeGreaterThan(traces.length / 2)
+    expect(traces.map((t) => t.index)).toEqual(slices.map((s) => s.index))
+    const joined = concat(slices, traces)
+    expect(joined.keyframes).toEqual(record.keyframes.data)
+    expect(joined.events).toEqual(record.events)
+    expect(joined.reveals).toEqual(record.reveals)
+    expect(joined.outcomes).toEqual([record.outcome])
+    for (const slice of slices) expect(slice).not.toHaveProperty('reveals')
+  })
+
+  it('reproduces the record through the binary formats too', () => {
+    const joined = concat(
+      slices.map((s) => decodeSlice(encodeSlice(s))),
+      traces.map((t) => decodeTrace(encodeTrace(t))),
+    )
     expect(joined.keyframes).toEqual(record.keyframes.data)
     expect(joined.events).toEqual(record.events)
     expect(joined.reveals).toEqual(record.reveals)
     expect(joined.outcomes).toEqual([record.outcome])
   })
 
-  it('reproduces the record through the binary format too', () => {
-    const joined = concat(slices.map((s) => decodeSlice(encodeSlice(s))))
-    expect(joined.keyframes).toEqual(record.keyframes.data)
-    expect(joined.events).toEqual(record.events)
-    expect(joined.reveals).toEqual(record.reveals)
-    expect(joined.outcomes).toEqual([record.outcome])
+  it('keeps in each trace a path point every few seconds and the last frame of its slice', () => {
+    const every = TRACE_PATH_SECONDS * record.keyframes.hz
+    for (const [k, slice] of slices.entries()) {
+      const frames = slice.keyframes.length / KEYFRAME_STRIDE
+      const expected: number[] = []
+      for (let f = 0; f < frames; f++) {
+        const at = f * KEYFRAME_STRIDE
+        if (
+          Math.round(slice.keyframes[at]! * record.keyframes.hz) % every !== 0 &&
+          f !== frames - 1
+        )
+          continue
+        expected.push(...slice.keyframes.subarray(at, at + 4))
+      }
+      expect(Array.from(traces[k]!.path), `slice ${k}`).toEqual(expected)
+    }
+  })
+
+  it('opens each slice with the running totals of the frames and events before it', () => {
+    const odometry = frameOdometry(record.keyframes)
+    let frames = 0
+    for (const slice of slices) {
+      const start = slice.index * manifest.sliceSeconds
+      const { totals } = slice
+      expect(totals.groundM).toBe(odometry.groundM[frames])
+      expect(totals.wheelRad).toBe(odometry.wheelRad[frames])
+      const before = record.events.filter((e) => e.t < start)
+      expect(totals.status === null).toBe(before.length === 0)
+      expect(totals.status?.t ?? -1).toBeLessThan(start)
+      const replans = before.filter((e) => e.type === 'replan')
+      expect(totals.route).toEqual(replans.at(-1)?.details?.polyline)
+      // The trail reaches a whole window back once the drive has covered one.
+      const [ground] = totals.slipTrail[0] ?? [0]
+      expect(ground >= 1 || totals.groundM <= 1.05).toBe(true)
+      frames += slice.keyframes.length / KEYFRAME_STRIDE
+    }
+    expect(slices[0]!.totals).toEqual({ groundM: 0, wheelRad: 0, slipTrail: [], status: null })
+  })
+
+  it('carries the route of the latest replan from the slice after it on', () => {
+    const route = [
+      { x: 1, y: 2 },
+      { x: 40, y: 50 },
+    ]
+    const replan: DriveEvent = { t: 75, type: 'replan', x: 1, y: 2, details: { polyline: route } }
+    const events = [
+      ...record.events.filter((e) => e.t < 75),
+      replan,
+      ...record.events.filter((e) => e.t >= 75),
+    ]
+    const { slices: replanned } = sliceRecord({ ...record, events })
+    expect(replanned[2]!.totals.route).toBeUndefined()
+    expect(replanned[2]!.events).toContainEqual(replan)
+    const next = events.find((e) => e.type === 'replan' && e.t > 75)?.t ?? Infinity
+    const held = replanned.filter((slice) => slice.index >= 3 && slice.index * 30 <= next)
+    expect(held.length).toBeGreaterThan(0)
+    for (const slice of held) expect(slice.totals.route).toEqual(route)
   })
 
   it('keeps every item inside its slice window, t = 0 in the first', () => {
     const S = manifest.sliceSeconds
-    for (const s of slices) {
+    for (const [n, s] of slices.entries()) {
       const lo = s.index * S
       const hi = lo + S
       for (let k = 0; k < s.keyframes.length; k += KEYFRAME_STRIDE) {
@@ -85,7 +162,12 @@ describe('sliceRecord on seed mars, 150 m', () => {
         expect(t).toBeGreaterThanOrEqual(lo)
         expect(t).toBeLessThan(hi)
       }
-      for (const { t } of [...s.events, ...s.reveals]) {
+      const path = traces[n]!.path.filter((_, k) => k % 4 === 0)
+      for (const { t } of [
+        ...s.events,
+        ...traces[n]!.reveals,
+        ...Array.from(path, (t) => ({ t })),
+      ]) {
         expect(t).toBeGreaterThanOrEqual(lo)
         expect(t).toBeLessThan(hi)
       }
@@ -134,20 +216,22 @@ describe('sliceRecord on seed mars, 150 m', () => {
 })
 
 describe('segment manifest schema', () => {
-  it('states the keyframe layout: version 2 with stride 23', () => {
-    expect(manifest.version).toBe(2)
+  it('states the layout: version 3 with stride 23, totals and traces', () => {
+    expect(manifest.version).toBe(3)
     expect(manifest.stride).toBe(23)
   })
 
-  it('reads a version 1 manifest, whose stride is 19, and refuses a stride its version does not state', () => {
+  it('reads version 1 and 2 manifests and refuses a stride a version does not state', () => {
     const plain = JSON.parse(JSON.stringify(manifest))
     expect(parseSegmentManifest({ ...plain, version: 1, stride: 19 })).toMatchObject({
       version: 1,
       stride: 19,
     })
+    expect(parseSegmentManifest({ ...plain, version: 2 })).toMatchObject({ version: 2, stride: 23 })
     for (const [version, stride] of [
       [1, 23],
       [2, 19],
+      [3, 19],
     ]) {
       expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version, stride }))?.code).toBe(
         'INVALID_RECORD',
@@ -162,7 +246,7 @@ describe('segment manifest schema', () => {
 
   it('refuses an outcome field or a wrong version', () => {
     const plain = JSON.parse(JSON.stringify(manifest))
-    expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version: 3 }))?.code).toBe(
+    expect(driveErrorOf(() => parseSegmentManifest({ ...plain, version: 4 }))?.code).toBe(
       'INVALID_RECORD',
     )
     expect(
@@ -192,73 +276,60 @@ describe('segment manifest schema', () => {
   })
 })
 
-/** `slice` as format v1 wrote it: 19-value frames, no steering. */
-function encodeV1(slice: SegmentSlice): Uint8Array {
-  const v2 = encodeSlice(slice)
-  const frames = slice.keyframes.length / KEYFRAME_STRIDE
-  const tail = v2.subarray(SLICE_HEADER_BYTES + slice.keyframes.length * 4)
-  const bytes = new Uint8Array(SLICE_HEADER_BYTES + frames * 19 * 4 + tail.byteLength)
-  bytes.set(v2.subarray(0, SLICE_HEADER_BYTES), 0)
-  bytes[4] = 1
-  const view = new DataView(bytes.buffer)
-  for (let f = 0; f < frames; f++) {
-    for (let k = 0; k < 19; k++) {
-      view.setFloat32(
-        SLICE_HEADER_BYTES + (f * 19 + k) * 4,
-        slice.keyframes[f * KEYFRAME_STRIDE + k]!,
-        true,
-      )
-    }
-  }
-  bytes.set(tail, SLICE_HEADER_BYTES + frames * 19 * 4)
-  return bytes
-}
-
-describe('slice binary format v2', () => {
+describe('slice binary format v3', () => {
   const last = slices.at(-1)!
 
   it('writes the documented header', () => {
     const s = slices[1]!
     const bytes = encodeSlice(s)
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    expect(SLICE_HEADER_BYTES).toBe(23)
+    expect(SLICE_HEADER_BYTES).toBe(19)
     expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe('JRSL')
-    expect(view.getUint8(4)).toBe(2)
+    expect(view.getUint8(4)).toBe(3)
     expect(view.getUint8(5)).toBe(0)
     expect(view.getUint32(6, true)).toBe(1)
     expect(view.getUint32(10, true)).toBe(s.keyframes.length / KEYFRAME_STRIDE)
-    const eventBytes = view.getUint32(14, true)
-    const revealCount = view.getUint32(18, true)
-    expect(revealCount).toBe(s.reveals.reduce((n, r) => n + r.vertices.length, 0))
-    expect(view.getUint8(22)).toBe(0)
-    expect(view.getFloat32(23, true)).toBe(s.keyframes[0])
-    expect(bytes.byteLength).toBe(23 + s.keyframes.length * 4 + eventBytes + revealCount * 4)
-    const lastView = new DataView(encodeSlice(last).buffer)
-    expect(lastView.getUint8(22)).toBe(1)
+    const payloadBytes = view.getUint32(14, true)
+    expect(view.getUint8(18)).toBe(0)
+    expect(view.getFloat32(19, true)).toBe(s.keyframes[0])
+    expect(bytes.byteLength).toBe(19 + s.keyframes.length * 4 + payloadBytes)
+    const json = JSON.parse(new TextDecoder().decode(bytes.subarray(19 + s.keyframes.length * 4)))
+    expect(Object.keys(json)).toEqual(['events', 'totals'])
+    expect(new DataView(encodeSlice(last).buffer).getUint8(18)).toBe(1)
   })
 
   it('round-trips byte-identically, also from an unaligned view', () => {
-    const bytes = encodeSlice(last)
-    expect(decodeSlice(bytes)).toEqual(last)
-    expect(encodeSlice(decodeSlice(bytes))).toEqual(bytes)
-    const padded = new Uint8Array(bytes.byteLength + 1)
-    padded.set(bytes, 1)
-    expect(decodeSlice(padded.subarray(1))).toEqual(last)
+    for (const slice of [slices[3]!, last]) {
+      const bytes = encodeSlice(slice)
+      expect(decodeSlice(bytes)).toEqual(slice)
+      expect(encodeSlice(decodeSlice(bytes) as WrittenSlice)).toEqual(bytes)
+      const padded = new Uint8Array(bytes.byteLength + 1)
+      padded.set(bytes, 1)
+      expect(decodeSlice(padded.subarray(1))).toEqual(slice)
+    }
   })
 
-  it('reads a format v1 slice with its frames widened, the steering angles zero', () => {
-    const s = slices.find((slice) =>
-      slice.keyframes.some((value, k) => k % KEYFRAME_STRIDE >= 19 && value !== 0),
-    )!
-    expect(s).toBeDefined()
-    const decoded = decodeSlice(encodeV1(s))
-    expect(decoded.keyframes).toHaveLength(s.keyframes.length)
-    for (let k = 0; k < s.keyframes.length; k++) {
-      const field = k % KEYFRAME_STRIDE
-      expect(decoded.keyframes[k]).toBe(field < 19 ? s.keyframes[k] : 0)
+  it('reads format v2 and v1 slices with their reveals and no totals, v1 frames widened', () => {
+    const k = slices.findIndex(
+      (slice, n) =>
+        traces[n]!.reveals.length > 0 &&
+        slice.keyframes.some((value, f) => f % KEYFRAME_STRIDE >= 19 && value !== 0),
+    )
+    expect(k).toBeGreaterThanOrEqual(0)
+    const s = slices[k]!
+    const { reveals } = traces[k]!
+    const v2 = decodeSlice(encodeLegacySlice(s, reveals, 2))
+    expect(v2).toEqual({ index: s.index, keyframes: s.keyframes, events: s.events, reveals })
+    const v1 = decodeSlice(encodeLegacySlice(s, reveals, 1))
+    expect(v1.keyframes).toHaveLength(s.keyframes.length)
+    for (let f = 0; f < s.keyframes.length; f++) {
+      const field = f % KEYFRAME_STRIDE
+      expect(v1.keyframes[f]).toBe(field < 19 ? s.keyframes[f] : 0)
     }
-    expect(decoded.events).toEqual(s.events)
-    expect(decoded.reveals).toEqual(s.reveals)
+    expect(v1).toMatchObject({ events: s.events, reveals })
+    expect(v1).not.toHaveProperty('totals')
+    const ending = decodeSlice(encodeLegacySlice(last, traces.at(-1)!.reveals, 2))
+    expect(ending.outcome).toEqual(record.outcome)
   })
 
   it('reports each malformed buffer with its code', () => {
@@ -274,17 +345,32 @@ describe('slice binary format v2', () => {
     magic[0] = 0x58
     expect(code(magic)).toBe('INVALID_RECORD')
     const version = bytes.slice()
-    version[4] = 3
+    version[4] = 4
     expect(code(version)).toBe('UNSUPPORTED_VERSION')
     const flags = bytes.slice()
     flags[5] = 1
     expect(code(flags)).toBe('UNSUPPORTED_VERSION')
     const outcomeFlag = bytes.slice()
-    outcomeFlag[22] = 0
+    outcomeFlag[18] = 0
     expect(code(outcomeFlag)).toBe('INVALID_RECORD')
     const json = bytes.slice()
     json[SLICE_HEADER_BYTES + last.keyframes.length * 4] = 0x7b + 1
     expect(code(json)).toBe('INVALID_RECORD')
+    const legacy = encodeLegacySlice(last, traces.at(-1)!.reveals, 2)
+    expect(code(legacy.subarray(0, 21))).toBe('TRUNCATED')
+  })
+
+  it('refuses a format v3 slice without totals', () => {
+    const bytes = encodeSlice(slices[2]!)
+    const at = SLICE_HEADER_BYTES + slices[2]!.keyframes.length * 4
+    const json = JSON.parse(new TextDecoder().decode(bytes.subarray(at)))
+    delete json.totals
+    const body = new TextEncoder().encode(JSON.stringify(json))
+    const broken = new Uint8Array(at + body.byteLength)
+    broken.set(bytes.subarray(0, at))
+    broken.set(body, at)
+    new DataView(broken.buffer).setUint32(14, body.byteLength, true)
+    expect(driveErrorOf(() => decodeSlice(broken))?.code).toBe('INVALID_RECORD')
   })
 
   it('carries the stop events and refuses an event type outside the set', () => {
@@ -298,13 +384,80 @@ describe('slice binary format v2', () => {
     const paused = {
       ...last,
       events: [{ t: 0, type: 'pause', x: 0, y: 0 }],
-    } as unknown as SegmentSlice
+    } as unknown as WrittenSlice
     expect(driveErrorOf(() => encodeSlice(paused))?.code).toBe('INVALID_RECORD')
   })
 
   it('refuses to encode a slice whose keyframes are not whole frames', () => {
     const broken = { ...last, keyframes: last.keyframes.subarray(1) }
     expect(driveErrorOf(() => encodeSlice(broken))?.code).toBe('INVALID_RECORD')
+  })
+})
+
+describe('trace binary format v1', () => {
+  // Several groups, as a slice spanning more than one metre of driving holds.
+  const trace: SliceTrace = { ...traces[5]!, reveals: record.reveals.slice(0, 3) }
+
+  it('writes the documented header', () => {
+    const bytes = encodeTrace(trace)
+    const view = new DataView(bytes.buffer)
+    const vertices = trace.reveals.reduce((n, r) => n + r.vertices.length, 0)
+    expect(TRACE_HEADER_BYTES).toBe(22)
+    expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe('JRTR')
+    expect(view.getUint8(4)).toBe(1)
+    expect(view.getUint32(6, true)).toBe(trace.index)
+    expect(view.getUint32(10, true)).toBe(trace.reveals.length)
+    expect(view.getUint32(14, true)).toBe(vertices)
+    expect(view.getUint32(18, true)).toBe(trace.path.length / 4)
+    expect(view.getFloat64(22, true)).toBe(trace.reveals[0]!.t)
+    expect(bytes.byteLength).toBe(
+      22 + trace.reveals.length * 12 + vertices * 4 + trace.path.length * 4,
+    )
+  })
+
+  it('round-trips byte-identically, also from an unaligned view', () => {
+    const bytes = encodeTrace(trace)
+    expect(decodeTrace(bytes)).toEqual(trace)
+    expect(encodeTrace(decodeTrace(bytes))).toEqual(bytes)
+    const padded = new Uint8Array(bytes.byteLength + 3)
+    padded.set(bytes, 3)
+    expect(decodeTrace(padded.subarray(3))).toEqual(trace)
+    const empty = { index: 4, reveals: [], path: new Float32Array(0) }
+    expect(decodeTrace(encodeTrace(empty))).toEqual(empty)
+  })
+
+  it('reports each malformed buffer with its code', () => {
+    const bytes = encodeTrace(trace)
+    const code = (b: Uint8Array) => driveErrorOf(() => decodeTrace(b))?.code
+    expect(code(bytes.subarray(0, 10))).toBe('TRUNCATED')
+    expect(code(bytes.subarray(0, bytes.byteLength - 1))).toBe('TRUNCATED')
+    const extra = new Uint8Array(bytes.byteLength + 4)
+    extra.set(bytes)
+    expect(code(extra)).toBe('TRAILING_DATA')
+    const magic = bytes.slice()
+    magic[3] = 0x58
+    expect(code(magic)).toBe('INVALID_RECORD')
+    const version = bytes.slice()
+    version[4] = 2
+    expect(code(version)).toBe('UNSUPPORTED_VERSION')
+    const sizes = bytes.slice()
+    const view = new DataView(sizes.buffer)
+    const at = TRACE_HEADER_BYTES + trace.reveals.length * 8
+    view.setUint32(at, view.getUint32(at, true) + 1, true)
+    view.setUint32(at + 4, view.getUint32(at + 4, true) - 1, true)
+    expect(decodeTrace(sizes).reveals[0]!.vertices.length).toBe(
+      trace.reveals[0]!.vertices.length + 1,
+    )
+    view.setUint32(at, view.getUint32(at, true) + 1, true)
+    expect(code(sizes)).toBe('INVALID_RECORD')
+  })
+
+  it('refuses to encode a path of partial points or a reveal at no time', () => {
+    const code = (t: SliceTrace) => driveErrorOf(() => encodeTrace(t))?.code
+    expect(code({ ...trace, path: trace.path.subarray(1) })).toBe('INVALID_RECORD')
+    expect(code({ ...trace, reveals: [{ t: Number.NaN, vertices: new Uint32Array(1) }] })).toBe(
+      'INVALID_RECORD',
+    )
   })
 })
 
@@ -347,6 +500,10 @@ describe('journey keys', () => {
   it('builds segment keys from a validated id', () => {
     expect(segmentManifestKey('smoke-1')).toBe('segments/smoke-1/manifest.json')
     expect(segmentSliceKey('smoke-1', 4)).toBe('segments/smoke-1/slices/4.bin')
+    expect(segmentTraceKey('smoke-1', 4)).toBe('segments/smoke-1/traces/4.bin')
+    expect(driveErrorOf(() => segmentTraceKey('a', MAX_SLICE_INDEX + 1))?.code).toBe(
+      'INVALID_INPUT',
+    )
     for (const id of ['', 'a/b', '..', 'x'.repeat(65), 'a b']) {
       expect(driveErrorOf(() => segmentManifestKey(id))?.code).toBe('INVALID_INPUT')
     }
@@ -377,6 +534,11 @@ describe('journey keys', () => {
       segmentId: 'smoke-1',
       index: 7,
     })
+    expect(parseJourneyKey('segments/smoke-1/traces/7.bin')).toEqual({
+      kind: 'segment-trace',
+      segmentId: 'smoke-1',
+      index: 7,
+    })
     for (const key of [
       '',
       'other/x',
@@ -387,6 +549,8 @@ describe('journey keys', () => {
       'segments/a/slices/-1.bin',
       'segments/a/other.json',
       'segments/a/slices/10000000.bin',
+      'segments/a/traces/01.bin',
+      'segments/a/reveals/1.bin',
       'segments/a/slices/123456789012345.bin',
       `/terrain/${hash}/stops/0.json`,
       // Stops and masks were once keyed by world; those keys are no longer served.

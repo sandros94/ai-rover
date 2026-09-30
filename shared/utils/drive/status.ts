@@ -26,9 +26,12 @@ const TERMINAL: ReadonlySet<DriveEventType> = new Set(['arrived', 'blocked', 'ha
  * stop event (`steering`, `turning`, `assessing`, `imaging`) for its `durationS`, and `stopped` from the
  * terminal event on. A later event cuts a running stop short. Works on the events released so
  * far: a stop whose end has not been reached yet is still its last run.
+ *
+ * `since` is the run in force before the first of `events` (see {@link statusInForce}), for events
+ * that begin mid-drive; the track then continues it exactly as it would over every earlier event.
  */
-export function statusRuns(events: readonly DriveEvent[]): StatusRun[] {
-  const runs: StatusRun[] = []
+export function statusRuns(events: readonly DriveEvent[], since?: StatusRun | null): StatusRun[] {
+  const runs: StatusRun[] = since ? [{ ...since }] : []
   const push = (run: StatusRun): void => {
     const last = runs.at(-1)
     if (last && last.t === run.t) runs.pop()
@@ -36,7 +39,7 @@ export function statusRuns(events: readonly DriveEvent[]): StatusRun[] {
     if (previous?.status === run.status && run.status === 'driving') return
     runs.push(run)
   }
-  let resumeAt: number | undefined
+  let resumeAt = since && since.status !== 'driving' ? since.endsAt : undefined
   for (const event of events) {
     if (runs.length === 0 && event.type !== 'start') continue
     if (runs.at(-1)?.status === 'stopped') break
@@ -70,9 +73,24 @@ export function statusRuns(events: readonly DriveEvent[]): StatusRun[] {
 
 /**
  * The status run holding sim time `t`: the last run starting at or before it. Before the drive
- * starts, `stopped` at 0.
+ * starts, `stopped` at 0. `since` as {@link statusRuns} takes it.
  */
-export function statusAt(events: readonly DriveEvent[], t: number): StatusRun {
-  const runs = statusRuns(events)
-  return runs.findLast((run) => run.t <= t) ?? { t: 0, status: 'stopped' }
+export function statusAt(
+  events: readonly DriveEvent[],
+  t: number,
+  since?: StatusRun | null,
+): StatusRun {
+  return statusInForce(events, t, since) ?? { t: 0, status: 'stopped' }
+}
+
+/**
+ * The status run holding sim time `t` over `events` (and `since`), or null before the drive
+ * starts: what a slice records as in force at its start, from the events before it.
+ */
+export function statusInForce(
+  events: readonly DriveEvent[],
+  t: number,
+  since?: StatusRun | null,
+): StatusRun | null {
+  return statusRuns(events, since).findLast((run) => run.t <= t) ?? null
 }

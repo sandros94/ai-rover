@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { Ref } from 'vue'
-import type { KeyframeBlock } from '#shared/utils/drive'
+import type { DrivenPoint } from '#shared/utils/client'
 import type { MapPoint } from '#shared/utils/mission'
 
 /**
@@ -13,15 +13,14 @@ export interface MapTrack {
   /** The route the playing segment follows at the playback time. */
   plan: Ref<MapPoint[]>
   /** Where the playing segment has driven so far. */
-  driven: Ref<MapPoint[]>
+  driven: Ref<DrivenPoint[]>
   /**
    * Vertices the playing drive has seen so far, as disk-grid indices of this stop's disk: shown
    * lifted from the fog, never given to the planner, which knows only the stop's mask.
    */
   reveals: Ref<readonly { vertices: ArrayLike<number> }[]>
-  /** For the 3D view: the playback frame, the keyframes reached and the sim time. */
+  /** For the 3D view: the playback frame and the sim time. */
   frame: Ref<Float32Array | undefined>
-  keyframes: Ref<KeyframeBlock | undefined>
   t: Ref<number>
   /** The rover's speed and share of the segment driven, for its card; none without a drive. */
   motion: Ref<{ speedMps: number; progress: number | null } | undefined>
@@ -201,7 +200,6 @@ const stage = computed((): StageProps => {
     deaths: deathObjects.value,
     deathRadiusM: rules.value.failureZone.destinationRadiusM,
     frame: track.frame.value,
-    keyframes: track.keyframes.value,
     t: track.t.value,
     submissions: submissions.value,
     highlightId: props.highlight?.id ?? null,

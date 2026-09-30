@@ -14,8 +14,7 @@ import {
   Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import type { KeyframeBlock } from '#shared/utils/drive'
-import { KEYFRAME_FIELDS, KEYFRAME_STRIDE } from '#shared/utils/drive'
+import type { DrivenPoint } from '#shared/utils/client'
 import type { Point3 } from '#shared/utils/rover'
 import {
   ribbonMesh,
@@ -29,13 +28,13 @@ const props = withDefaults(
   defineProps<{
     /** The stops shown, the one the rover stands at or left from `current`; drawn as posts. */
     stops?: { x: number; y: number; current?: boolean }[]
-    /** The segment's keyframes; the path is drawn up to `t`. */
-    keyframes?: KeyframeBlock
+    /** The path driven; drawn up to `t`. */
+    driven?: DrivenPoint[]
     /** Sim seconds. */
     t?: number
     heightAt?: (x: number, y: number) => number | undefined
   }>(),
-  { stops: () => [], keyframes: undefined, t: 0, heightAt: undefined },
+  { stops: () => [], driven: () => [], t: 0, heightAt: undefined },
 )
 
 /** Path points closer than this to the last kept one are skipped. */
@@ -143,18 +142,15 @@ function drawPath(): void {
   }
   path = undefined
   pathTimes = []
-  const block = props.keyframes
-  if (!block || block.count < 2) return
-  const [T, X, Y, Z] = (['t', 'x', 'y', 'z'] as const).map((name) => KEYFRAME_FIELDS.indexOf(name))
+  const driven = props.driven
+  if (driven.length < 2) return
   const points: Point3[] = []
-  for (let k = 0; k < block.count; k++) {
-    const o = k * KEYFRAME_STRIDE
-    const x = block.data[o + X!]!
-    const y = block.data[o + Y!]!
+  for (const [k, { x, y, z, t }] of driven.entries()) {
     const last = points.at(-1)
-    if (last && Math.hypot(x - last.x, y - last.y) < PATH_SPACING_M && k < block.count - 1) continue
-    points.push({ x, y, z: props.heightAt?.(x, y) ?? block.data[o + Z!]! })
-    pathTimes.push(block.data[o + T!]!)
+    if (last && Math.hypot(x - last.x, y - last.y) < PATH_SPACING_M && k < driven.length - 1)
+      continue
+    points.push({ x, y, z: props.heightAt?.(x, y) ?? z })
+    pathTimes.push(t)
   }
   const mesh = ribbonMesh(points, PATH)
   path = new Mesh(overlayGeometry(mesh), pathMaterial)
@@ -179,7 +175,7 @@ function reveal(): void {
 }
 
 watch(() => [props.stops, props.heightAt], drawPosts, { immediate: true })
-watch(() => [props.keyframes, props.heightAt], drawPath, { immediate: true })
+watch(() => [props.driven, props.heightAt], drawPath, { immediate: true })
 watch(() => props.t, reveal)
 
 onBeforeUnmount(() => {
