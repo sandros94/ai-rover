@@ -41,19 +41,13 @@ import {
 import {
   backstopSlice,
   rankSubmissions,
+  reachedMask,
   shouldResetToPreviousStop,
   truncateRecord,
 } from '#shared/utils/mission'
 import { NavError } from '#shared/utils/nav'
-import {
-  computeStopDisk,
-  revealDisk,
-  revealedKey,
-  revealedOverDisk,
-  revealVertices,
-  stopManifestKey,
-  TerrainError,
-} from '#shared/utils/terrain'
+import type { StopKeys } from '#shared/utils/terrain'
+import { computeStopDisk, revealedOverDisk, TerrainError } from '#shared/utils/terrain'
 import { missionHistory } from './history'
 import { failIfNotMoving } from './not-moving'
 import { recordNextDue, roundStanding } from './round'
@@ -146,21 +140,23 @@ interface TickContext {
   store: JourneyStore
   mission: Mission
   now: Date
-  /** Index of the stop the tick settled, set once it is; primed after the commit. */
-  published?: number
+  /** The objects of the stop the tick settled, set once it is; primed after the commit. */
+  published?: StopKeys
 }
 
 type Assessment = Awaited<ReturnType<typeof assessGoal>>
 
 /**
- * What a settlement did before it took the lock: the stop reached, published under the index it
- * takes (its disk, and the mask with the drive's reveals and the new viewshed), and after a stop
- * short each open submission of the round beside it planned and judged again from there, keyed by
- * submission id.
+ * What a settlement did before it took the lock: the stop reached, published under the keys its
+ * drive and its mask name (its disk, and the mask of the stop left, as `fromRevealedKey` names it,
+ * with the drive's reveals and the new viewshed), and after a stop short each open submission of
+ * the round beside it planned and judged again from there, keyed by submission id. Nothing in it
+ * depends on the index the stop takes, which is assigned under the lock.
  */
 interface PreparedSettlement {
   segmentId: string
-  stopIndex: number
+  fromRevealedKey: string
+  keys: StopKeys
   assessments: Map<string, Assessment>
 }
 
@@ -200,11 +196,12 @@ interface PublishedDrive {
  *
  * Only rows are written under the per-mission lock. Everything slow happens before it: Jev
  * re-judgments, planning and simulating the winner, and every blob of the stop reached and of the
- * winner's drive. Blobs are immutable and keyed by mission, stop and segment, so writing them
- * first is safe: a row never names a blob that is not there, and a blob no row names is never
- * served. Under the lock the tick checks that the mission is still where the preparation found
- * it; otherwise it applies nothing (`skipped: 'changed'`) and the next tick prepares again.
- * Every step is logged with its duration (see {@link TickRun}).
+ * winner's drive. Blobs are immutable and named by what produced them (a stop by the drive that
+ * reached it and its mask, a drive by its content), never by a position a tick working from an
+ * old snapshot could guess, so writing them first is safe: a row never names a blob that is not
+ * there, and a blob no row names is never served. Under the lock the tick checks that the mission
+ * is still where the preparation found it; otherwise it applies nothing (`skipped: 'changed'`)
+ * and the next tick prepares again. Every step is logged with its duration (see {@link TickRun}).
  */
 export async function tickMission(db: DB, options: TickOptions): Promise<TickResult> {
   const run = new TickRun(options.missionId)
@@ -240,7 +237,7 @@ async function tickPass(db: DB, options: TickOptions, run: TickRun): Promise<Tic
     : null
   const closing = moving ? null : await prepareClose(db, { store, mission: snapshot, now, run })
 
-  let published: number | undefined
+  let published: StopKeys | undefined
   const ticked = await underMissionLock(db, { missionId, lock }, async (tx) => {
     const result: TickResult = { ...idle }
     const mission = await getMission(tx, missionId)
@@ -277,16 +274,17 @@ async function tickPass(db: DB, options: TickOptions, run: TickRun): Promise<Tic
   }
   run.step(moving ? 'settle-apply' : 'close-apply')
   if (ticked.skipped === 'changed') run.step('changed')
-  if (published !== undefined) void primeStop(missionId, published)
+  if (published) void primeStop(published)
   return ticked
 }
 
 /**
  * Runs `apply` in a transaction holding the mission's advisory lock, with every lock wait inside
  * bounded by {@link LOCK_TIMEOUT} and every statement by {@link STATEMENT_TIMEOUT}. `busy` when
- * `lock` is `try` and a lock was held.
+ * `lock` is `try` and a lock was held. Whatever changes a mission's rows beside the tick takes it
+ * too, so the tick never applies a preparation the change made stale.
  */
-async function underMissionLock<T>(
+export async function underMissionLock<T>(
   db: DB,
   options: { missionId: string; lock: MissionLock },
   apply: (tx: DB) => Promise<T>,
@@ -324,8 +322,9 @@ async function underMissionLock<T>(
 /**
  * The settlement of `driving` due at `now`, computed and published without a transaction or a
  * lock: null when the drive is not due or it failed (a failure only records the death). The stop
- * reached is published under the index it takes once created. The snapshot may be overtaken
- * before the lock is taken; {@link settle} reconciles it.
+ * reached is derived from the drive alone (its from-stop, its record, its id), so a tick that
+ * prepares a drive another tick has already settled publishes the same objects again. The
+ * snapshot may be overtaken before the lock is taken; {@link settle} reconciles it.
  */
 async function prepareSettlement(
   db: DB,
@@ -344,18 +343,14 @@ async function prepareSettlement(
   if (outcome.kind === 'failed') return null
 
   const world = missionWorld(mission)
+  const radius = mission.config.rules.stopRadiusM
   const from = await getStop(db, driving.fromStopId)
-  const seen = revealVertices(
-    await loadRevealedMask(store, from),
-    stopDisk(world, from, { radius: mission.config.rules.stopRadiusM }),
-    await loadRecordReveals(store, driving),
-  )
   const { x, y } = outcome.endPose
-  const disk = computeStopDisk(world, {
-    center: { x, y },
-    radius: mission.config.rules.stopRadiusM,
-  })
-  const mask = revealDisk(seen, disk)
+  const disk = computeStopDisk(world, { center: { x, y }, radius })
+  const mask = reachedMask(
+    { mask: await loadRevealedMask(store, from), disk: stopDisk(world, from, { radius }) },
+    { reveals: await loadRecordReveals(store, driving), disk },
+  )
   const assessments = new Map<string, Assessment>()
 
   const beside = await getOpenRound(db, mission.id)
@@ -380,11 +375,16 @@ async function prepareSettlement(
       assessments.set(submission.id, assessed)
     }
   }
-  const stopIndex = await nextStopIndex(db, mission.id)
   run.step('settle-prepare')
-  await publishStop(store, { world, disk, mask, missionId: mission.id, stopIndex })
+  const { keys } = await publishStop(store, {
+    world,
+    disk,
+    mask,
+    missionId: mission.id,
+    reachedBy: driving.id,
+  })
   run.step('settle-publish')
-  return { segmentId: driving.id, stopIndex, assessments }
+  return { segmentId: driving.id, fromRevealedKey: from.revealedKey, keys, assessments }
 }
 
 /**
@@ -393,8 +393,9 @@ async function prepareSettlement(
  * viewshed from the new stop, and the round beside the drive moves to it; after a stop short its
  * anchor moves there too and its open submissions take the assessments prepared from there.
  * Failed: the death is recorded, the round beside the drive is voided and a fresh one opens at the
- * stop the rover retries from. Without a preparation for this drive and this stop index nothing
- * is settled; the next tick prepares again.
+ * stop the rover retries from. Without a preparation for this drive over the mask its from-stop
+ * holds now (a repair may have replaced it since) nothing is settled; the next tick prepares
+ * again. The stop takes its index here, under the lock.
  */
 async function settle(
   tx: DB,
@@ -422,18 +423,17 @@ async function settle(
     return { settled: { segmentId: driving.id, status: 'failed' }, opened: { roundId: fresh.id } }
   }
 
-  const index = await nextStopIndex(tx, mission.id)
-  if (prepared?.segmentId !== driving.id || prepared.stopIndex !== index) {
+  if (prepared?.segmentId !== driving.id || prepared.fromRevealedKey !== from.revealedKey) {
     return { settled: null, opened: null, skipped: 'changed' }
   }
   const reached = await createStop(tx, {
     missionId: mission.id,
-    index,
+    index: await nextStopIndex(tx, mission.id),
     x,
     y,
     headingRad,
-    manifestKey: stopManifestKey(mission.id, index),
-    revealedKey: revealedKey(mission.id, index),
+    manifestKey: prepared.keys.manifestKey,
+    revealedKey: prepared.keys.revealedKey,
     fromSegmentId: driving.id,
   })
 
@@ -444,7 +444,7 @@ async function settle(
     if (short) await applyAssessments(tx, beside, prepared.assessments)
     await reanchorRound(tx, beside.id, { fromStopId: reached.id, anchor })
   }
-  context.published = index
+  context.published = prepared.keys
   await settleSegment(tx, driving.id, { status: outcome.kind, toStopId: reached.id, now })
   await setCurrentStop(tx, mission.id, reached.id)
   return { settled: { segmentId: driving.id, status: outcome.kind }, opened: null }

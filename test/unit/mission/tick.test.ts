@@ -31,6 +31,18 @@ import {
   segmentTraceKey,
 } from '#shared/utils/drive'
 import { NavError } from '#shared/utils/nav'
+import {
+  chunksNearestFirst,
+  computeStopDisk,
+  decodeDiskPack,
+  decodeRevealedMask,
+  defineWorld,
+  encodeRevealedMask,
+  parseStopManifest,
+  revealDisk,
+  revealVertices,
+} from '#shared/utils/terrain'
+import { loadRecordReveals } from '#server/utils/mission/terrain'
 import { memoryJevCache } from '../jev/helpers'
 import { forced, stopShortAt } from './forced'
 import {
@@ -160,14 +172,18 @@ describe('priming the CDN', () => {
       const m = await stoppingShort()
       // Landing primes stop 0; starting a drive primes nothing.
       expect(primed).toEqual(
-        stopPrimeKeys(m.missionId, 0).map((key) => `https://rover.example/journey/${key}`),
+        stopPrimeKeys(m.published.keys).map((key) => `https://rover.example/journey/${key}`),
       )
       primed.length = 0
       events.length = 0
       await m.tick(m.driving.endsAt)
       await vi.waitFor(() => expect(primed).toHaveLength(3))
+      const [, reached] = await listStops(db, m.missionId)
+      const { packKey } = parseStopManifest(await m.store.getJson(reached!.manifestKey))
       expect(primed).toEqual(
-        stopPrimeKeys(m.missionId, 1).map((key) => `https://rover.example/journey/${key}`),
+        stopPrimeKeys({ ...reached!, packKey: packKey! }).map(
+          (key) => `https://rover.example/journey/${key}`,
+        ),
       )
       // After the settlement's transaction; the close it made due runs in a second one.
       expect(events.indexOf('prime')).toBeGreaterThan(events.indexOf('end'))
@@ -614,6 +630,62 @@ describe('the mission lock', () => {
     expect(meanwhile?.settled).toEqual({ segmentId: driving.id, status: 'arrived' })
     expect(tick).toMatchObject({ settled: null, closed: null, started: null, opened: null })
     expect((await listStops(db, m.missionId)).map((stop) => stop.index)).toEqual([0, 1])
+  })
+
+  it('keeps the next stop whole when a tick holding an old snapshot settles a drive already settled', async () => {
+    let race: (() => Promise<unknown>) | undefined
+    const m = await stoppingShort(async () => {
+      const run = race
+      race = undefined
+      await run?.()
+      return {}
+    })
+    const written = new Map<string, Uint8Array[]>()
+    onPut = (key, bytes) => {
+      if (bytes) written.set(key, [...(written.get(key) ?? []), bytes])
+    }
+    // Tick B has read the drive as still driving; while it judges the waiting goals again, tick A
+    // settles the drive, starts the next one, and commits.
+    let meanwhile: Awaited<ReturnType<typeof m.tick>> | undefined
+    race = async () => {
+      meanwhile = await m.tick(m.driving.endsAt)
+    }
+    const stale = await m.tick(m.driving.endsAt)
+    expect(meanwhile?.settled).toEqual({ segmentId: m.driving.id, status: 'stopped-short' })
+    expect(meanwhile?.started).not.toBeNull()
+    expect(stale.settled).toBeNull()
+    // Whatever both published for the same drive, they published in the same bytes.
+    for (const [key, writes] of written) {
+      for (const bytes of writes) expect([key, bytes]).toEqual([key, writes[0]])
+    }
+
+    const next = await getSegment(db, meanwhile!.started!.segmentId)
+    const settled = await m.tick(next.endsAt)
+    expect(settled.settled?.segmentId).toBe(next.id)
+    const [, reached, arrived] = await listStops(db, m.missionId)
+    expect(arrived!.fromSegmentId).toBe(next.id)
+
+    // Its mask: the one it left from, what the drive revealed, and the viewshed where it ended.
+    const world = defineWorld({ seed: 'mars' })
+    const radius = SMALL_RULES.stopRadiusM
+    const left = computeStopDisk(world, { center: reached!, radius })
+    const disk = computeStopDisk(world, { center: arrived!, radius })
+    const expected = revealDisk(
+      revealVertices(
+        decodeRevealedMask((await m.store.getInflated(reached!.revealedKey))!),
+        left,
+        await loadRecordReveals(m.store, next),
+      ),
+      disk,
+    )
+    expect(await m.store.getInflated(arrived!.revealedKey)).toEqual(encodeRevealedMask(expected))
+    // Its pack: its own disk's chunks, as its manifest lists them.
+    const manifest = parseStopManifest(await m.store.getJson(arrived!.manifestKey))
+    expect(manifest.stop).toMatchObject({ x: arrived!.x, y: arrived!.y })
+    expect(manifest.revealedKey).toBe(arrived!.revealedKey)
+    const pack = decodeDiskPack((await m.store.getInflated(manifest.packKey!))!)
+    const own = chunksNearestFirst(disk.chunks, { center: disk.center, chunkSize: 64 })
+    expect(pack.map(({ cx, cy }) => ({ cx, cy }))).toEqual(own.map(({ cx, cy }) => ({ cx, cy })))
   })
 
   /**

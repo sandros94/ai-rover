@@ -3,6 +3,7 @@ import { decodeSlice, parseStoredSegmentManifest } from '../drive/slices'
 import type { SliceTrace } from '../drive/traces'
 import { decodeTrace, decodeTraceBlock, TRACE_BLOCK } from '../drive/traces'
 import {
+  parseJourneyKey,
   segmentManifestKey,
   segmentSliceKey,
   segmentTraceBlockKey,
@@ -11,13 +12,7 @@ import {
 import type { Chunk } from '../terrain/chunk'
 import { decodeChunk } from '../terrain/encode'
 import type { StopManifest } from '../terrain/manifest'
-import {
-  chunkKey,
-  parseStopManifest,
-  revealedKey,
-  stopManifestKey,
-  stopPackKey,
-} from '../terrain/manifest'
+import { chunkKey, parseStopManifest } from '../terrain/manifest'
 import { readDiskPack } from '../terrain/pack'
 import { TerrainError } from '../terrain/errors'
 import type { RevealedMask } from '../terrain/revealed'
@@ -35,16 +30,21 @@ export type Released<T> =
   /** No such slice: past the segment's end, or an unknown segment. */
   | { status: 'missing' }
 
+/**
+ * A stop's objects are read by the keys the server hands out, never built from a stop's position
+ * in the journey: the manifest by the key the mission state or a drive names (`manifestKey`), the
+ * mask and the pack by the keys that manifest names.
+ */
 export interface JourneyClient {
-  getStopManifest(missionId: string, stopIndex: number): Promise<StopManifest>
-  getRevealedMask(missionId: string, stopIndex: number): Promise<RevealedMask>
+  getStopManifest(manifestKey: string): Promise<StopManifest>
+  /** The mask a manifest names (`revealedKey`). */
+  getRevealedMask(revealedKey: string): Promise<RevealedMask>
   getChunk(worldHash: string, cx: number, cy: number): Promise<Chunk>
   /**
-   * The stop's disk pack as a stream of chunks, decoded as the bytes arrive; null when the stop
-   * has no pack, as stops published before packs existed. Breaking off the iteration cancels the
-   * download.
+   * The disk pack a manifest names (`packKey`) as a stream of chunks, decoded as the bytes arrive;
+   * null when it is not stored. Breaking off the iteration cancels the download.
    */
-  getStopPack(missionId: string, stopIndex: number): Promise<AsyncIterable<Chunk> | null>
+  getStopPack(packKey: string): Promise<AsyncIterable<Chunk> | null>
   getSegmentManifest(segmentId: string): Promise<StoredSegmentManifest>
   getSlice(segmentId: string, sliceIndex: number): Promise<Released<SegmentSlice>>
   getTrace(segmentId: string, sliceIndex: number): Promise<Released<SliceTrace>>
@@ -152,18 +152,29 @@ export function createJourneyClient(
     return { status: 'ready', value }
   }
 
+  /** Refuses a key that names no stop object, before any request. */
+  function stopKey(key: string, what: string): string {
+    if (parseJourneyKey(key)?.kind !== 'stop') {
+      throw new ClientError(
+        'INVALID_INPUT',
+        `${what} key "${key}" names no stop object; pass the key the mission state or the stop's manifest names.`,
+      )
+    }
+    return key
+  }
+
   const json = (bytes: Uint8Array): unknown =>
     JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
 
   return {
-    async getStopManifest(missionId, stopIndex) {
-      const key = stopManifestKey(missionId, stopIndex)
+    async getStopManifest(manifestKey) {
+      const key = stopKey(manifestKey, 'Stop manifest')
       const bytes = await required(key, 'Stop manifest')
       return decode(key, 'Stop manifest', bytes, (b) => parseStopManifest(json(b)))
     },
 
-    async getRevealedMask(missionId, stopIndex) {
-      const key = revealedKey(missionId, stopIndex)
+    async getRevealedMask(revealedKey) {
+      const key = stopKey(revealedKey, 'Revealed mask')
       return decode(key, 'Revealed mask', await required(key, 'Revealed mask'), decodeRevealedMask)
     },
 
@@ -179,8 +190,8 @@ export function createJourneyClient(
       return chunk
     },
 
-    async getStopPack(missionId, stopIndex) {
-      const key = stopPackKey(missionId, stopIndex)
+    async getStopPack(packKey) {
+      const key = stopKey(packKey, 'Disk pack')
       const response = await request(key)
       if (response.status === 404) return null
       // A body-less answer reads as an empty pack, which the decoder refuses as truncated.

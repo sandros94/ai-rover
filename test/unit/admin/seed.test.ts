@@ -7,7 +7,6 @@ import { listStops } from '#server/repositories/stops'
 import type { AdminContext } from '#server/utils/admin/access'
 import { defineAdminSeedHandlerWith, defineAdminStatusHandlerWith } from '#server/utils/admin/seed'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
-import { stopManifestKey } from '#shared/utils/terrain'
 import { createTestDb, memoryStore, tableCounts } from '../mission/helpers'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
@@ -108,7 +107,7 @@ describe('POST /api/admin/seed', () => {
     const [stop] = await listStops(db, mission.id)
     expect(stop).toMatchObject({ id: landed.stopId, index: 0, x: 12, y: -8 })
     expect((await getOpenRound(db, mission.id))?.id).toBe(landed.roundId)
-    expect(await store.has(stopManifestKey(mission.id, 0))).toBe(true)
+    expect(await store.has(stop!.manifestKey)).toBe(true)
   })
 
   it('answers 409 once a mission exists and changes nothing', async () => {

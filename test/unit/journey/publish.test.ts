@@ -10,7 +10,8 @@ import {
   generateChunk,
   parseStopManifest,
   revealDisk,
-  stopManifestKey,
+  revealedMaskDigest,
+  stopKeys,
   worldHash,
 } from '#shared/utils/terrain'
 import {
@@ -36,6 +37,8 @@ const world = defineWorld({ seed: 'mars' })
 const disk = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 150 })
 const mask = revealDisk(createRevealedMask(world), disk)
 const missionId = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+/** The drive that reached a stop. */
+const SEGMENT = '0190a1b2-c3d4-8e5f-8a9b-0c1d2e3f4a5c'
 
 describe('putAll', () => {
   const bytes = () => new Uint8Array([1, 2, 3])
@@ -83,9 +86,10 @@ describe('publishStop', () => {
   it('writes every chunk and the mask, then the pack, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
-    const manifestKey = stopManifestKey(missionId, 0)
-    expect(result.manifestKey).toBe(manifestKey)
+    const result = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
+    const maskDigest = revealedMaskDigest(encodeRevealedMask(mask))
+    expect(result.keys).toEqual(stopKeys(missionId, { reachedBy: null, maskDigest }))
+    const { manifestKey } = result.keys
     expect(blobs.writes).toHaveLength(disk.chunks.length + 3)
     const manifest = parseStopManifest(await store.getJson(manifestKey))
     expect(manifest).toMatchObject({ missionId, worldHash: worldHash(world) })
@@ -104,8 +108,8 @@ describe('publishStop', () => {
 
   it('packs exactly the listed chunks, in manifest order, as the chunk blobs hold them', async () => {
     const store = createJourneyStore({ store: new MemoryBlobs() })
-    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
-    const manifest = parseStopManifest(await store.getJson(result.manifestKey))
+    const result = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
+    const manifest = parseStopManifest(await store.getJson(result.keys.manifestKey))
     const packKey = manifest.packKey!
     const packed = decodeDiskPack((await store.getInflated(packKey))!)
     expect(packed.map(({ cx, cy }) => ({ cx, cy }))).toEqual(
@@ -121,35 +125,52 @@ describe('publishStop', () => {
   it('skips chunks already stored on a later stop', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
+    await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
     blobs.writes.length = 0
-    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 1 })
+    const result = await publishStop(store, { world, disk, mask, missionId, reachedBy: SEGMENT })
     expect(result.skipped).toHaveLength(disk.chunks.length)
-    const manifest = parseStopManifest(await store.getJson(stopManifestKey(missionId, 1)))
     // Each stop has its own pack, even when every chunk it holds is stored already.
-    expect(blobs.writes).toEqual([
-      manifest.revealedKey,
-      manifest.packKey,
-      stopManifestKey(missionId, 1),
-    ])
+    const { manifestKey, revealedKey, packKey } = result.keys
+    expect(blobs.writes).toEqual([revealedKey, packKey, manifestKey])
+    expect(manifestKey).toMatch(
+      new RegExp(`^missions/${missionId}/stops/${SEGMENT}\\.[0-9a-f]{16}\\.json$`),
+    )
+  })
+
+  it('names the objects of one drive after another starting mask apart, its pack alike', async () => {
+    const store = createJourneyStore({ store: new MemoryBlobs() })
+    const again = await publishStop(store, { world, disk, mask, missionId, reachedBy: SEGMENT })
+    const more = revealDisk(mask, computeStopDisk(world, { center: { x: 60, y: 0 }, radius: 60 }))
+    const other = await publishStop(store, {
+      world,
+      disk,
+      mask: more,
+      missionId,
+      reachedBy: SEGMENT,
+    })
+    expect(other.keys.revealedKey).not.toBe(again.keys.revealedKey)
+    expect(other.keys.manifestKey).not.toBe(again.keys.manifestKey)
+    expect(other.keys.packKey).toBe(again.keys.packKey)
+    expect(await store.getInflated(again.keys.revealedKey)).toEqual(encodeRevealedMask(mask))
+    expect(await store.getInflated(other.keys.revealedKey)).toEqual(encodeRevealedMask(more))
   })
 
   it('run again after being cut short, writes only what is missing, then the manifest', async () => {
     const blobs = new MemoryBlobs()
     const store = createJourneyStore({ store: blobs })
-    await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
-    const manifest = parseStopManifest(await store.getJson(stopManifestKey(missionId, 0)))
-    const lost = [manifest.chunks[2]!.key, manifest.packKey!, stopManifestKey(missionId, 0)]
+    const { keys } = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
+    const manifest = parseStopManifest(await store.getJson(keys.manifestKey))
+    const lost = [manifest.chunks[2]!.key, manifest.packKey!, keys.manifestKey]
     for (const key of lost) blobs.blobs.delete(key)
     blobs.writes.length = 0
-    const result = await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
+    const result = await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
     expect(blobs.writes).toEqual(lost)
     expect(result.skipped).toHaveLength(disk.chunks.length)
     expect(result.skipped).toContain(manifest.revealedKey)
-    // With the pack stored too, only the manifest is written again.
+    // With everything stored, publishing again writes nothing.
     blobs.writes.length = 0
-    await publishStop(store, { world, disk, mask, missionId, stopIndex: 0 })
-    expect(blobs.writes).toEqual([stopManifestKey(missionId, 0)])
+    await publishStop(store, { world, disk, mask, missionId, reachedBy: null })
+    expect(blobs.writes).toEqual([])
   })
 })
 

@@ -372,7 +372,6 @@ const shortcuts = [{ key: 'escape', label: 'Clear the focus', run: mapFocus.clea
             v-if="focused"
             :key="focused.id"
             :object="focused"
-            :mission-id="state.mission.id"
             :rules="state.mission.rules"
             :submission="focusedSubmission"
           />

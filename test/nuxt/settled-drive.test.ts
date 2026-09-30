@@ -19,8 +19,10 @@ import type { MissionStateJson } from '~/composables/useMissionState'
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
 import { JOURNEY_FIXTURE, journeyFixture } from '../unit/client/helpers'
 
-const { missionId, stopIndex, segmentId, startedAt } = JOURNEY_FIXTURE
-const { record, segmentManifest, slices, files } = journeyFixture()
+const { missionId, segmentId, startedAt } = JOURNEY_FIXTURE
+const { record, segmentManifest, slices, files, stopKeys } = journeyFixture()
+/** The stop the drive reached: nothing of it is served, as the drive's replay needs none. */
+const REACHED = `missions/${missionId}/stops/1.json`
 const { sliceSeconds } = segmentManifest
 const last = slices.length - 1
 /** The segment row's end: the release of its last slice from the row's start. */
@@ -60,7 +62,7 @@ async function journeyFetch(input: string): Promise<Response> {
 }
 
 function state(): MissionStateJson {
-  const stop = { id: 's0', index: stopIndex, x: 0, y: 0, headingRad: 0 }
+  const stop = { id: 's0', index: 0, x: 0, y: 0, headingRad: 0 }
   const { x, y, headingRad } = record.outcome.endPose
   return {
     now: new Date(endsAt + 60_000).toISOString(),
@@ -71,7 +73,7 @@ function state(): MissionStateJson {
       createdAt: '2026-09-01T00:00:00.000Z',
       rules: structuredClone(DEFAULT_MISSION_RULES),
     },
-    currentStop: { id: 's1', index: stopIndex + 1, x, y, headingRad },
+    currentStop: { id: 's1', index: 1, x, y, headingRad, manifestKey: REACHED },
     round: null,
     segment: null,
     release: null,
@@ -86,8 +88,8 @@ function state(): MissionStateJson {
       distanceM: record.outcome.distanceM,
     },
     trail: [
-      { index: stopIndex, x: 0, y: 0, reachedBy: null },
-      { index: stopIndex + 1, x, y, reachedBy: null },
+      { index: 0, x: 0, y: 0, manifestKey: stopKeys.manifestKey, reachedBy: null },
+      { index: 1, x, y, manifestKey: REACHED, reachedBy: null },
     ],
     deaths: [],
     tally: {

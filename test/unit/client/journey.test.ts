@@ -8,7 +8,10 @@ import {
 import { ClientError, createJourneyClient } from '#shared/utils/client'
 import { JOURNEY_FIXTURE, journeyFixture, readRecord, recordsFetch } from './helpers'
 
-const { missionId, stopIndex, segmentId, startedAt } = JOURNEY_FIXTURE
+const { missionId, segmentId, startedAt } = JOURNEY_FIXTURE
+const { manifestKey, revealedKey, packKey } = journeyFixture().stopKeys
+/** A stop key of the fixture's mission that nothing is stored under. */
+const NOWHERE = `missions/${missionId}/stops/9.json`
 
 async function clientErrorOf(promise: Promise<unknown>): Promise<ClientError | undefined> {
   try {
@@ -34,13 +37,14 @@ describe('createJourneyClient over the recorded journey', () => {
   it('decodes the stop manifest', async () => {
     const { fetch, calls } = recordsFetch()
     const client = createJourneyClient({ fetch })
-    expect(await client.getStopManifest(missionId, stopIndex)).toEqual(fixture.stopManifest)
-    expect(calls).toEqual([`/journey/missions/${missionId}/stops/0.json`])
+    expect(await client.getStopManifest(manifestKey)).toEqual(fixture.stopManifest)
+    expect(calls).toEqual([`/journey/${manifestKey}`])
   })
 
   it('decodes the revealed mask', async () => {
     const client = createJourneyClient({ fetch: recordsFetch().fetch })
-    expect(await client.getRevealedMask(missionId, stopIndex)).toEqual(fixture.mask)
+    expect(fixture.stopManifest.revealedKey).toBe(revealedKey)
+    expect(await client.getRevealedMask(revealedKey)).toEqual(fixture.mask)
   })
 
   it('decodes every chunk the manifest lists', async () => {
@@ -60,7 +64,7 @@ describe('createJourneyClient over the recorded journey', () => {
   it('streams the disk pack: every listed chunk, in manifest order, from one request', async () => {
     const { fetch, calls } = recordsFetch()
     const client = createJourneyClient({ fetch })
-    const pack = await client.getStopPack(missionId, stopIndex)
+    const pack = await client.getStopPack(packKey)
     const chunks = []
     for await (const chunk of pack!) chunks.push(chunk)
     expect(chunks.map(({ cx, cy }) => ({ cx, cy }))).toEqual(
@@ -73,8 +77,7 @@ describe('createJourneyClient over the recorded journey', () => {
 
   it('answers no pack on a 404, and refuses a broken pack with DECODE', async () => {
     const client = createJourneyClient({ fetch: recordsFetch().fetch })
-    expect(await client.getStopPack(missionId, 9)).toBeNull()
-    const packKey = fixture.stopManifest.packKey
+    expect(await client.getStopPack(`missions/${missionId}/stops/9.pack`)).toBeNull()
     const cut = readRecord(packKey)!.subarray(0, 30_000)
     const broken = createJourneyClient({
       fetch: recordsFetch({
@@ -82,7 +85,7 @@ describe('createJourneyClient over the recorded journey', () => {
           key === packKey ? new Response(cut as Uint8Array<ArrayBuffer>) : undefined,
       }).fetch,
     })
-    const pack = (await broken.getStopPack(missionId, stopIndex))!
+    const pack = (await broken.getStopPack(packKey))!
     const read = (async () => {
       for await (const _ of pack) void _
     })()
@@ -140,11 +143,25 @@ describe('createJourneyClient over the recorded journey', () => {
     expect(await client.getTrace(segmentId, past)).toEqual({ status: 'missing' })
   })
 
+  it('refuses a key that names no stop object with INVALID_INPUT, requesting nothing', async () => {
+    const { fetch, calls } = recordsFetch()
+    const client = createJourneyClient({ fetch })
+    for (const promise of [
+      client.getStopManifest(`segments/${segmentId}/manifest.json`),
+      client.getRevealedMask('missions/m/revealed/0.bin'),
+      client.getStopPack(`missions/${missionId}/stops/landing.json`),
+    ]) {
+      expect((await clientErrorOf(promise))?.code).toBe('INVALID_INPUT')
+    }
+    expect(calls).toEqual([])
+  })
+
   it('refuses a missing manifest, mask or chunk with NOT_FOUND', async () => {
     const client = createJourneyClient({ fetch: recordsFetch().fetch })
     const { worldHash } = fixture.stopManifest
-    expect((await clientErrorOf(client.getStopManifest(missionId, 9)))?.code).toBe('NOT_FOUND')
-    expect((await clientErrorOf(client.getRevealedMask(missionId, 9)))?.code).toBe('NOT_FOUND')
+    expect((await clientErrorOf(client.getStopManifest(NOWHERE)))?.code).toBe('NOT_FOUND')
+    const noMask = `missions/${missionId}/revealed/9.bin`
+    expect((await clientErrorOf(client.getRevealedMask(noMask)))?.code).toBe('NOT_FOUND')
     expect((await clientErrorOf(client.getChunk(worldHash, 40, 40)))?.code).toBe('NOT_FOUND')
     expect((await clientErrorOf(client.getSegmentManifest('nope')))?.code).toBe('NOT_FOUND')
   })
@@ -154,8 +171,8 @@ describe('createJourneyClient over the recorded journey', () => {
     const client = createJourneyClient({ fetch: recordsFetch({ override: garbage }).fetch })
     const { worldHash } = fixture.stopManifest
     for (const promise of [
-      client.getStopManifest(missionId, stopIndex),
-      client.getRevealedMask(missionId, stopIndex),
+      client.getStopManifest(manifestKey),
+      client.getRevealedMask(revealedKey),
       client.getChunk(worldHash, 0, 0),
       client.getSegmentManifest(segmentId),
       client.getSlice(segmentId, 0),

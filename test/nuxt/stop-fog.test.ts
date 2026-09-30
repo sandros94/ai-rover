@@ -57,8 +57,8 @@ vi.mock('~/components/scene/DiskScene.vue', async () => {
   }
 })
 
-const { missionId, stopIndex, segmentId, startedAt } = JOURNEY_FIXTURE
-const { files, record } = journeyFixture()
+const { missionId, segmentId, startedAt } = JOURNEY_FIXTURE
+const { files, record, stopKeys } = journeyFixture()
 
 /** The playing segment's frame, moved by the test; no slices load. */
 const frame = shallowRef<Float32Array>()
@@ -95,7 +95,7 @@ const keyframe = (k: number) =>
   record.keyframes.data.slice(k * KEYFRAME_STRIDE, (k + 1) * KEYFRAME_STRIDE)
 
 function state(): MissionStateJson {
-  const stop = { id: 's0', index: stopIndex, x: 0, y: 0, headingRad: 0 }
+  const stop = { id: 's0', index: 0, x: 0, y: 0, headingRad: 0, manifestKey: stopKeys.manifestKey }
   return {
     now: new Date(startedAt).toISOString(),
     mission: {
@@ -112,7 +112,7 @@ function state(): MissionStateJson {
     flags: null,
     pause: null,
     lastSegment: null,
-    trail: [{ index: stopIndex, x: 0, y: 0, reachedBy: null }],
+    trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKeys.manifestKey, reachedBy: null }],
     deaths: [],
     tally: { distanceM: 0, stops: 1, arrived: 0, stoppedShort: 0, failed: 0, resets: 0 },
   } as unknown as MissionStateJson
@@ -212,6 +212,37 @@ describe('the fog on the dashboard', () => {
     expect(distinct(handed.scene)).toEqual(new Set(computed))
     expect(handed.map.at(-1)).toBe(computed.at(-1))
     expect(handed.scene.at(-1)).toBe(computed.at(-1))
+  })
+})
+
+describe('the stop on the dashboard', () => {
+  it('is loaded through the manifest key the state names, its mask and pack through the manifest', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (input: string) => {
+      const key = input.replace(/^\/journey\//, '')
+      asked.push(key)
+      const bytes = files.get(key)
+      return bytes
+        ? new Response(bytes as Uint8Array<ArrayBuffer>)
+        : new Response(null, { status: 404 })
+    })
+    const wrapper = await mountSuspended(
+      defineComponent({
+        render: () =>
+          h(UApp, null, {
+            default: () => h(MissionDashboard, { state: state(), error: null, serverOffsetMs: 0 }),
+          }),
+      }),
+      { attachTo: document.body },
+    )
+    attached.push(wrapper)
+    // The fog is drawn once the mask is in, over the ground the pack brought.
+    await vi.waitFor(() => expect(handed.map.at(-1)).toBeDefined())
+    const stopKeysAsked = asked.filter((key) => key.startsWith('missions/'))
+    expect(stopKeysAsked[0]).toBe(stopKeys.manifestKey)
+    expect(new Set(stopKeysAsked)).toEqual(
+      new Set([stopKeys.manifestKey, stopKeys.revealedKey, stopKeys.packKey]),
+    )
   })
 })
 

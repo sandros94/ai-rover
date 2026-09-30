@@ -16,7 +16,7 @@ import {
 } from '#shared/utils/drive'
 import { DEFAULT_MISSION_RULES } from '#shared/utils/mission'
 import type { RevealedMask } from '#shared/utils/terrain'
-import { encodeRevealedMask, revealedKey, revealedOverDisk } from '#shared/utils/terrain'
+import { encodeRevealedMask, revealedOverDisk } from '#shared/utils/terrain'
 import type { MissionStateJson } from '~/composables/useMissionState'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import MissionDashboard from '~/components/dashboard/MissionDashboard.vue'
@@ -68,8 +68,9 @@ vi.mock('~/components/scene/StopScene.vue', async () => {
   }
 })
 
-const { missionId, stopIndex, segmentId, startedAt } = JOURNEY_FIXTURE
-const { files, mask, disk, stopManifest, record, segmentManifest, traces } = journeyFixture()
+const { missionId, segmentId, startedAt } = JOURNEY_FIXTURE
+const { files, mask, disk, stopKeys, stopManifest, record, segmentManifest, traces } =
+  journeyFixture()
 const { sliceSeconds } = segmentManifest
 
 /** Wall time mid-drive: live stands in slice 20, with twenty slices of reveals before it. */
@@ -113,7 +114,7 @@ const hole = Uint32Array.from(
 )
 const first = { ...traces[0]!, reveals: [{ t: 0, vertices: hole }, ...traces[0]!.reveals] }
 const served = new Map(files)
-served.set(revealedKey(missionId, stopIndex), encodeRevealedMask(holed))
+served.set(stopKeys.revealedKey, encodeRevealedMask(holed))
 served.set(segmentTraceKey(segmentId, 0), encodeTrace(first))
 
 /** Requests held back until the test lets them through. */
@@ -148,7 +149,7 @@ async function journeyFetch(input: string): Promise<Response> {
 }
 
 function state(): MissionStateJson {
-  const stop = { id: 's0', index: stopIndex, x: 0, y: 0, headingRad: 0 }
+  const stop = { id: 's0', index: 0, x: 0, y: 0, headingRad: 0, manifestKey: stopKeys.manifestKey }
   return {
     now: new Date(now).toISOString(),
     mission: {
@@ -165,7 +166,7 @@ function state(): MissionStateJson {
     flags: null,
     pause: null,
     lastSegment: null,
-    trail: [{ index: stopIndex, x: 0, y: 0, reachedBy: null }],
+    trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKeys.manifestKey, reachedBy: null }],
     deaths: [],
     tally: { distanceM: 0, stops: 1, arrived: 0, stoppedShort: 0, failed: 0, resets: 0 },
   } as unknown as MissionStateJson
@@ -242,7 +243,7 @@ describe('the rover on the dashboard, opened mid-drive', () => {
     const fogged = fogSurface(disk.grid, { seen: stopSeen }).heights
     const under = gridHeightAt(fogged, { ...disk.grid, origin: disk.origin }, rover.x, rover.y)!
     expect(Math.abs(under - pose[Z]!)).toBeGreaterThan(0.03)
-    expect(stopManifest.revealedKey).toBe(revealedKey(missionId, stopIndex))
+    expect(stopManifest.revealedKey).toBe(stopKeys.revealedKey)
   })
 
   it('draws no rover from the live slice before the traces are in, then stands it on true ground', async () => {

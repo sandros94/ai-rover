@@ -55,10 +55,7 @@ const TRANSITION_NOTICE_MS = 4000
 const rules = computed(() => props.mission.rules)
 const multi = computed(() => props.drives.length > 1)
 
-const playback = useSegmentPlaylist(props.drives, {
-  missionId: props.mission.id,
-  rate: START_RATE,
-})
+const playback = useSegmentPlaylist(props.drives, { rate: START_RATE })
 const drive = playback.segment
 const { snapshot, rover, plan, driven, motion } = usePlaybackTrack(playback)
 /** Playlist time at the instruments' rate: the controls and the status need no more. */
@@ -353,13 +350,7 @@ const instrumentProps = computed(() => ({
       </section>
     </template>
     <template #panel-details>
-      <ObjectDetails
-        v-if="focused"
-        :key="focused.id"
-        :object="focused"
-        :mission-id="mission.id"
-        :rules="rules"
-      />
+      <ObjectDetails v-if="focused" :key="focused.id" :object="focused" :rules="rules" />
     </template>
     <template v-for="group in instrumentGroups" #[`panel-${group}`]>
       <Instrument :group="group" v-bind="instrumentProps" />

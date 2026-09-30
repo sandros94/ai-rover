@@ -131,11 +131,15 @@ export interface PublicSegmentRef {
   fromIndex: number
 }
 
-/** A stop reached, with the settled drive that reached it; null for the landing stop. */
+/**
+ * A stop reached, with the settled drive that reached it; null for the landing stop.
+ * `manifestKey` names its stored objects: the manifest, and through it the mask and the pack.
+ */
 export interface PublicStop {
   index: number
   x: number
   y: number
+  manifestKey: string
   reachedBy: (PublicSegmentRef & { at: Date }) | null
 }
 
@@ -158,6 +162,7 @@ export function publicStopsAndDeaths(
     index: number
     x: number
     y: number
+    manifestKey: string
     fromSegmentId: string | null
   }[],
   segments: readonly SettledSegment[],
@@ -172,9 +177,9 @@ export function publicStopsAndDeaths(
       },
     ]),
   )
-  const trail = stops.map(({ index, x, y, fromSegmentId }): PublicStop => {
+  const trail = stops.map(({ index, x, y, manifestKey, fromSegmentId }): PublicStop => {
     const by = fromSegmentId ? refs.get(fromSegmentId) : undefined
-    return { index, x, y, reachedBy: by ? { ...by.ref, at: by.segment.endsAt } : null }
+    return { index, x, y, manifestKey, reachedBy: by ? { ...by.ref, at: by.segment.endsAt } : null }
   })
   const deaths = [...refs.values()].flatMap(({ segment, ref }): PublicDeath[] =>
     segment.death

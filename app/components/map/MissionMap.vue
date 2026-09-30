@@ -101,7 +101,7 @@ const {
   terrain,
   revealed,
   error,
-} = useStopTerrain(props.state.mission.id, stop.index, { center: anchor.value })
+} = useStopTerrain(stop.manifestKey, { center: anchor.value })
 const heightAt = (x: number, y: number) => sampler.value?.heightAt(x, y)
 
 watch(

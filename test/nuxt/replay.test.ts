@@ -15,6 +15,10 @@ import DriveReplay from '~/components/journey/DriveReplay.vue'
 // @ts-ignore -- tsgolint (oxlint) cannot resolve .vue modules; `pnpm typecheck` checks them.
 import ReplayBar from '~/components/journey/ReplayBar.vue'
 
+/** An older stop's manifest key, named by its index. */
+const stopKey = (index: number) =>
+  `missions/0192f000-0000-7000-8000-000000000001/stops/${index}.json`
+
 const JUDGMENT: DriveJson['judgment'] = {
   feasible: 0.9,
   verdict: 'accept',
@@ -42,8 +46,8 @@ const DRIVES: DriveJson[] = [
     distanceM: 80,
     durationS: 2400,
     reasons: [],
-    from: { id: 's0', index: 0, x: 0, y: 0 },
-    to: { id: 's1', index: 1, x: 0, y: 80 },
+    from: { id: 's0', index: 0, x: 0, y: 0, manifestKey: stopKey(0) },
+    to: { id: 's1', index: 1, x: 0, y: 80, manifestKey: stopKey(1) },
     goal: { x: 0, y: 80 },
     death: null,
     submitter: { id: 'u2', displayName: 'Grace', avatarUrl: null },
@@ -60,7 +64,7 @@ const DRIVES: DriveJson[] = [
     distanceM: 41.6,
     durationS: 1260,
     reasons: ['stuck'],
-    from: { id: 's1', index: 1, x: 0, y: 80 },
+    from: { id: 's1', index: 1, x: 0, y: 80, manifestKey: stopKey(1) },
     to: null,
     goal: { x: 30, y: 100 },
     death: { x: 30, y: 100 },
@@ -85,7 +89,7 @@ registerEndpoint('/api/mission/segments', (event: { path?: string; url?: URL }) 
 registerEndpoint(`/api/mission/segments/${DRIVES[0]!.id}`, () => ({
   drive: DRIVES[0],
   mission: MISSION,
-  trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+  trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
   deaths: [],
   next: { id: DRIVES[1]!.id, number: 2 },
 }))
@@ -156,7 +160,7 @@ describe('DriveReplay', () => {
     await mountReplay({
       drives: DRIVES,
       mission: MISSION,
-      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+      trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
     })
     expect(indicator()!.textContent).toContain('1 of 2')
     await press('n')
@@ -174,7 +178,7 @@ describe('DriveReplay', () => {
     const wrapper = await mountReplay({
       drives: [DRIVES[0]!],
       mission: MISSION,
-      trail: [{ index: 0, x: 0, y: 0, reachedBy: null }],
+      trail: [{ index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null }],
       next: { to: `/drives/${DRIVES[1]!.id}`, number: 2 },
     })
     expect(indicator()).toBeNull()
@@ -189,11 +193,12 @@ describe('inspecting the replay', () => {
   /** The map lays itself out in a 400 × 400 px box whose corner sits at client (10, 20). */
   const BOX = { left: 10, top: 20, width: 400, height: 400 }
   const TRAIL = [
-    { index: 0, x: 0, y: 0, reachedBy: null },
+    { index: 0, x: 0, y: 0, manifestKey: stopKey(0), reachedBy: null },
     {
       index: 1,
       x: 0,
       y: 80,
+      manifestKey: stopKey(1),
       reachedBy: {
         segmentId: DRIVES[0]!.id,
         number: 1,

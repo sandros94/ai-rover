@@ -21,7 +21,8 @@ export interface PlaylistSegment {
   durationS: number
   /** When its last slice was released. */
   endedAt: string | Date
-  from: { index: number }
+  /** The stop left: `manifestKey` names its objects. */
+  from: { index: number; manifestKey: string }
 }
 
 /**
@@ -37,7 +38,7 @@ export interface PlaylistSegment {
  */
 export function useSegmentPlaylist<T extends PlaylistSegment>(
   segments: readonly T[],
-  options: { missionId: string; rate?: PlaybackRate },
+  options: { rate?: PlaybackRate } = {},
 ) {
   const client = useJourneyClient()
   const playlist = createPlaylist(segments)
@@ -79,20 +80,20 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
   const paused = ref(false)
   const error = shallowRef<unknown>(null)
 
-  const terrain = useStopTerrain(options.missionId, () => segment.value.from.index)
-  /** Stops whose disk is loaded, so playback may enter a segment leaving from them. */
-  const readyStops = new Set<number>()
+  const terrain = useStopTerrain(() => segment.value.from.manifestKey)
+  /** Stops whose disk is loaded, by manifest key, so playback may enter a segment leaving them. */
+  const readyStops = new Set<string>()
   watch(terrain.terrain, (disk) => {
-    if (disk && terrain.manifest.value) readyStops.add(terrain.manifest.value.stop.index)
+    if (disk && terrain.manifestKey.value) readyStops.add(terrain.manifestKey.value)
   })
-  const prefetchedStops = new Set<number>()
-  function prefetchStop(stopIndex: number): void {
-    if (prefetchedStops.has(stopIndex)) return
-    prefetchedStops.add(stopIndex)
+  const prefetchedStops = new Set<string>()
+  function prefetchStop(manifestKey: string): void {
+    if (prefetchedStops.has(manifestKey)) return
+    prefetchedStops.add(manifestKey)
     terrain
-      .prefetch(stopIndex)
-      .then(() => readyStops.add(stopIndex))
-      .catch(() => prefetchedStops.delete(stopIndex))
+      .prefetch(manifestKey)
+      .then(() => readyStops.add(manifestKey))
+      .catch(() => prefetchedStops.delete(manifestKey))
   }
 
   /** Loaded segments by position: the playing one and its neighbours. */
@@ -121,7 +122,7 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
   /** Sim seconds segment `k` holds, 0 until its from-stop disk is in. */
   function held(k: number): number {
     const stream = entries.get(k)?.stream
-    if (!stream || !readyStops.has(segments[k]!.from.index)) return 0
+    if (!stream || !readyStops.has(segments[k]!.from.manifestKey)) return 0
     return stream.done ? Infinity : stream.loadedUntil
   }
 
@@ -142,11 +143,11 @@ export function useSegmentPlaylist<T extends PlaylistSegment>(
     const { segmentIndex: k, simTime: sim } = playlist.locate(t)
 
     ensure(k)
-    prefetchStop(segments[k]!.from.index)
+    prefetchStop(segments[k]!.from.manifestKey)
     const ahead = playlist.prefetchIndex(t)
     if (ahead !== undefined) {
       ensure(ahead)
-      prefetchStop(segments[ahead]!.from.index)
+      prefetchStop(segments[ahead]!.from.manifestKey)
     }
     for (const key of entries.keys()) if (Math.abs(key - k) > 1) entries.delete(key)
     // The playing segment opens where playback stands; its neighbours are entered at their start.

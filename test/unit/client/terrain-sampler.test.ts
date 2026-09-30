@@ -114,7 +114,7 @@ describe('createTerrainSampler over the recorded chunks', () => {
     const disk = computeStopDisk(world, { center: { x: 10, y: -5 }, radius: 130 })
     const manifest = buildStopManifest(world, disk, {
       missionId: JOURNEY_FIXTURE.missionId,
-      stopIndex: 1,
+      keys: fixture.stopKeys,
     })
     const client = createJourneyClient({
       // Chunks beyond the recorded four, generated as the server would store them.

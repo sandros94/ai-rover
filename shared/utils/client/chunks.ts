@@ -40,14 +40,10 @@ export interface ChunkCache {
     options?: { concurrency?: number; onChunk?: (chunk: Chunk) => void },
   ): Promise<void>
   /**
-   * Holds every chunk of the stop's disk pack, calling `onChunk` as each is decoded; false, with
-   * nothing loaded, when the stop has no pack.
+   * Holds every chunk of the disk pack at `packKey` (as a stop's manifest names it), calling
+   * `onChunk` as each is decoded; false, with nothing loaded, when it is not stored.
    */
-  loadPack(
-    missionId: string,
-    stopIndex: number,
-    options?: { onChunk?: (chunk: Chunk) => void },
-  ): Promise<boolean>
+  loadPack(packKey: string, options?: { onChunk?: (chunk: Chunk) => void }): Promise<boolean>
 }
 
 /** Decoded chunks of one world, least recently used evicted past `max`. */
@@ -136,11 +132,10 @@ export function createChunkCache(options: {
   }
 
   async function loadPack(
-    missionId: string,
-    stopIndex: number,
+    packKey: string,
     packOptions: { onChunk?: (chunk: Chunk) => void } = {},
   ): Promise<boolean> {
-    const pack = await client.getStopPack(missionId, stopIndex)
+    const pack = await client.getStopPack(packKey)
     if (!pack) return false
     for await (const chunk of pack) {
       accept(chunk)

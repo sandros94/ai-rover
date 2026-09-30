@@ -574,6 +574,19 @@ describe('journey keys', () => {
     const hash = '0123456789abcdef'
     expect(parseJourneyKey(`terrain/${hash}/chunks/-3_4.bin`)).toEqual({ kind: 'terrain' })
     const mission = '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b'
+    // A stop's objects as `stopKeys` names them: by the landing or the drive that reached it.
+    const segment = '0190a1b2-c3d4-8e5f-8a9b-0c1d2e3f4a5c'
+    const digest = '0123456789abcdef'
+    for (const name of ['landing', segment]) {
+      expect(parseJourneyKey(`missions/${mission}/stops/${name}.${digest}.json`)).toEqual({
+        kind: 'stop',
+      })
+      expect(parseJourneyKey(`missions/${mission}/revealed/${name}.${digest}.bin`)).toEqual({
+        kind: 'stop',
+      })
+      expect(parseJourneyKey(`missions/${mission}/stops/${name}.pack`)).toEqual({ kind: 'stop' })
+    }
+    // Older stops' objects, named by the stop's index, stay served.
     expect(parseJourneyKey(`missions/${mission}/revealed/0.bin`)).toEqual({ kind: 'stop' })
     expect(parseJourneyKey(`missions/${mission}/stops/12.json`)).toEqual({ kind: 'stop' })
     expect(parseJourneyKey(`missions/${mission}/stops/12.pack`)).toEqual({ kind: 'stop' })
@@ -626,6 +639,14 @@ describe('journey keys', () => {
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/01.pack',
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/0.pack',
       'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/chunks/0_0.bin',
+      // A stop named otherwise: without its mask's digest, with a short one, or by no segment.
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/landing.bin',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.0123.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/landing.0123456789abcdef.pack',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/smoke-1.0123456789abcdef.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/stops/12.0123456789abcdef.json',
+      'missions/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/revealed/landing.0123456789ABCDEF.bin',
     ]) {
       expect(parseJourneyKey(key)).toBeNull()
     }

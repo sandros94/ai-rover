@@ -18,16 +18,15 @@ import {
   diskFromTerrain,
   previewPlan,
 } from '#shared/utils/client'
-import { JOURNEY_FIXTURE, journeyFixture, recordsFetch } from './helpers'
+import { journeyFixture, recordsFetch } from './helpers'
 
 const fixture = journeyFixture()
-const { missionId, stopIndex } = JOURNEY_FIXTURE
 
 /** The disk and revealed bytes as the browser builds them: from the served blobs only. */
 async function clientGround(): Promise<{ disk: StopDisk; revealed: Uint8Array }> {
   const client = createJourneyClient({ fetch: recordsFetch().fetch })
-  const manifest = await client.getStopManifest(missionId, stopIndex)
-  const mask = await client.getRevealedMask(missionId, stopIndex)
+  const manifest = await client.getStopManifest(fixture.stopKeys.manifestKey)
+  const mask = await client.getRevealedMask(manifest.revealedKey)
   const cache = createChunkCache({ client, worldHash: manifest.worldHash })
   await cache.prefetch(manifest.chunks)
   const terrain = createTerrainSampler(cache).assembleDiskGrid(manifest)!

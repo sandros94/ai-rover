@@ -23,7 +23,6 @@ type Submission = NonNullable<MissionStateJson['round']>['submissions'][number]
  */
 const props = defineProps<{
   object: StopObject | DeathObject | SubmissionObject | DestinationObject
-  missionId: string
   rules: MissionRules
   /** The focused submission as the round lists it. */
   submission?: Submission
@@ -34,13 +33,13 @@ const replay = (segmentId: string) => `/drives/${segmentId}`
 /** The stop's manifest, once fetched; null when it could not be. */
 const manifest = shallowRef<StopManifest | null>()
 watch(
-  () => (props.object.kind === 'stop' ? props.object.index : undefined),
-  async (index) => {
+  () => (props.object.kind === 'stop' ? props.object.manifestKey : undefined),
+  async (key) => {
     manifest.value = undefined
-    if (index === undefined) return
+    if (key === undefined) return
     try {
-      const fetched = await useJourneyClient().getStopManifest(props.missionId, index)
-      if (props.object.kind === 'stop' && props.object.index === index) manifest.value = fetched
+      const fetched = await useJourneyClient().getStopManifest(key)
+      if (props.object.kind === 'stop' && props.object.manifestKey === key) manifest.value = fetched
     } catch {
       manifest.value = null
     }

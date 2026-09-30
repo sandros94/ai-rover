@@ -52,13 +52,19 @@ export type JourneyKey =
   | { kind: 'segment-trace-block'; segmentId: string; from: number; to: number }
 
 const TERRAIN_KEY = /^terrain\/[0-9a-f]{16}\/chunks\/-?\d{1,10}_-?\d{1,10}\.bin$/
-const STOP_KEY =
-  /^missions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:revealed\/(?:0|[1-9]\d{0,14})\.bin|stops\/(?:0|[1-9]\d{0,14})\.(?:json|pack))$/
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+/** What `stopKeys` names a stop by: the landing, or the segment that reached it. */
+const STOP_NAME = `(?:landing|${UUID})`
+/** Older stops' objects are named by the stop's index; they stay served. */
+const STOP_INDEX = '(?:0|[1-9]\\d{0,14})'
+const STOP_KEY = new RegExp(
+  `^missions\\/${UUID}\\/(?:revealed\\/(?:${STOP_INDEX}|${STOP_NAME}\\.[0-9a-f]{16})\\.bin|stops\\/(?:${STOP_INDEX}\\.(?:json|pack)|${STOP_NAME}\\.[0-9a-f]{16}\\.json|${STOP_NAME}\\.pack))$`,
+)
 const SEGMENT_KEY =
   /^segments\/([A-Za-z0-9_-]{1,64})\/(?:(manifest\.json)|(slices|traces)\/(0|[1-9]\d{0,6})(?:-([1-9]\d{0,6}))?\.bin)$/
 
 /**
- * Classifies a key built by `chunkKey`, `revealedKey`, `stopManifestKey`, `stopPackKey`,
+ * Classifies a key built by `chunkKey`, `stopKeys` (or an older stop's index-named keys),
  * `segmentManifestKey`, `segmentSliceKey`, `segmentTraceKey` or `segmentTraceBlockKey`; null for
  * anything else, including paths with `..` or a leading `/` and trace ranges other than a block.
  */

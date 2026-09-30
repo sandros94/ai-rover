@@ -8,8 +8,10 @@ import {
   encodeRevealedMask,
   isRevealed,
   revealDisk,
+  revealedMaskDigest,
   revealedOverDisk,
   revealedVertexCount,
+  revealedVerticesMissing,
   revealVertices,
   TerrainError,
 } from '#shared/utils/terrain'
@@ -173,6 +175,48 @@ describe('revealedVertexCount', () => {
       [...visiblePoints(world, first), ...visiblePoints(world, second)].map((p) => `${p.x},${p.y}`),
     )
     expect(revealedVertexCount(mask)).toBe(seen.size)
+  })
+})
+
+describe('revealedVerticesMissing', () => {
+  const world = defineWorld({ seed: 'mars' })
+  const near = revealDisk(
+    createRevealedMask(world),
+    computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 40 }),
+  )
+  const both = revealDisk(near, computeStopDisk(world, { center: { x: 70, y: 0 }, radius: 40 }))
+
+  it('counts the world vertices one mask holds and the other does not, edges once', () => {
+    expect(revealedVerticesMissing(near, near)).toBe(0)
+    expect(revealedVerticesMissing(near, both)).toBe(0)
+    const added = revealedVertexCount(both) - revealedVertexCount(near)
+    expect(added).toBeGreaterThan(0)
+    expect(revealedVerticesMissing(both, near)).toBe(added)
+    expect(revealedVerticesMissing(both, createRevealedMask(world))).toBe(revealedVertexCount(both))
+  })
+
+  it('refuses masks of different chunk layouts', () => {
+    const other = createRevealedMask(defineWorld({ seed: 'mars', chunkSize: 32 }))
+    expect(terrainErrorOf(() => revealedVerticesMissing(near, other))?.code).toBe('INVALID_GRID')
+  })
+})
+
+describe('revealedMaskDigest', () => {
+  const world = defineWorld({ seed: 'mars' })
+  const mask = revealDisk(
+    createRevealedMask(world),
+    computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 40 }),
+  )
+
+  it('is 16 hex characters, the same for the same bytes, another for other bytes', () => {
+    const encoded = encodeRevealedMask(mask)
+    const digest = revealedMaskDigest(encoded)
+    expect(digest).toMatch(/^[0-9a-f]{16}$/)
+    expect(revealedMaskDigest(encoded.slice())).toBe(digest)
+    const flipped = encoded.slice()
+    flipped[flipped.length - 1]! ^= 1
+    expect(revealedMaskDigest(flipped)).not.toBe(digest)
+    expect(revealedMaskDigest(encodeRevealedMask(createRevealedMask(world)))).not.toBe(digest)
   })
 })
 

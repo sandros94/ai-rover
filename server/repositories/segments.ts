@@ -277,6 +277,15 @@ export async function countRecentFailuresNear(
 }
 
 /** A settled drive as the journey log shows it: everything about it is public by now. */
+/** A stop a settled drive left or reached. */
+export interface JourneyStop {
+  id: string
+  index: number
+  x: number
+  y: number
+  manifestKey: string
+}
+
 export interface JourneySegment {
   id: string
   /** Position among the mission's settled drives, oldest first, from 1. */
@@ -293,9 +302,10 @@ export interface JourneySegment {
   durationS: number
   /** Why the drive fell short or failed; empty on an arrival. */
   reasons: string[]
-  from: { id: string; index: number; x: number; y: number }
+  /** The stop left; `manifestKey` names its stored objects. */
+  from: JourneyStop
   /** The stop reached; null for a failure. */
-  to: { id: string; index: number; x: number; y: number } | null
+  to: JourneyStop | null
   /** The winning submission's destination. */
   goal: { x: number; y: number }
   death: { x: number; y: number } | null
@@ -358,8 +368,8 @@ function journeyQuery(db: DB, ordered: OrderedJourney) {
       segment,
       number: ordered.number,
       beforeM: ordered.beforeM,
-      from: { id: from.id, index: from.index, x: from.x, y: from.y },
-      to: { id: to.id, index: to.index, x: to.x, y: to.y },
+      from: { id: from.id, index: from.index, x: from.x, y: from.y, manifestKey: from.manifestKey },
+      to: { id: to.id, index: to.index, x: to.x, y: to.y, manifestKey: to.manifestKey },
       goal: { x: submission.goalX, y: submission.goalY },
       judgment: submission.judgment,
       submitter: {

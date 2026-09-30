@@ -33,7 +33,7 @@ describe('listJourneySegments', () => {
       distanceM: 42,
       durationS: 42 * 30,
       reasons: ['stuck'],
-      from: { id: j.reached.id, index: 1, x: 0, y: 80 },
+      from: { id: j.reached.id, index: 1, x: 0, y: 80, manifestKey: j.reached.manifestKey },
       to: null,
       goal: { x: 30, y: 100 },
       death: { x: 30, y: 100 },

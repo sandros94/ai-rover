@@ -2,10 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { defineComponent, h } from 'vue'
 import { useStopTerrain } from '~/composables/useStopTerrain'
-import { JOURNEY_FIXTURE, journeyFixture } from '../unit/client/helpers'
+import { journeyFixture } from '../unit/client/helpers'
 
-const { missionId, stopIndex } = JOURNEY_FIXTURE
-const { stopManifest, files } = journeyFixture()
+const { stopManifest, stopKeys, files } = journeyFixture()
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -35,7 +34,7 @@ async function mountTerrain(records: ReturnType<typeof journeyFetch>) {
   await mountSuspended(
     defineComponent({
       setup() {
-        terrain = useStopTerrain(missionId, stopIndex)
+        terrain = useStopTerrain(stopKeys.manifestKey)
         return () => h('div')
       },
     }),
@@ -61,6 +60,15 @@ describe('useStopTerrain', () => {
     expect(terrain.ground.value?.heightRange).toEqual(stopManifest.heightRange)
   })
 
+  it('reads the manifest by the key it is given, the mask and the pack by the keys it names', async () => {
+    const records = journeyFetch()
+    await mountTerrain(records)
+    expect(records.calls[0]).toBe(`/journey/${stopKeys.manifestKey}`)
+    expect(records.calls).toContain(`/journey/${stopManifest.revealedKey}`)
+    expect(records.calls).toContain(`/journey/${stopManifest.packKey}`)
+    expect(records.calls.every((url) => !/\/(stops|revealed)\/\d+\./.test(url))).toBe(true)
+  })
+
   it('falls back to chunk requests when the stop has no pack', async () => {
     const records = journeyFetch((key) => key.endsWith('.pack'))
     const terrain = await mountTerrain(records)
@@ -76,10 +84,7 @@ describe('useStopTerrain', () => {
   it('loads a version 2 stop chunk by chunk, never asking for a pack', async () => {
     const { packKey: _packKey, heightRange: _heightRange, ...rest } = stopManifest
     const v2 = new Map(files)
-    v2.set(
-      `missions/${missionId}/stops/${stopIndex}.json`,
-      new TextEncoder().encode(JSON.stringify({ ...rest, version: 2 })),
-    )
+    v2.set(stopKeys.manifestKey, new TextEncoder().encode(JSON.stringify({ ...rest, version: 2 })))
     const records = journeyFetch(() => false, v2)
     const terrain = await mountTerrain(records)
     expect(terrainCalls(records.calls).toSorted()).toEqual(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Diagnosis } from '#shared/utils/admin'
+import type { Diagnosis, StopRepairEntry, StopRepairReport } from '#shared/utils/admin'
 
 const { data: status } = await useFetch('/api/admin/status', {
   default: () => ({ configured: false }),
@@ -46,6 +46,49 @@ async function diagnose() {
   } finally {
     diagnosing.value = false
   }
+}
+
+/** The stops as the last check or repair found them, with whether it applied. */
+const repair = ref<{ apply: boolean; stops: StopRepairEntry[] } | null>(null)
+const repairing = ref<'check' | 'apply' | null>(null)
+const staleStops = computed(() => repair.value?.stops.filter((stop) => stop.stale) ?? [])
+
+/**
+ * Walks every stop through `POST /api/admin/repair-stops`, one bounded call after another until
+ * the answer carries no cursor. A dry run first, so the report is read before anything changes.
+ */
+async function repairStops(apply: boolean) {
+  repairing.value = apply ? 'apply' : 'check'
+  error.value = null
+  repair.value = null
+  const stops: StopRepairEntry[] = []
+  try {
+    let cursor: StopRepairReport['cursor'] | undefined
+    do {
+      const report: StopRepairReport = await $fetch<StopRepairReport>('/api/admin/repair-stops', {
+        method: 'POST',
+        body: { token: state.token, apply, ...(cursor && { cursor }) },
+      })
+      stops.push(...report.stops)
+      cursor = report.cursor
+    } while (cursor)
+    repair.value = { apply, stops }
+  } catch (caught) {
+    error.value = {
+      title: apply ? 'Not repaired' : 'Not checked',
+      message: requestErrorOf(caught).message,
+    }
+    if (stops.length) repair.value = { apply, stops }
+  } finally {
+    repairing.value = null
+  }
+}
+
+/** One line per stop: its mask as stored against the one computed again, and its disk pack. */
+function stopLine(stop: StopRepairEntry): string {
+  const pack =
+    stop.packMatches === null ? 'no pack' : stop.packMatches ? 'pack matches' : 'pack differs'
+  return `${stop.stored} vertices stored, ${stop.recomputed} computed, ${stop.missing} missing, ${stop.extra} extra; ${pack}`
 }
 
 const yesNo = (value: boolean) => (value ? 'yes' : 'no')
@@ -194,6 +237,81 @@ const sections = computed(() => {
           :title="error.title"
           :description="error.message"
         />
+
+        <div class="flex flex-col gap-2" data-test="admin-stops">
+          <p class="text-sm text-muted">
+            Checks every stop's revealed mask against the one computed again from the landing and
+            its disk pack against its manifest, and points the wrong ones at corrected objects.
+          </p>
+          <div class="flex gap-2">
+            <UButton
+              type="button"
+              data-test="admin-check-stops"
+              color="neutral"
+              variant="outline"
+              :loading="repairing === 'check'"
+              :disabled="!state.token || repairing !== null"
+              class="flex-1"
+              block
+              @click="repairStops(false)"
+            >
+              Check stops
+            </UButton>
+            <UButton
+              type="button"
+              data-test="admin-repair-stops"
+              color="warning"
+              :loading="repairing === 'apply'"
+              :disabled="
+                !state.token ||
+                repairing !== null ||
+                !repair ||
+                repair.apply ||
+                staleStops.length === 0
+              "
+              class="flex-1"
+              block
+              @click="repairStops(true)"
+            >
+              Repair {{ staleStops.length }} {{ staleStops.length === 1 ? 'stop' : 'stops' }}
+            </UButton>
+          </div>
+          <template v-if="repair">
+            <p class="text-sm" data-test="admin-stops-summary">
+              <template v-if="repair.apply">
+                Repaired {{ repair.stops.filter((stop) => stop.applied).length }} of
+                {{ repair.stops.length }} stops.
+              </template>
+              <template v-else>
+                {{ staleStops.length }} of {{ repair.stops.length }} stops need repair.
+              </template>
+              Rounds already planned over a stale mask are left as they are.
+            </p>
+            <ul class="flex flex-col gap-2 text-sm">
+              <li
+                v-for="stop in repair.stops"
+                :key="stop.stopId"
+                :data-test="`admin-stop-${stop.index}`"
+                :data-stale="String(stop.stale)"
+                class="flex gap-2"
+              >
+                <UIcon
+                  :name="stop.stale ? 'i-lucide-circle-alert' : 'i-lucide-circle-check'"
+                  :class="stop.stale ? 'text-warning' : 'text-success'"
+                  class="mt-0.5 size-4 shrink-0"
+                />
+                <div class="min-w-0">
+                  <p class="font-medium">
+                    Stop {{ stop.index }}
+                    <span v-if="stop.applied" class="font-normal text-success">· repaired</span>
+                    <span v-else-if="stop.stale" class="font-normal text-warning">· stale</span>
+                  </p>
+                  <p class="break-words text-muted tabular-nums">{{ stopLine(stop) }}</p>
+                </div>
+              </li>
+            </ul>
+          </template>
+        </div>
 
         <ul v-if="sections.length" class="flex flex-col gap-3 text-sm">
           <li
