@@ -4,7 +4,3 @@ publish = "dist"
 
 [build.environment]
 NODE_VERSION = "24"
-
-# Runtime values (session key, OAuth credentials, the Jev token) are site environment variables in
-# the functions scope, never in this file: Nuxt reads `NUXT_*` when a request is served, not at
-# build time. The database connection is injected by the platform.
