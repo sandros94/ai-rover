@@ -11,6 +11,10 @@ const ROVER = fileURLToPath(new URL('./shared/utils/rover/index.ts', import.meta
 const DRIVE = fileURLToPath(new URL('./shared/utils/drive/index.ts', import.meta.url))
 const MISSION = fileURLToPath(new URL('./shared/utils/mission/index.ts', import.meta.url))
 
+const PREVIEW_URL = ['deploy-preview', 'branch-deploy'].includes(process.env.CONTEXT ?? '')
+  ? process.env.DEPLOY_PRIME_URL
+  : undefined
+
 export default defineNuxtConfig({
   compatibilityDate: 'latest',
   devtools: { enabled: true },
@@ -26,6 +30,13 @@ export default defineNuxtConfig({
   icon: { customCollections: [{ prefix: 'brand', dir: './app/assets/icons' }] },
 
   runtimeConfig: {
+    public: {
+      /**
+       * The site's own origin, for the absolute URLs link previews need, from
+       * `NUXT_PUBLIC_SITE_URL`. A Netlify deploy preview or branch deploy points at itself.
+       */
+      siteUrl: PREVIEW_URL ?? 'https://rover.s94.dev',
+    },
     /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
     typesafeToken: '',
     /**

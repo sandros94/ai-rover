@@ -20,11 +20,25 @@ const title = 'AI Rover'
 const description =
   'A community-steered autonomous rover on procedurally generated Martian terrain.'
 
+const { siteUrl } = useRuntimeConfig().public
+const route = useRoute()
+
+// `scripts/og-image.ts` renders the card.
 useSeoMeta({
   title,
   description,
   ogTitle: title,
   ogDescription: description,
+  ogSiteName: title,
+  ogType: 'website',
+  ogUrl: () => new URL(route.path, siteUrl).href,
+  ogImage: new URL('/og.jpg', siteUrl).href,
+  ogImageType: 'image/jpeg',
+  ogImageWidth: 1200,
+  ogImageHeight: 630,
+  ogImageAlt:
+    'The Perseverance-class rover from behind, driving over its own tracks towards a Martian sunset.',
+  twitterCard: 'summary_large_image',
 })
 </script>
 

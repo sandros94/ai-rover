@@ -49,6 +49,7 @@
   "devDependencies": {
     "@dxup/unimport": "npm:@dxup/unimport@^0.1.2",
     "@electric-sql/pglite": "npm:@electric-sql/pglite@0.5.8",
+    "@fontsource/public-sans": "^5.3.0",
     "@gltf-transform/cli": "^4.5.0",
     "@gltf-transform/core": "^4.5.0",
     "@gltf-transform/extensions": "^4.5.0",
@@ -73,6 +74,7 @@
     "playwright-core": "npm:playwright-core@^1.63.0",
     "sharp": "^0.35.4",
     "simple-git-hooks": "npm:simple-git-hooks@^2.14.0",
+    "takumi-js": "^2.14.0",
     "typescript": "npm:typescript@^7.0.2",
     "vitest": "npm:vitest@^4.1.11",
     "vue-tsc": "npm:vue-tsc@^3.3.11"

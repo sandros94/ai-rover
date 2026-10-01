@@ -92,6 +92,11 @@ const props = withDefaults(
     toneMapping?: ToneMapping
     /** Whether the camera's pose is reported (`camera`), as a view drawing its footprint needs. */
     reportCamera?: boolean
+    /**
+     * Where the camera opens, world metres from its target (`focusTarget`, else the rover's
+     * middle); by default an orbit view of the rover, or a close one over the flat grid.
+     */
+    cameraOffset?: [number, number, number]
   }>(),
   {
     chunks: () => [],
@@ -117,6 +122,7 @@ const props = withDefaults(
     exposureBias: 0,
     toneMapping: CustomToneMapping,
     reportCamera: false,
+    cameraOffset: undefined,
   },
 )
 
@@ -271,7 +277,7 @@ onBeforeUnmount(() => {
     <FollowCamera
       :target="target"
       :target-key="focusKey"
-      :offset="chunks.length > 0 ? undefined : [-3.5, -3.5, 2]"
+      :offset="cameraOffset ?? (chunks.length > 0 ? undefined : [-3.5, -3.5, 2])"
       :report="reportCamera"
       @pose="emit('camera', $event)"
     />
@@ -335,5 +341,7 @@ onBeforeUnmount(() => {
       @hover="(id, client) => emit('hover', id, client)"
       @tap="(id, type, client) => emit('tap', id, type, client)"
     />
+    <!-- More of the world, drawn with the rest. -->
+    <slot />
   </TresCanvas>
 </template>

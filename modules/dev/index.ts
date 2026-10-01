@@ -28,7 +28,8 @@ const API_ROUTES = [
  * bundles it: the local database (migrations applied at boot, requests refused while the
  * database disagrees with its migration files, a Database tab in Nuxt DevTools to inspect,
  * migrate, reset and seed it), the `/api/_dev` routes, and the `/_dev` pages: index with a dev
- * sign-in, stop-disk viewer and the instrument playground.
+ * sign-in, stop-disk viewer, the instrument playground, the rover under a free camera and the
+ * social card's staged still.
  */
 export default defineNuxtModule({
   meta: { name: 'rover-dev' },
@@ -83,6 +84,8 @@ export default defineNuxtModule({
       routes.push(
         { name: 'dev', path: '/_dev', file: `${pages}/index.vue` },
         { name: 'dev-disk', path: '/_dev/disk', file: `${pages}/disk.vue` },
+        { name: 'dev-og', path: '/_dev/og', file: `${pages}/og.vue` },
+        { name: 'dev-rover', path: '/_dev/rover', file: `${pages}/rover.vue` },
         { name: 'dev-playground', path: '/_dev/playground', file: `${pages}/playground/index.vue` },
         {
           name: 'dev-playground-entry',

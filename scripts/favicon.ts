@@ -1,10 +1,11 @@
 /**
- * Renders the PNG icons under `public/` from `public/favicon.svg`: a 32 px favicon for browsers
- * without SVG favicons, transparent 192 and 512 px icons for the web manifest, and on the site's
- * dark background a 180 px Apple touch icon (iOS fills transparency with black) and a 512 px
- * maskable icon, the wheel inside the central 80 % circle a mask may keep. The rasteriser ignores
- * the SVG's colour-scheme rule, so the PNGs take the light scheme's orange, and the dark one on
- * the dark background. Deterministic; re-running overwrites them.
+ * Renders the PNG icons under `public/` from the two wheel marks: `favicon.svg`, drawn for tab
+ * sizes, gives the 32 px favicon for browsers without SVG favicons; `icon.svg`, the detailed mark,
+ * gives the transparent 192 and 512 px icons for the web manifest and, on the site's dark
+ * background, a 180 px Apple touch icon (iOS fills transparency with black) and a 512 px maskable
+ * icon, the wheel inside the central 80 % circle a mask may keep. The rasteriser ignores the
+ * SVGs' colour-scheme rule, so the PNGs take the light scheme's orange, and the dark one on the
+ * dark background. Deterministic; re-running overwrites them.
  *
  * Run from the repository root:
  *
@@ -23,16 +24,22 @@ const DARK = '#fb923c'
 /** A maskable icon's safe zone is the central circle of 80 % the icon's width. */
 const MASKABLE_SAFE = 0.8
 
-const svg = readFileSync(join(PUBLIC, 'favicon.svg'), 'utf8')
-if (!svg.includes(`color: ${LIGHT}`) || !svg.includes(`color: ${DARK}`)) {
-  throw new Error(`favicon.svg no longer sets ${LIGHT} and ${DARK}; update this script with it.`)
+function mark(file: string): string {
+  const svg = readFileSync(join(PUBLIC, file), 'utf8')
+  if (!svg.includes(`color: ${LIGHT}`) || !svg.includes(`color: ${DARK}`)) {
+    throw new Error(`${file} no longer sets ${LIGHT} and ${DARK}; update this script with it.`)
+  }
+  return svg
 }
-/** The SVG in one colour, its colour-scheme rule dropped. */
-const inColour = (colour: string) =>
+const TAB = mark('favicon.svg')
+const DETAILED = mark('icon.svg')
+
+/** A mark in one colour, its colour-scheme rule dropped. */
+const inColour = (svg: string, colour: string) =>
   Buffer.from(svg.replace(/@media[^}]*}\s*}/, '').replace(`color: ${LIGHT}`, `color: ${colour}`))
 
-async function transparent(size: number, file: string): Promise<void> {
-  await sharp(inColour(LIGHT), { density: (72 * size) / 32 })
+async function transparent(svg: string, size: number, file: string): Promise<void> {
+  await sharp(inColour(svg, LIGHT), { density: (72 * size) / 32 })
     .resize(size, size)
     .png({ compressionLevel: 9 })
     .toFile(join(PUBLIC, file))
@@ -41,7 +48,7 @@ async function transparent(size: number, file: string): Promise<void> {
 /** The wheel at `share` of the icon's width, centred on the dark background. */
 async function onBackground(size: number, share: number, file: string): Promise<void> {
   const inner = Math.round(size * share)
-  const wheel = await sharp(inColour(DARK), { density: (72 * inner) / 32 })
+  const wheel = await sharp(inColour(DETAILED, DARK), { density: (72 * inner) / 32 })
     .resize(inner, inner)
     .png()
     .toBuffer()
@@ -51,9 +58,9 @@ async function onBackground(size: number, share: number, file: string): Promise<
     .toFile(join(PUBLIC, file))
 }
 
-await transparent(32, 'favicon-32.png')
-await transparent(192, 'icon-192.png')
-await transparent(512, 'icon-512.png')
+await transparent(TAB, 32, 'favicon-32.png')
+await transparent(DETAILED, 192, 'icon-192.png')
+await transparent(DETAILED, 512, 'icon-512.png')
 await onBackground(180, 0.8, 'apple-touch-icon.png')
 // The wheel's circle spans the square it is drawn in: its diameter is the safe zone's.
 await onBackground(512, MASKABLE_SAFE * 0.92, 'icon-maskable-512.png')
