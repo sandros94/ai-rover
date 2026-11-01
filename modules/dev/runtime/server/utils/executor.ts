@@ -13,8 +13,8 @@ export function executorOver(db: DB): SQLExecutor {
     // simple query protocol (a query without parameters) accepts.
     exec: (text) => db.execute(sql.raw(text)),
     async query<T>(text: string, params: unknown[] = []) {
-      const result = (await db.execute(rebindPlaceholders(text, params))) as { rows: T[] }
-      return { rows: result.rows }
+      const rows = await db.execute(rebindPlaceholders(text, params), 'objects')
+      return { rows: rows as T[] }
     },
     transaction: (run) => db.transaction((tx) => run(executorOver(tx))),
   }

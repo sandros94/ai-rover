@@ -62,9 +62,9 @@ describe('seedLocalMission', () => {
 
     const second = await seedLocalMission(local.url, migrations.dir, { store, force: true })
     expect(second.missionId).not.toBe(first.missionId)
-    expect(await useDB().execute(sql`select id from mission`)).toMatchObject({
-      rows: [{ id: second.missionId }],
-    })
+    expect(await useDB().execute(sql`select id from mission`, 'objects')).toEqual([
+      { id: second.missionId },
+    ])
   })
 
   it('refuses a database that is not on this machine', async () => {

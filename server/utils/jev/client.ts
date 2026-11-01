@@ -221,7 +221,7 @@ export function createJevClient(options: JevClientOptions): JevClient {
         explorationValue: scoreJudgment(answers.exploration_value),
       }
       await cache.set(key, judged)
-      return judgmentOf(judged, false, usage.input_tokens)
+      return judgmentOf(judged, false, usage.input_tokens ?? undefined)
     },
   }
 }
@@ -271,7 +271,7 @@ const ResultSchema = v.object({
     risk: scoreSchema(JUDGE_QUESTIONS.risk.criteria.length),
     exploration_value: scoreSchema(JUDGE_QUESTIONS.exploration_value.criteria.length),
   }),
-  usage: v.object({ input_tokens: v.number() }),
+  usage: v.object({ input_tokens: v.nullable(v.number()) }),
 })
 
 function scoreJudgment(answer: {

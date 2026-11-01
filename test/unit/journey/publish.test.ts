@@ -31,7 +31,7 @@ import {
   publishSegment,
   publishStop,
 } from '#server/utils/journey/publish'
-import { CountingBlobs, MemoryBlobs } from './helpers'
+import { CountingStore, MemoryBlobs } from './helpers'
 
 const world = defineWorld({ seed: 'mars' })
 const disk = computeStopDisk(world, { center: { x: 0, y: 0 }, radius: 150 })
@@ -46,14 +46,11 @@ describe('putAll', () => {
     Array.from({ length: n }, (_, k) => ({ key: `k/${k}`, bytes, contentType: 'x/y' }))
 
   it(`keeps exactly ${PUT_CONCURRENCY} writes in flight while it can, and writes every entry`, async () => {
-    const blobs = new CountingBlobs()
-    const result = await blobs.drive(
-      putAll(createJourneyStore({ store: blobs }), entries(50)),
-      PUT_CONCURRENCY,
-    )
-    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
+    const counting = new CountingStore()
+    const result = await counting.drive(putAll(counting.store, entries(50)))
+    expect(counting.maxInFlight).toBe(PUT_CONCURRENCY)
     expect(result.written.map((w) => w.key)).toEqual(entries(50).map((e) => e.key))
-    expect(new Set(blobs.writes).size).toBe(50)
+    expect(new Set(counting.blobs.writes).size).toBe(50)
   })
 
   it('skips keys already stored without encoding them', async () => {
@@ -249,16 +246,10 @@ describe('publishSegment', () => {
 
   it(`keeps exactly ${PUT_CONCURRENCY} slices in flight while it can`, async () => {
     expect(slices.length).toBeGreaterThan(PUT_CONCURRENCY)
-    const blobs = new CountingBlobs()
-    await blobs.drive(
-      publishSegment(createJourneyStore({ store: blobs }), {
-        segment,
-        segmentId: 'seg-1',
-      }),
-      PUT_CONCURRENCY,
-    )
-    expect(blobs.maxInFlight).toBe(PUT_CONCURRENCY)
-    expect(new Set(blobs.writes).size).toBe(2 * slices.length + 1)
+    const counting = new CountingStore()
+    await counting.drive(publishSegment(counting.store, { segment, segmentId: 'seg-1' }))
+    expect(counting.maxInFlight).toBe(PUT_CONCURRENCY)
+    expect(new Set(counting.blobs.writes).size).toBe(2 * slices.length + 1)
   })
 
   it('run again after being cut short, writes only the missing blobs, then the manifest', async () => {

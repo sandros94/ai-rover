@@ -27,8 +27,8 @@ afterEach(async () => {
   await migrations.remove()
 })
 
-async function rows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
-  return ((await useDB().execute(query)) as { rows: T[] }).rows
+function rows<T extends Record<string, unknown>>(query: ReturnType<typeof sql>) {
+  return useDB().execute<T>(query, 'objects')
 }
 
 const initFile = () => join(migrations.dir, INIT, 'migration.sql')

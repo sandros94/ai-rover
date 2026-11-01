@@ -83,11 +83,6 @@ async function run(
   }
 }
 
-/** The rows of `query`, as both platform drivers answer them. */
-async function rowsOf<T>(db: DB, query: ReturnType<typeof sql>): Promise<T[]> {
-  return ((await db.execute(query)) as { rows: T[] }).rows
-}
-
 /** Everything an operator needs to name the failing step; only ever sent to an admin. */
 function detailOf(error: unknown): MissionDiagnosis['error'] {
   const name = error instanceof Error ? error.constructor.name : typeof error
@@ -182,25 +177,27 @@ export async function diagnoseDatabase(connect: () => DB): Promise<DatabaseDiagn
   const tables: Record<string, number> = {}
   const outcome = await run(async () => {
     const db = connect()
-    const rows = <T>(query: ReturnType<typeof sql>) => rowsOf<T>(db, query)
-    const [tracking] = await rows<{ present: boolean }>(
+    const [tracking] = await db.execute<{ present: boolean }>(
       sql`select to_regclass('netlify.migrations') is not null as present`,
+      'objects',
     )
     if (tracking?.present) {
       /*
        * The platform's tracking table and the local emulation's do not share a column layout, so
        * each row is read whole and the migration is whatever value looks like a migration name.
        */
-      const ran = await rows<{ row: Record<string, unknown> }>(
+      const ran = await db.execute<{ row: Record<string, unknown> }>(
         sql`select to_jsonb(m) as row from netlify.migrations m`,
+        'objects',
       )
       migrations.push(...ran.map((r) => migrationLabel(r.row)).toSorted())
     }
     const present = new Set(
       (
-        await rows<{ name: string }>(
+        await db.execute<{ name: string }>(
           sql`select table_name as name from information_schema.tables
               where table_schema = 'public' and table_type = 'BASE TABLE'`,
+          'objects',
         )
       ).map((row) => row.name),
     )
@@ -229,8 +226,7 @@ export async function diagnoseLocks(
   let oldestTransactionS: number | null = null
   const stuck: StuckSession[] = []
   const outcome = await run(async () => {
-    const sessions = await rowsOf<Omit<StuckSession, 'ageS'> & { ageS: number | null }>(
-      connect(),
+    const sessions = await connect().execute<Omit<StuckSession, 'ageS'> & { ageS: number | null }>(
       sql`select a.pid, a.state, a.wait_event_type as "waitEventType",
             extract(epoch from ${now.toISOString()}::timestamptz - a.xact_start)::float8 as "ageS",
             exists (
@@ -239,6 +235,7 @@ export async function diagnoseLocks(
             ) as "holdsAdvisoryLock"
           from pg_stat_activity a
           where a.datname = current_database() and a.state is not null`,
+      'objects',
     )
     for (const session of sessions) {
       states[session.state] = (states[session.state] ?? 0) + 1

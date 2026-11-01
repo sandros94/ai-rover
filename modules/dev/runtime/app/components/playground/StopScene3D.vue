@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue
 import { LinearToneMapping } from 'three'
 import { useRoute, useScenePassTiming, useSceneQuality, useStopFog } from '#imports'
 import { createTerrainSampler, destinationObject, drivenPath } from '#shared/utils/client'
+import type { SceneTier } from '#shared/utils/client/scene'
 import { chunksFromGrid } from '#shared/utils/client/scene'
 import { KEYFRAME_FIELDS } from '#shared/utils/drive'
 import type { Chunk } from '#shared/utils/terrain'
@@ -80,6 +81,10 @@ const tiers = computed(() => [
   { label: 'Medium', value: 'medium' },
   { label: 'Low', value: 'low' },
 ])
+const tier = computed({
+  get: () => choice.value.tier,
+  set: (next: SceneTier | 'auto') => (choice.value = { ...choice.value, tier: next }),
+})
 const timing = useScenePassTiming()
 const ms = (value: number) => value.toFixed(2)
 
@@ -175,7 +180,7 @@ const deaths = computed(() => {
       </label>
       <USwitch v-model="cycling" :label="`Cycle a sol in ${CYCLE_S} s`" />
       <USelect
-        v-model="choice"
+        v-model="tier"
         :items="tiers"
         class="w-40"
         aria-label="Scene quality"

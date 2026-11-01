@@ -301,10 +301,11 @@ export async function underMissionLock<T>(
       if (lock === 'wait') {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${missionId}))`)
       } else {
-        const { rows } = (await tx.execute(
+        const [row] = await tx.execute<{ locked: boolean }>(
           sql`select pg_try_advisory_xact_lock(hashtext(${missionId})) as locked`,
-        )) as { rows: { locked: boolean }[] }
-        if (!rows[0]?.locked) return 'busy' as const
+          'objects',
+        )
+        if (!row?.locked) return 'busy' as const
       }
       return apply(tx)
     })

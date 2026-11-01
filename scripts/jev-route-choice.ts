@@ -91,7 +91,7 @@ for (const { seed, goal } of CASES) {
   }
   const result = await client.systemOne({ state: common, questions })
   writeFixture(`route-choice-${seed}`, recorder.exchanges.at(-1)!)
-  inputTokens += result.usage.input_tokens
+  inputTokens += result.usage.input_tokens ?? 0
 
   const byCost = candidates.map((c, k) => ({ k, cost: c.cost })).sort((a, b) => a.cost - b.cost)
   const rankOf = (k: number) => byCost.findIndex((entry) => entry.k === k) + 1

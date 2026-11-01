@@ -703,10 +703,10 @@ describe('the mission lock', () => {
             const value = Reflect.get(target, prop, target) as unknown
             return typeof value === 'function' ? value.bind(target) : value
           }
-          return async (query: SQL) => {
+          return async (query: SQL, ...rest: unknown[]) => {
             const statement = dialect.sqlToQuery(query).sql
             if (/pg_(try_)?advisory_xact_lock/.test(statement)) return lock(statement)
-            return target.execute(query)
+            return (target.execute.bind(target) as (...args: unknown[]) => unknown)(query, ...rest)
           }
         },
       })
@@ -743,7 +743,7 @@ describe('the mission lock', () => {
   it('skips a tick that does not wait while the lock is held, applying nothing', async () => {
     const m = await landed()
     await m.submit(m.ada.id, { x: 0, y: 20 }, at(T0, MINUTE))
-    const busy = contended(() => ({ rows: [{ locked: false }] }))
+    const busy = contended(() => [{ locked: false }])
     const now = at(T0, 6 * MINUTE)
     const tick = await tickMission(busy, {
       store: m.store,

@@ -42,17 +42,19 @@ export async function databaseStatus(
   if (!base.loopback) return { ...base, ready: false, applied: [], pending: [], counts: {} }
 
   const db = useDB()
-  const [tracking] = await rows<{ migrations: boolean; digests: boolean }>(
+  const [tracking] = await db.execute<{ migrations: boolean; digests: boolean }>(
     sql`select to_regclass('netlify.migrations') is not null as migrations,
                to_regclass('rover_dev.migration_digest') is not null as digests`,
+    'objects',
   )
   const ran = tracking?.migrations
-    ? await rows<{ name: string; digest: string | null; recorded_ms: number | null }>(
+    ? await db.execute<{ name: string; digest: string | null; recorded_ms: number | null }>(
         tracking.digests
           ? sql`select m.name, d.digest, extract(epoch from d.recorded_at) * 1000 as recorded_ms
                 from netlify.migrations m left join rover_dev.migration_digest d on d.name = m.name
                 order by m.name`
           : sql`select name, null as digest, null as recorded_ms from netlify.migrations order by name`,
+        'objects',
       )
     : []
   const applied: AppliedMigration[] = []
@@ -70,20 +72,18 @@ export async function databaseStatus(
   const pending = (await listMigrations(directory)).filter((name) => !done.has(name))
 
   const counts: Record<string, number> = {}
-  const tables = await rows<{ name: string }>(
+  const tables = await db.execute<{ name: string }>(
     sql`select table_name as name from information_schema.tables
         where table_schema = 'public' and table_type = 'BASE TABLE' order by 1`,
+    'objects',
   )
   for (const { name } of tables) {
-    const [row] = await rows<{ n: number }>(
+    const [row] = await db.execute<{ n: number }>(
       sql`select count(*)::int as n from ${sql.identifier('public')}.${sql.identifier(name)}`,
+      'objects',
     )
     counts[name] = row?.n ?? 0
   }
 
   return { ...base, ready: refusal === null && pending.length === 0, applied, pending, counts }
-
-  async function rows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
-    return ((await db.execute(query)) as { rows: T[] }).rows
-  }
 }

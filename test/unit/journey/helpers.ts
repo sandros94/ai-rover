@@ -1,4 +1,5 @@
-import type { BlobStore } from '#server/utils/journey/store'
+import type { BlobStore, JourneyStore } from '#server/utils/journey/store'
+import { createJourneyStore } from '#server/utils/journey/store'
 
 /** In-memory stand-in for a Netlify Blobs store, recording the order of writes. */
 export class MemoryBlobs implements BlobStore {
@@ -32,62 +33,58 @@ export class MemoryBlobs implements BlobStore {
   }
 }
 
-/** Event-loop turns {@link CountingBlobs.drive} waits for writes to arrive before it gives up. */
-const IDLE_TURNS = 1000
-
-const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
+/** Resolves once every microtask queued so far, and each one those queue, has run. */
+const settled = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 /**
- * {@link MemoryBlobs} whose writes are held until released, counting how many overlap at most.
- * No clock is involved: the test decides when each write completes (see {@link drive}).
+ * A journey store over {@link MemoryBlobs} whose `putImmutable` calls are held until released,
+ * counting how many overlap at most. A write is held as it is called, before it deflates
+ * anything, so a writer waiting only on the store has started all it will once the microtasks
+ * queued so far have run. No clock is involved: the test decides when each write runs (see
+ * {@link drive}).
  */
-export class CountingBlobs extends MemoryBlobs {
+export class CountingStore {
+  readonly blobs = new MemoryBlobs()
+  readonly store: JourneyStore
   inFlight = 0
   maxInFlight = 0
-  /** Resolvers of the writes held, oldest first. */
-  private readonly held: (() => void)[] = []
+  /** The writes held, oldest first; each runs once released, and `done` settles with it. */
+  private readonly held: { release: () => void; done: Promise<unknown> }[] = []
 
-  override async set(
-    key: string,
-    data: ArrayBuffer,
-    options: { metadata: Record<string, unknown> },
-  ) {
-    this.maxInFlight = Math.max(this.maxInFlight, ++this.inFlight)
-    try {
-      await new Promise<void>((resolve) => this.held.push(resolve))
-      await super.set(key, data, options)
-    } finally {
-      this.inFlight--
+  constructor() {
+    const inner = createJourneyStore({ store: this.blobs })
+    this.store = {
+      ...inner,
+      putImmutable: (...args) => {
+        this.maxInFlight = Math.max(this.maxInFlight, ++this.inFlight)
+        const { promise, resolve } = Promise.withResolvers<void>()
+        const done = promise.then(() => inner.putImmutable(...args)).finally(() => this.inFlight--)
+        this.held.push({ release: resolve, done })
+        return done
+      },
     }
   }
 
   /**
-   * Runs `work` to its end, completing the held writes one at a time, oldest first, each only
-   * once the writer has started all it will: `bound` of them, or, when fewer are left, those it
-   * starts before the event loop has turned {@link IDLE_TURNS} times with no new one (deflating
-   * a blob takes a few turns). A writer that keeps to `bound` then reaches it exactly whenever it
-   * has that many to write. Returns what `work` resolves to; throws instead of hanging when
-   * `work` stays pending with no write held.
+   * Runs `work` to its end, letting it start every write it will before releasing the oldest
+   * held one, then waiting for that write to finish, one write at a time. A writer bounded to
+   * `n` writes in flight so keeps exactly `n` held whenever it has that many to write. Returns
+   * what `work` resolves to; throws instead of hanging when `work` stays pending with no write
+   * held.
    */
-  async drive<T>(work: Promise<T>, bound: number): Promise<T> {
+  async drive<T>(work: Promise<T>): Promise<T> {
     let done = false
     const finished = work.finally(() => {
       done = true
     })
     finished.catch(() => {})
-    while (!done) {
-      let quiet = 0
-      let count = this.held.length
-      while (!done && this.held.length < bound && quiet < IDLE_TURNS) {
-        await nextTurn()
-        quiet = this.held.length === count ? quiet + 1 : 0
-        count = this.held.length
-      }
+    while (true) {
+      await settled()
       if (done) break
-      if (!this.held.length) {
-        throw new Error(`No write arrived in ${IDLE_TURNS} turns and the work is still pending.`)
-      }
-      this.held.shift()!()
+      const next = this.held.shift()
+      if (!next) throw new Error('The work is still pending with no write held.')
+      next.release()
+      await next.done.catch(() => {})
     }
     return finished
   }

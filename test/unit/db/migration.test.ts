@@ -5,6 +5,7 @@ import { applyMigrations, NetlifyDB } from '@netlify/database-dev'
 import { sql as raw } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/netlify-db'
 import { describe, expect, it } from 'vitest'
+import type { DB } from '#server/database/db'
 import { relations } from '#server/database/schema'
 import { DEFAULT_MISSION_RULES, MissionError, parseMissionRules } from '#shared/utils/mission'
 import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
@@ -65,7 +66,7 @@ describe('the round_anchor migration', () => {
   it('applies after init and backfills anchors and rejection reasons on existing rows', async () => {
     const server = new NetlifyDB({ logger: () => {} })
     const connection = getDatabase({ connectionString: await server.start() })
-    const db = drizzle({ client: connection, relations })
+    const db: DB = drizzle({ client: connection, relations })
     try {
       const [init, ...later] = readdirSync(MIGRATIONS_DIR).toSorted()
       expect(init).toMatch(/_init$/)
@@ -91,12 +92,13 @@ describe('the round_anchor migration', () => {
       }
 
       expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(later)
-      const rounds = await db.execute(raw`select anchor_x, anchor_y from round`)
-      expect(rounds.rows).toEqual([{ anchor_x: 12.5, anchor_y: -4 }])
+      const rounds = await db.execute(raw`select anchor_x, anchor_y from round`, 'objects')
+      expect(rounds).toEqual([{ anchor_x: 12.5, anchor_y: -4 }])
       const submissions = await db.execute(
         raw`select status, rejection_reason from submission order by id`,
+        'objects',
       )
-      expect(submissions.rows).toEqual([
+      expect(submissions).toEqual([
         { status: 'rejected', rejection_reason: 'judged-infeasible' },
         { status: 'open', rejection_reason: null },
       ])
@@ -111,7 +113,7 @@ describe('the due_and_jev_cache migration', () => {
   it('makes existing active missions due and gives their rules the attempt cap', async () => {
     const server = new NetlifyDB({ logger: () => {} })
     const connection = getDatabase({ connectionString: await server.start() })
-    const db = drizzle({ client: connection, relations })
+    const db: DB = drizzle({ client: connection, relations })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_due_and_jev_cache'))
@@ -128,10 +130,13 @@ describe('the due_and_jev_cache migration', () => {
           ('01900000-0000-7000-8000-000000000003', 'mars', '0123456789abcdef', ${capped}, 'ended')`)
 
       expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
-      const missions = await db.execute<{ due: boolean; cap: number }>(raw`
+      const missions = await db.execute(
+        raw`
         select next_due_at is not null as due, (config -> 'rules' -> 'maxJudgedPerRound')::int as cap
-        from mission order by id`)
-      expect(missions.rows).toEqual([
+        from mission order by id`,
+        'objects',
+      )
+      expect(missions).toEqual([
         { due: true, cap: 5 },
         { due: false, cap: 5 },
         { due: false, cap: 2 },
@@ -147,7 +152,7 @@ describe('the ai_judgment migration', () => {
   it('renames the judgment cache in place, keeping its rows and primary key', async () => {
     const server = new NetlifyDB({ logger: () => {} })
     const connection = getDatabase({ connectionString: await server.start() })
-    const db = drizzle({ client: connection, relations })
+    const db: DB = drizzle({ client: connection, relations })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_ai_judgment'))
@@ -157,13 +162,19 @@ describe('the ai_judgment migration', () => {
         insert into jev_judgment (hash, model, answers) values ('h1', 'm', '{"verdict":"accept"}')`)
 
       expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
-      const rows = await db.execute(raw`select hash, model, answers from ai_judgment`)
-      expect(rows.rows).toEqual([{ hash: 'h1', model: 'm', answers: { verdict: 'accept' } }])
-      const keys = await db.execute(raw`
-        select conname from pg_constraint where conrelid = 'ai_judgment'::regclass and contype = 'p'`)
-      expect(keys.rows).toEqual([{ conname: 'ai_judgment_pkey' }])
-      const old = await db.execute(raw`select to_regclass('jev_judgment') is null as gone`)
-      expect(old.rows).toEqual([{ gone: true }])
+      const rows = await db.execute(raw`select hash, model, answers from ai_judgment`, 'objects')
+      expect(rows).toEqual([{ hash: 'h1', model: 'm', answers: { verdict: 'accept' } }])
+      const keys = await db.execute(
+        raw`
+        select conname from pg_constraint where conrelid = 'ai_judgment'::regclass and contype = 'p'`,
+        'objects',
+      )
+      expect(keys).toEqual([{ conname: 'ai_judgment_pkey' }])
+      const old = await db.execute(
+        raw`select to_regclass('jev_judgment') is null as gone`,
+        'objects',
+      )
+      expect(old).toEqual([{ gone: true }])
     } finally {
       await connection.pool.end()
       await server.stop()
@@ -175,7 +186,7 @@ describe('the segment_time_band migration', () => {
   it('moves stored rules to the current shape and gives stored submissions their exploration', async () => {
     const server = new NetlifyDB({ logger: () => {} })
     const connection = getDatabase({ connectionString: await server.start() })
-    const db = drizzle({ client: connection, relations })
+    const db: DB = drizzle({ client: connection, relations })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_segment_time_band'))
@@ -228,16 +239,18 @@ describe('the segment_time_band migration', () => {
       expect(() => parseMissionRules(older)).toThrow(MissionError)
 
       expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
-      const missions = await db.execute(raw`select config from mission order by id`)
-      const [migrated, tunedAfter] = (missions.rows as { config: { rules: unknown } }[]).map(
-        (row) => parseMissionRules(row.config.rules),
+      const missions = await db.execute<{ config: { rules: unknown } }>(
+        raw`select config from mission order by id`,
+        'objects',
       )
+      const [migrated, tunedAfter] = missions.map((row) => parseMissionRules(row.config.rules))
       expect(migrated).toEqual(DEFAULT_MISSION_RULES)
       expect(tunedAfter).toEqual(tuned)
       const submissions = await db.execute(
         raw`select exploration, exploration_parts from submission order by id`,
+        'objects',
       )
-      expect(submissions.rows).toEqual([
+      expect(submissions).toEqual([
         { exploration: 0.5, exploration_parts: { pathInFog: 0.5, goalInFog: 1, pocket: 0 } },
         { exploration: 0, exploration_parts: { pathInFog: 0, goalInFog: 0, pocket: 0 } },
       ])
@@ -252,7 +265,7 @@ describe('the stop_radius_rule migration', () => {
   it('gives the rules of existing missions the stop radius their stops were published with', async () => {
     const server = new NetlifyDB({ logger: () => {} })
     const connection = getDatabase({ connectionString: await server.start() })
-    const db = drizzle({ client: connection, relations })
+    const db: DB = drizzle({ client: connection, relations })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_stop_radius_rule'))
@@ -268,9 +281,12 @@ describe('the stop_radius_rule migration', () => {
           ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${small})`)
 
       expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
-      const missions = await db.execute<{ radius: number }>(raw`
-        select (config -> 'rules' -> 'stopRadiusM')::int as radius from mission order by id`)
-      expect(missions.rows).toEqual([{ radius: 500 }, { radius: 120 }])
+      const missions = await db.execute(
+        raw`
+        select (config -> 'rules' -> 'stopRadiusM')::int as radius from mission order by id`,
+        'objects',
+      )
+      expect(missions).toEqual([{ radius: 500 }, { radius: 120 }])
     } finally {
       await connection.pool.end()
       await server.stop()

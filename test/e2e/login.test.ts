@@ -11,7 +11,6 @@ describe('e2e: the login page rendered on the server', async () => {
   await setup({
     port: PORT,
     env: {
-      NUXT_SESSION_KEY: 'e2e-login-test-secret-of-at-least-32-characters',
       NUXT_OAUTH_ORIGINS: LISTED,
       NUXT_OAUTH_GITHUB_CLIENT_ID: 'e2e',
       NUXT_OAUTH_GITHUB_CLIENT_SECRET: 'e2e',
