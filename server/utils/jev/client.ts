@@ -158,12 +158,14 @@ export function createJevClient(options: JevClientOptions): JevClient {
   /*
    * The base URL is pinned: the SDK would otherwise take it from the environment, and a hosting
    * platform's AI gateway can inject a provider URL of its own there, which then refuses this
-   * project's key.
+   * project's key. Bodies go uncompressed: Netlify's AI gateway answers a zstd-encoded one with
+   * 400 "Invalid request body", though TypeSafe's own API accepts it.
    */
   const client = new TypeSafeClient({
     apiKey,
     baseURL: options.baseURL ?? TYPESAFE_API_URL,
     defaultModel: JEV_MODEL,
+    compression: false,
     ...(options.fetch && { fetch: options.fetch }),
     ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
     ...(options.maxRetries !== undefined && { retry: { maxRetries: options.maxRetries } }),

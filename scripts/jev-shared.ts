@@ -3,7 +3,6 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { zstdDecompressSync } from 'node:zlib'
 import type { StopDisk, World } from '#shared/utils/terrain'
 import {
   computeStopDisk,
@@ -67,12 +66,7 @@ export function printTable(head: string[], body: string[][]): void {
   for (const line of [head, head.map(() => '---'), ...body]) console.log(`| ${line.join(' | ')} |`)
 }
 
-/** The JSON text of a request body, decompressing one the SDK sent zstd-encoded. */
 function bodyText(init: RequestInit | undefined): string {
-  const body = init?.body
-  if (typeof body === 'string') return body
-  if (body instanceof Uint8Array && new Headers(init?.headers).get('content-encoding') === 'zstd') {
-    return zstdDecompressSync(body).toString('utf8')
-  }
-  throw new Error('Expected a JSON request body, as text or zstd-encoded bytes.')
+  if (typeof init?.body !== 'string') throw new Error('Expected a JSON string request body.')
+  return init.body
 }

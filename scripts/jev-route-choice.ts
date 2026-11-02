@@ -35,6 +35,8 @@ const recorder = recordingFetch()
 const client = new TypeSafeClient({
   apiKey: apiKeyFromEnv(),
   defaultModel: JEV_MODEL,
+  // Uncompressed, as the server's client sends them, so the recorded request is the server's.
+  compression: false,
   fetch: recorder.fetch,
   retry: { maxRetries: 0 },
 })

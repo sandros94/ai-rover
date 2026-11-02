@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { zstdDecompressSync } from 'node:zlib'
 import type { SubmissionSummary } from '#shared/utils/nav'
 import type { JevCache, JudgedAnswers } from '#server/utils/jev/client'
 import { jevRequestKey } from '#server/utils/jev/client'
@@ -87,14 +86,9 @@ export function answersFetch(feasible: number) {
   return { fetch, calls }
 }
 
-/** The JSON text of a request body, decompressing one the SDK sent zstd-encoded. */
 function bodyText(init: RequestInit | undefined): string {
-  const body = init?.body
-  if (typeof body === 'string') return body
-  if (body instanceof Uint8Array && new Headers(init?.headers).get('content-encoding') === 'zstd') {
-    return zstdDecompressSync(body).toString('utf8')
-  }
-  throw new Error('Expected a JSON request body, as text or zstd-encoded bytes.')
+  if (typeof init?.body !== 'string') throw new Error('Expected a JSON string request body.')
+  return init.body
 }
 
 /** An in-memory Jev cache; `entries` shows what it holds. */
