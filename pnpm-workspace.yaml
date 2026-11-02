@@ -5,6 +5,12 @@ minimumReleaseAgeExclude:
   - 'nuxt-nightly'
   - '@nuxt/*'
 
+packageExtensions:
+  # `@tresjs/nuxt` imports `@nuxt/devtools-kit` at runtime without declaring it.
+  '@tresjs/nuxt':
+    dependencies:
+      '@nuxt/devtools-kit': ^4.0.0
+
 allowBuilds:
   '@parcel/watcher': false
   'better-sqlite3': true
