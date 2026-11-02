@@ -39,9 +39,9 @@
     "simplex-noise": "^4.0.3",
     "tailwindcss": "npm:tailwindcss@^4.3.3",
     "three": "^0.187.0",
-    "unauth": "https://pkg.pr.new/sandros94/unauth@d07ba91",
-    "unjwt": "^0.7.3",
-    "unsecure": "npm:unsecure@^0.3.1",
+    "unauth": "https://pkg.pr.new/unauth@915b82a",
+    "unjwt": "https://pkg.pr.new/sandros94/unjwt@5db6c51",
+    "unsecure": "npm:unsecure@^0.3.4",
     "valibot": "npm:valibot@^1.5.0",
     "vue": "npm:vue@^3.5.44"
   },

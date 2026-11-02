@@ -161,7 +161,7 @@ describe('admin page', () => {
         runtime: {
           node: 'v24.0.0',
           region: 'eu-central-1',
-          hasSessionKey: true,
+          hasAppSecret: true,
           hasTypesafeToken: true,
           originsConfigured: true,
         },

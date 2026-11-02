@@ -1,8 +1,6 @@
 import type { H3Event } from 'nitro/h3'
 import { defineHandler, HTTPError } from 'nitro/h3'
 import { useRuntimeConfig } from 'nitro/runtime-config'
-import type { UserSessions } from '../../../modules/auth/runtime/server/lib/session'
-import { useAuthContext } from '../../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../../database/db'
 import type { IdentityProvider } from '../../database/schema'
 import { IDENTITY_PROVIDERS } from '../../database/schema'
@@ -12,11 +10,14 @@ import { listIdentities } from '../../repositories/users'
 import { useDB } from '../db'
 import type { JourneyStore } from '../journey/store'
 import { createJourneyStore } from '../journey/store'
+import { signInOrigins } from '../oauth-sign-in'
+import type { AuthSession } from '../session'
+import { signedInUser, useAuthSessions } from '../session'
 import type { AdminStatus } from '#shared/utils/admin'
 
 /** The server settings diagnostics report on, by presence only. */
 export interface AdminSettings {
-  sessionKey: string
+  appSecret: string
   typesafeToken: string
   origins: string
 }
@@ -33,7 +34,7 @@ export interface AdminAllowlist {
 /** What the admin routes reach beyond the request; tests pass their own. */
 export interface AdminContext {
   allowlist: () => AdminAllowlist
-  sessions: () => Pick<UserSessions, 'get'>
+  sessions: () => { use(event: H3Event): Promise<Pick<AuthSession, 'id' | 'data'>> }
   /** Every identity linked to the account, from the database. */
   identitiesOf: (userId: string) => Promise<readonly Identity[]>
   db: () => DB
@@ -94,16 +95,16 @@ export function configuredAllowlist(): AdminAllowlist {
 
 export const PLATFORM: AdminContext = {
   allowlist: configuredAllowlist,
-  sessions: () => useAuthContext().sessions,
+  sessions: useAuthSessions,
   identitiesOf: (userId) => listIdentities(useDB(), userId),
   db: useDB,
   store: () => createJourneyStore(),
   settings: () => {
     const config = useRuntimeConfig()
     return {
-      sessionKey: config.sessionKey,
+      appSecret: config.appSecret,
       typesafeToken: config.typesafeToken,
-      origins: config.oauth.origins,
+      origins: signInOrigins(config.oauth).origins.join(','),
     }
   },
 }
@@ -121,7 +122,7 @@ export function noStore(event: H3Event) {
 export async function adminOf(event: H3Event, context: AdminContext): Promise<boolean> {
   const allowlist = context.allowlist()
   if (allowlist.keys.size === 0) return false
-  const { user } = await context.sessions().get(event)
+  const user = signedInUser(await context.sessions().use(event))
   if (!user) return false
   return isAdmin(await context.identitiesOf(user.id), allowlist)
 }

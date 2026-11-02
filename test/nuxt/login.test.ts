@@ -46,6 +46,20 @@ describe('login page', () => {
     expect(wrapper.text()).not.toContain('Bluesky')
   })
 
+  it('posts the handle to the AT Protocol sign-in as a form, keeping the landing path', async () => {
+    const wrapper = await mountSuspended(LoginPage, { route: '/login?redirect=/drives' })
+    const form = wrapper.find('[data-test=atproto-sign-in]')
+    expect(form.attributes('method')).toBe('post')
+    expect(form.attributes('action')).toBe('/api/auth/atproto?redirect=%2Fdrives')
+    expect(form.find('input').attributes('name')).toBe('handle')
+    const submit = form.find('button[type=submit]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await form.find('input').setValue('  ')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await form.find('input').setValue('alice.bsky.social')
+    expect(form.find('button[type=submit]').attributes('disabled')).toBeUndefined()
+  })
+
   it('offers GitHub and Discord as redirect buttons when configured', async () => {
     offered = ['github', 'discord', 'atproto']
     useState('rover-auth-providers').value = null

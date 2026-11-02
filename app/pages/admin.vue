@@ -141,11 +141,11 @@ const sections = computed(() => {
     {
       key: 'runtime',
       label: 'Runtime',
-      ok: runtime.hasSessionKey && runtime.hasTypesafeToken && runtime.originsConfigured,
+      ok: runtime.hasAppSecret && runtime.hasTypesafeToken && runtime.originsConfigured,
       ms: undefined,
       lines: [
         `Node ${runtime.node}${runtime.region ? `, region ${runtime.region}` : ''}`,
-        `Session key: ${yesNo(runtime.hasSessionKey)}`,
+        `App secret: ${yesNo(runtime.hasAppSecret)}`,
         `TypeSafe token: ${yesNo(runtime.hasTypesafeToken)}`,
         `Sign-in origins: ${yesNo(runtime.originsConfigured)}`,
       ],

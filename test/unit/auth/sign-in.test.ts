@@ -1,5 +1,6 @@
-import { H3 } from 'nitro/h3'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { H3, HTTPError } from 'nitro/h3'
+import { UnauthError } from 'unauth/n'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
 import type { ProvenIdentity } from '#server/repositories/users'
 import {
@@ -8,72 +9,68 @@ import {
   findUserByIdentity,
   listIdentities,
 } from '#server/repositories/users'
-import { completeSignIn, failSignIn } from '#server/utils/sign-in'
-import type { CodeFlowProvider } from '~~/modules/auth/runtime/server/lib/code-flow'
-import { createCodeFlowHandler } from '~~/modules/auth/runtime/server/lib/code-flow'
-import type { GitHubFlow } from '~~/modules/auth/runtime/server/lib/flow'
+import { createGitHubSignIn } from '#server/utils/oauth-sign-in'
+import { signInSession } from '#server/utils/session'
+import { signInErrorCode, signInFailure } from '#server/utils/sign-in'
 import { createTestDb } from '../db/helpers'
-import { cookieHeader, openCookie, ORIGIN, setCookies, testAuth } from './helpers'
+import {
+  cookieHeader,
+  json,
+  mockFetch,
+  openSession,
+  ORIGIN,
+  setCookies,
+  testSignInContext,
+} from './helpers'
 
 let db: DB
 let close: () => Promise<void>
-beforeAll(async () => ({ db, close } = await createTestDb()))
+beforeAll(async () => {
+  ;({ db, close } = await createTestDb())
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+})
 afterAll(() => close())
 
-/** A provider that proves whichever subject the test names next, with no network. */
-function fakeProvider() {
-  const next = { subject: '', displayName: '' }
-  const provider: CodeFlowProvider<GitHubFlow> = {
-    provider: 'github',
-    label: 'Fake',
-    async authorize({ state }) {
-      return { url: new URL(`https://provider.test/authorize?state=${state}`), flow: {} }
-    },
-    async identify() {
-      return { subject: next.subject, profile: { displayName: next.displayName } }
-    },
-  }
-  return { provider, next }
-}
-
+/** GitHub sign-in over a GitHub that proves whichever account the test names next. */
 function appWith() {
-  const auth = testAuth(globalThis.fetch)
-  const { provider, next } = fakeProvider()
+  const next = { id: 0, login: '' }
+  const { fetch } = mockFetch({
+    'POST https://github.com/login/oauth/access_token': () =>
+      json({ access_token: 'gho_secret', token_type: 'bearer', scope: '' }),
+    'GET https://api.github.com/user': () => json({ ...next, avatar_url: null }),
+  })
+  const context = testSignInContext(db, fetch)
   const app = new H3()
-    .get(
+    .all(
       '/api/auth/github',
-      createCodeFlowHandler(
-        auth,
-        provider,
-        { clientId: 'id', clientSecret: 'secret' },
-        {
-          onSuccess: (event, result) =>
-            completeSignIn(event, { db, sessions: auth.sessions }, result),
-          onError: (event, error) => failSignIn(event, error, auth.sessions),
-        },
-      ),
+      createGitHubSignIn({ clientId: 'id', clientSecret: 'secret' }, context),
     )
     .post('/test/login-as/:id', async (event) => {
-      await auth.sessions.set(event, {
-        user: { id: event.context.params!.id!, displayName: 'Current', providers: ['discord'] },
+      await signInSession(await context.sessions.use(event), {
+        id: event.context.params!.id!,
+        displayName: 'Current',
+        providers: ['discord'],
       })
       return 'ok'
     })
 
   /** Runs the flow for `subject`, signed in as `as` when given, linking when `link`; `deny` refuses it at the provider. */
   async function run(
-    subject: string,
+    subject: number,
     options: { as?: string; link?: boolean; deny?: boolean } = {},
   ) {
-    next.subject = subject
-    next.displayName = `gh ${subject}`
+    next.id = subject
+    next.login = `gh-${subject}`
     const login = options.as
       ? await app.request(`${ORIGIN}/test/login-as/${options.as}`, { method: 'POST' })
       : undefined
     const jar = login ? [login] : []
+    const cookie = cookieHeader(...jar)
     const started = await app.request(
       `${ORIGIN}/api/auth/github?redirect=/settings${options.link ? '&link' : ''}`,
-      { headers: { cookie: cookieHeader(...jar) } },
+      options.link
+        ? { method: 'POST', headers: { cookie, 'origin': ORIGIN, 'sec-fetch-site': 'same-origin' } }
+        : { headers: { cookie } },
     )
     expect(started.status).toBe(302)
     const state = new URL(started.headers.get('location')!).searchParams.get('state')
@@ -85,7 +82,7 @@ function appWith() {
     return {
       status: callback.status,
       location: callback.headers.get('location'),
-      claims: session?.value ? await openCookie(session.value) : undefined,
+      claims: session?.value ? await openSession(session.value) : undefined,
     }
   }
   return { run }
@@ -98,65 +95,101 @@ function discord(displayName: string, subject: string): ProvenIdentity {
 describe('completing a sign-in', () => {
   it('creates an account for an unknown identity and signs into it', async () => {
     const { run } = appWith()
-    const { location, claims } = await run('101')
+    const { location, claims } = await run(101)
     expect(location).toBe('/settings')
     const user = await findUserByIdentity(db, { provider: 'github', subject: '101' })
-    expect(user).toMatchObject({ displayName: 'gh 101', primaryProvider: 'github' })
-    expect(claims).toMatchObject({ sub: user!.id, providers: ['github'] })
+    expect(user).toMatchObject({ displayName: 'gh-101', primaryProvider: 'github' })
+    expect(claims?.user).toMatchObject({ id: user!.id, providers: ['github'] })
   })
 
   it('attaches an unclaimed identity to the signed-in account when linking', async () => {
     const { run } = appWith()
     const current = await createUserWithIdentity(db, discord('Current', 'd-102'))
-    const { location, claims } = await run('102', { as: current.id, link: true })
+    const { location, claims } = await run(102, { as: current.id, link: true })
     expect(location).toBe('/settings')
     expect(await findUserByIdentity(db, { provider: 'github', subject: '102' })).toMatchObject({
       id: current.id,
       displayName: 'Current',
     })
-    expect(claims).toMatchObject({ sub: current.id, providers: ['discord', 'github'] })
+    expect(claims?.user).toMatchObject({ id: current.id, providers: ['discord', 'github'] })
   })
 
   it("merges the identity's account into the signed-in one when linking", async () => {
     const { run } = appWith()
-    await run('103')
+    await run(103)
     const other = (await findUserByIdentity(db, { provider: 'github', subject: '103' }))!
     const current = await createUserWithIdentity(db, discord('Current', 'd-103'))
-    const { claims } = await run('103', { as: current.id, link: true })
+    const { claims } = await run(103, { as: current.id, link: true })
     expect(await findUser(db, other.id)).toBeUndefined()
     expect((await listIdentities(db, current.id)).map((i) => i.provider).toSorted()).toEqual([
       'discord',
       'github',
     ])
-    expect(claims).toMatchObject({ sub: current.id, displayName: 'Current' })
+    expect(claims?.user).toMatchObject({ id: current.id, displayName: 'Current' })
   })
 
   it('signs into the holding account when not linking, whoever was signed in', async () => {
     const { run } = appWith()
-    await run('104')
+    await run(104)
     const holder = (await findUserByIdentity(db, { provider: 'github', subject: '104' }))!
     const current = await createUserWithIdentity(db, discord('Current', 'd-104'))
-    const { claims } = await run('104', { as: current.id })
-    expect(claims).toMatchObject({ sub: holder.id, providers: ['github'] })
+    const { claims } = await run(104, { as: current.id })
+    expect(claims?.user).toMatchObject({ id: holder.id, providers: ['github'] })
     expect(await findUser(db, current.id)).toBeDefined()
   })
 
   it('lands on the settings page with the code when a link cannot merge', async () => {
     const { run } = appWith()
-    await run('105')
+    await run(105)
     const current = await createUserWithIdentity(db, {
       provider: 'github',
       subject: '105-other',
       profile: { displayName: 'Current', avatarUrl: null, handle: null },
     })
-    const { status, location } = await run('105', { as: current.id, link: true })
+    const { status, location } = await run(105, { as: current.id, link: true })
     expect(status).toBe(302)
     expect(location).toBe('/settings?error=link-conflict')
   })
 
   it('lands on the login page with the code when signed out', async () => {
     const { run } = appWith()
-    const { location } = await run('106', { deny: true })
+    const { location } = await run(106, { deny: true })
     expect(location).toBe('/login?error=refused')
+  })
+})
+
+describe('signInErrorCode', () => {
+  it('maps the failed flows of unauth onto the codes the login page explains', () => {
+    const codes = {
+      ERR_AUTHN_FLOW_EXPIRED: 'state-mismatch',
+      ERR_AUTHN_STATE_MISMATCH: 'state-mismatch',
+      ERR_AUTHN_PROVIDER_REFUSED: 'refused',
+      ERR_AUTHN_LOGIN_HINT_REQUIRED: 'handle',
+      ERR_AUTHN_LOGIN_HINT_INVALID: 'handle',
+      ERR_AUTHN_TOKEN_EXCHANGE: 'provider',
+      ERR_AUTHN_PROFILE_INVALID: 'provider',
+      ERR_AUTHN_PROVIDER_ERROR: 'provider',
+      ERR_AUTHN_CROSS_SITE_START: 'sign-in-failed',
+      ERR_AUTHN_ORIGIN_UNTRUSTED: 'sign-in-failed',
+      ERR_AUTHN_UNAUTHENTICATED: 'sign-in-failed',
+      ERR_UNAUTH_CONFIG_INVALID: 'sign-in-failed',
+    } as const
+    const mapped = Object.fromEntries(
+      Object.keys(codes).map((code) => [code, signInErrorCode(new UnauthError('x', code))]),
+    )
+    expect(mapped).toEqual(codes)
+  })
+
+  it("reads the app's own failures, a database failure underneath and a provider's 502", () => {
+    expect(signInErrorCode(signInFailure('link-conflict', { status: 409, message: 'x' }))).toBe(
+      'link-conflict',
+    )
+    const postgres = Object.assign(new Error('connection refused'), { code: '08006' })
+    expect(signInErrorCode(new Error('query failed', { cause: postgres }))).toBe('database')
+    expect(signInErrorCode(new HTTPError({ status: 500, message: 'x', cause: postgres }))).toBe(
+      'database',
+    )
+    expect(signInErrorCode(new HTTPError({ status: 502, message: 'x' }))).toBe('provider')
+    expect(signInErrorCode(new Error('x'))).toBe('sign-in-failed')
   })
 })

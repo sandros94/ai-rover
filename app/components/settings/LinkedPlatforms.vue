@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type { AuthProvider } from '#auth'
-import { AUTH_PROVIDERS } from '#auth'
 import type { AccountView } from '#shared/utils/account'
+import type { AuthProvider } from '#shared/utils/sign-in'
+import { AUTH_PROVIDERS } from '#shared/utils/sign-in'
 
 /**
- * The account's identities: link the missing ones (by the sign-in flow, returning here), unlink
- * any but the last, and pick the one that supplies the name and avatar.
+ * The account's identities: link the missing ones (by the sign-in flow, returning here, started
+ * from a form, since a link is taken only as a same-origin `POST`; AT Protocol's names the account
+ * in its `handle` field), unlink any but the last, and pick the one that supplies the name and
+ * avatar.
  */
 const props = defineProps<{ account: AccountView; offered: AuthProvider[] }>()
 const emit = defineEmits<{ changed: [account: AccountView] }>()
@@ -31,15 +33,6 @@ const primaryItems = computed(() =>
 
 function linkUrl(provider: AuthProvider) {
   return signInUrl(provider, { redirect: '/settings', link: true })
-}
-
-async function linkAtproto() {
-  const value = handle.value.trim()
-  if (value) {
-    await navigateTo(signInUrl('atproto', { redirect: '/settings', link: true, handle: value }), {
-      external: true,
-    })
-  }
 }
 
 async function change(request: () => Promise<AccountView>) {
@@ -110,11 +103,13 @@ function choosePrimary(provider: AuthProvider) {
         <form
           v-else-if="provider === 'atproto'"
           data-test="link-atproto"
+          method="post"
+          :action="linkUrl(provider)"
           class="flex w-full gap-2 sm:w-auto"
-          @submit.prevent="linkAtproto"
         >
           <UInput
             v-model="handle"
+            name="handle"
             size="sm"
             placeholder="alice.bsky.social"
             aria-label="AT Protocol handle or DID"
@@ -122,7 +117,9 @@ function choosePrimary(provider: AuthProvider) {
           />
           <UButton type="submit" size="sm" :disabled="!handle.trim()">Link</UButton>
         </form>
-        <UButton v-else data-test="link" :to="linkUrl(provider)" external size="sm"> Link </UButton>
+        <form v-else method="post" :action="linkUrl(provider)">
+          <UButton data-test="link" type="submit" size="sm">Link</UButton>
+        </form>
       </li>
     </ul>
 

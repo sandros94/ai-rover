@@ -25,22 +25,38 @@ function samples(durationS: number, stepS: number): number[] {
   return out
 }
 
-/** Checks a move's rate, acceleration and jerk against its limits, and their continuity. */
+/**
+ * Checks a move's rate, acceleration and jerk against its limits, and their continuity, at every
+ * millisecond: the extremes over all samples are asserted once each, as a long move has hundreds
+ * of thousands of samples and an `expect` costs far more than the `moveAt` it checks.
+ */
 function expectWithinLimits(move: Move): void {
   const { limits: l, durationS } = move
   const h = 1e-3
+  let minRate = Infinity
+  let maxRate = -Infinity
+  let maxAccel = 0
+  let maxRateStep = 0
+  let maxAccelStep = 0
+  let minAdvance = Infinity
   let previous = moveAt(move, 0)
   for (const t of samples(durationS, h).slice(1)) {
     const at = moveAt(move, t)
-    expect(at.rate).toBeGreaterThanOrEqual(-1e-12)
-    expect(at.rate).toBeLessThanOrEqual(l.rate + 1e-12)
-    expect(Math.abs(at.accel)).toBeLessThanOrEqual(l.accel + 1e-12)
-    // Continuous rate and acceleration: no step bigger than the next derivative allows.
-    expect(Math.abs(at.rate - previous.rate)).toBeLessThanOrEqual(l.accel * h + 1e-12)
-    expect(Math.abs(at.accel - previous.accel)).toBeLessThanOrEqual(l.jerk * h + 1e-12)
-    expect(at.position).toBeGreaterThanOrEqual(previous.position)
+    minRate = Math.min(minRate, at.rate)
+    maxRate = Math.max(maxRate, at.rate)
+    maxAccel = Math.max(maxAccel, Math.abs(at.accel))
+    maxRateStep = Math.max(maxRateStep, Math.abs(at.rate - previous.rate))
+    maxAccelStep = Math.max(maxAccelStep, Math.abs(at.accel - previous.accel))
+    minAdvance = Math.min(minAdvance, at.position - previous.position)
     previous = at
   }
+  expect(minRate).toBeGreaterThanOrEqual(-1e-12)
+  expect(maxRate).toBeLessThanOrEqual(l.rate + 1e-12)
+  expect(maxAccel).toBeLessThanOrEqual(l.accel + 1e-12)
+  // Continuous rate and acceleration: no step bigger than the next derivative allows.
+  expect(maxRateStep).toBeLessThanOrEqual(l.accel * h + 1e-12)
+  expect(maxAccelStep).toBeLessThanOrEqual(l.jerk * h + 1e-12)
+  expect(minAdvance).toBeGreaterThanOrEqual(0)
 }
 
 describe('jerk-limited ramps', () => {

@@ -1,8 +1,5 @@
 import type { H3Event } from 'nitro/h3'
 import { defineHandler, HTTPError } from 'nitro/h3'
-import { useRuntimeConfig } from 'nitro/runtime-config'
-import type { UserSessions } from '../../../modules/auth/runtime/server/lib/session'
-import { useAuthContext } from '../../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../../database/db'
 import { DbError, isMissingUserViolation } from '../../database/errors'
 import type { Mission, UserAccount } from '../../database/schema'
@@ -15,6 +12,8 @@ import { lazyJevClient } from '../jev/client'
 import { JudgeError } from '../jev/errors'
 import type { JourneyStore } from '../journey/store'
 import { createJourneyStore } from '../journey/store'
+import type { AuthSessions } from '../session'
+import { useAuthSessions } from '../session'
 import { MissionError } from '#shared/utils/mission'
 import { NavError } from '#shared/utils/nav'
 import { TerrainError } from '#shared/utils/terrain'
@@ -162,7 +161,7 @@ export async function syncMission(
 /** What mission routes reach beyond the request; tests pass their own. */
 export interface MissionRouteContext {
   db: () => DB
-  sessions: () => Pick<UserSessions, 'require' | 'clear'>
+  sessions: () => AuthSessions
   store: () => JourneyStore
   dispatch: TickDispatcher
 }
@@ -171,10 +170,11 @@ let token: Promise<string> | undefined
 
 const PLATFORM: MissionRouteContext = {
   db: useDB,
-  sessions: () => useAuthContext().sessions,
+  sessions: useAuthSessions,
   store: () => createJourneyStore(),
   dispatch: createTickDispatcher({
-    token: () => (token ??= tickToken(useRuntimeConfig().sessionKey, Boolean(import.meta.dev))),
+    // From the environment, as the background function reads it: see `tickToken`.
+    token: () => (token ??= tickToken(process.env.NUXT_APP_SECRET, Boolean(import.meta.dev))),
   }),
 }
 
@@ -185,10 +185,10 @@ const PLATFORM: MissionRouteContext = {
 export async function requireSessionUser(
   db: DB,
   event: H3Event,
-  sessions: Pick<UserSessions, 'require'>,
+  sessions: Pick<AuthSessions, 'require'>,
 ): Promise<UserAccount> {
-  const { user } = await sessions.require(event)
-  const account = await findUser(db, user.id)
+  const { data } = await sessions.require(event)
+  const account = await findUser(db, data.user.id)
   if (!account) throw new DbError('USER_GONE', USER_GONE_MESSAGE)
   return account
 }
@@ -272,25 +272,18 @@ export function defineMissionHandlerWith<T, A extends MissionAccess, U extends b
 
 /**
  * The answer for anything a route throws, as {@link httpErrorOf} maps it; a `USER_GONE` answer
- * also clears the session so the browser signs in afresh.
+ * also clears the session so the browser signs in afresh. The session writes the expired cookie
+ * to the event's error headers too, which the thrown answer carries.
  */
 export async function answerRouteError(
   event: H3Event,
   error: unknown,
-  sessions: Pick<UserSessions, 'clear'>,
+  sessions: Pick<AuthSessions, 'use'>,
 ): Promise<HTTPError> {
   const answer = httpErrorOf(error)
   if ((answer.body as { code?: unknown } | undefined)?.code !== 'USER_GONE') return answer
-  await sessions.clear(event)
-  // An error answer carries its own headers, not the event's: the cleared cookie rides on it.
-  const cleared = event.res.headers.getSetCookie().map((cookie) => ['set-cookie', cookie])
-  return new HTTPError({
-    status: answer.status,
-    message: answer.message,
-    body: answer.body,
-    headers: cleared as [string, string][],
-    cause: answer.cause,
-  })
+  await (await sessions.use(event)).clear()
+  return answer
 }
 
 /**

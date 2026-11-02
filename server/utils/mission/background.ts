@@ -1,7 +1,7 @@
 import { purgeCache } from '@netlify/functions'
 import { secureCompare } from 'unsecure/compare'
+import { hkdf } from 'unsecure/hkdf'
 import * as v from 'valibot'
-import { deriveSecret, sessionSecret } from '../../../modules/auth/runtime/server/lib/key'
 import type { Mission } from '../../database/schema'
 import type { TickResult } from './tick'
 
@@ -37,13 +37,49 @@ export async function purgeMissionCache(missionId: string): Promise<void> {
   }
 }
 
+/** Shortest `NUXT_APP_SECRET` a tick token is derived from, as Nuxt requires of it. */
+const MIN_SECRET_LENGTH = 32
+
+/** Stands in for an unset `NUXT_APP_SECRET` under `nuxt dev`; public, so refused elsewhere. */
+const DEV_SEED = 'ai-rover development tick secret'
+
+let warned = false
+
 /**
- * The bearer a dispatcher sends and the background function expects: HKDF of `NUXT_SESSION_KEY`
- * (as given, `sessionKey` rules; under `nuxt dev` an empty key is the development seed) under its
- * own info, so it opens nothing a session key opens. Throws on a key `sessionKey` refuses.
+ * The bearer a dispatcher sends and the background function expects: 256 bits of HKDF over
+ * `NUXT_APP_SECRET` under the info `ai-rover:tick`, base64url, so it opens nothing else derived
+ * from the secret. Both sides pass the secret from the environment, since the background function
+ * runs outside Nitro; under `nuxt dev` Nuxt keeps a secret it generates in its runtime config
+ * alone, so there an unset one is the public {@link DEV_SEED}. Throws, before deriving anything,
+ * on an unset secret outside dev, on one under 32 characters and on the development seed itself.
  */
-export function tickToken(sessionKey: string, dev: boolean): Promise<string> {
-  return deriveSecret(sessionSecret(sessionKey, dev), 'rover-tick')
+export function tickToken(appSecret: string | undefined, dev: boolean): Promise<string> {
+  return hkdf(tickSecret(appSecret ?? '', dev), {
+    length: 32,
+    info: 'ai-rover:tick',
+    returnAs: 'base64url',
+  })
+}
+
+function tickSecret(secret: string, dev: boolean): string {
+  if (secret === DEV_SEED) {
+    throw new Error(
+      'NUXT_APP_SECRET is the public development seed; generate a secret of your own.',
+    )
+  }
+  if (secret.length >= MIN_SECRET_LENGTH) return secret
+  if (secret || !dev) {
+    throw new Error(
+      `NUXT_APP_SECRET is ${secret ? `shorter than ${MIN_SECRET_LENGTH} characters` : 'not set'}; generate one with: openssl rand -base64 32`,
+    )
+  }
+  if (!warned) {
+    warned = true
+    console.warn(
+      '[mission] NUXT_APP_SECRET is not in the environment; the tick token uses the public development seed.',
+    )
+  }
+  return DEV_SEED
 }
 
 /** Whether `authorization` carries `expected` as its bearer, compared in constant time. */

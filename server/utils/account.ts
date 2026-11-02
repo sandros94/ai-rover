@@ -1,8 +1,6 @@
 import type { H3Event } from 'nitro/h3'
 import { defineHandler } from 'nitro/h3'
 import * as v from 'valibot'
-import type { UserSessions } from '../../modules/auth/runtime/server/lib/session'
-import { useAuthContext } from '../../modules/auth/runtime/server/utils/auth'
 import type { DB } from '../database/db'
 import type { AccountView } from '#shared/utils/account'
 import type { UserAccount } from '../database/schema'
@@ -10,6 +8,8 @@ import { IDENTITY_PROVIDERS } from '../database/schema'
 import { listIdentities } from '../repositories/users'
 import { useDB } from './db'
 import { answerRouteError, requireSessionUser } from './mission/http'
+import type { AuthSessions } from './session'
+import { useAuthSessions } from './session'
 import { sessionUser } from './sign-in'
 
 export const ProviderSchema = v.picklist(IDENTITY_PROVIDERS)
@@ -34,10 +34,10 @@ export async function accountView(db: DB, account: UserAccount): Promise<Account
 
 export interface AccountRouteContext {
   db: () => DB
-  sessions: () => Pick<UserSessions, 'require' | 'set' | 'clear'>
+  sessions: () => AuthSessions
 }
 
-const PLATFORM: AccountRouteContext = { db: useDB, sessions: () => useAuthContext().sessions }
+const PLATFORM: AccountRouteContext = { db: useDB, sessions: useAuthSessions }
 
 export type AccountRouteHandler = (
   event: H3Event,
@@ -62,7 +62,7 @@ export function defineAccountHandlerWith(
     const sessions = platform.sessions()
     try {
       const db = platform.db()
-      const { user } = await sessions.require(event)
+      const session = await sessions.require(event)
       const account = await handler(event, {
         db,
         user: await requireSessionUser(db, event, sessions),
@@ -70,8 +70,8 @@ export function defineAccountHandlerWith(
       const view = await accountView(db, account)
       // Providers proven here stay, but not one whose identity has left the account.
       const linked = new Set(view.identities.map((identity) => identity.provider))
-      const providers = user.providers.filter((provider) => linked.has(provider))
-      await sessions.set(event, { user: sessionUser(account, providers) })
+      const providers = session.data.user.providers.filter((provider) => linked.has(provider))
+      await session.update({ user: sessionUser(account, providers) })
       return view
     } catch (error) {
       throw await answerRouteError(event, error, sessions)

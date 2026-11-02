@@ -69,11 +69,19 @@ describe('settings page', () => {
     const wrapper = await mountSuspended(SettingsPage, { route: '/settings' })
     const github = wrapper.find('[data-test=platform-github]')
     expect(github.find('[data-test=unlink]').attributes('disabled')).toBeDefined()
-    const discord = wrapper.find('[data-test=platform-discord] [data-test=link]')
-    expect(discord.attributes('href')).toBe('/api/auth/discord?redirect=%2Fsettings&link=')
-    expect(wrapper.find('[data-test=platform-atproto] [data-test=link-atproto]').exists()).toBe(
-      true,
-    )
+    // A link starts from a same-origin form: every provider refuses it from a plain link.
+    const discord = wrapper.find('[data-test=platform-discord] form')
+    expect(discord.attributes('method')).toBe('post')
+    expect(discord.attributes('action')).toBe('/api/auth/discord?redirect=%2Fsettings&link=')
+    expect(discord.find('[data-test=link]').attributes('type')).toBe('submit')
+    // AT Protocol's form names the account in its `handle` field.
+    const atproto = wrapper.find('[data-test=platform-atproto] [data-test=link-atproto]')
+    expect(atproto.attributes('method')).toBe('post')
+    expect(atproto.attributes('action')).toBe('/api/auth/atproto?redirect=%2Fsettings&link=')
+    expect(atproto.find('input').attributes('name')).toBe('handle')
+    expect(atproto.find('button[type=submit]').attributes('disabled')).toBeDefined()
+    await atproto.find('input').setValue('alice.bsky.social')
+    expect(atproto.find('button[type=submit]').attributes('disabled')).toBeUndefined()
     // One identity leaves nothing to choose.
     expect(wrapper.find('[data-test=primary]').exists()).toBe(false)
   })

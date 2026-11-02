@@ -7,8 +7,8 @@ import { createUser } from '#server/repositories/users'
 import { createMissionAtStop } from '#server/utils/mission/create'
 import type { MissionRouteContext } from '#server/utils/mission/http'
 import { defineMissionHandlerWith, USER_GONE_MESSAGE } from '#server/utils/mission/http'
-import { createUserSessions } from '~~/modules/auth/runtime/server/lib/session'
-import { cookieHeader, KEY, ORIGIN, setCookies } from '../auth/helpers'
+import { signInSession } from '#server/utils/session'
+import { cookieHeader, ORIGIN, setCookies, testSessions } from '../auth/helpers'
 import { createTestDb, memoryStore, SMALL_RULES, T0 } from './helpers'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
@@ -16,7 +16,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 let db: DB
 let close: () => Promise<void>
 const { store } = memoryStore()
-const sessions = createUserSessions({ key: KEY, dev: false })
+const sessions = testSessions()
 const platform: MissionRouteContext = {
   db: () => db,
   sessions: () => sessions,
@@ -45,7 +45,11 @@ function appWith(handler = vi.fn<Handler>(async (_event, context) => context.use
   const app = new H3()
     .post('/login/:id', async (event) => {
       const id = event.context.params!.id!
-      await sessions.set(event, { user: { id, displayName: 'Ada', providers: ['github'] } })
+      await signInSession(await sessions.use(event), {
+        id,
+        displayName: 'Ada',
+        providers: ['github'],
+      })
       return 'ok'
     })
     .post(

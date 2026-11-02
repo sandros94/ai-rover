@@ -4,6 +4,7 @@ import { createUserWithIdentity, linkIdentity, listIdentities } from '#server/re
 import type { AdminContext } from '#server/utils/admin/access'
 import { parseAdminAllowlist } from '#server/utils/admin/access'
 import type { JourneyStore } from '#server/utils/journey/store'
+import type { SessionData } from '#shared/types/session'
 
 export const ORIGIN = 'https://rover.test'
 
@@ -28,15 +29,19 @@ export function adminContext(
   return {
     allowlist: () => parsed,
     sessions: () => ({
-      get: async (event: H3Event) => {
+      use: async (event: H3Event) => {
         const id = event.req.headers.get(USER_HEADER)
-        return id ? { user: { id, displayName: 'Test', providers: ['github'] } } : {}
+        if (!id) return { id: undefined, data: {} as SessionData }
+        return {
+          id: 'test',
+          data: { user: { id, displayName: 'Test', providers: ['github'] }, loggedInAt: 0 },
+        }
       },
     }),
     identitiesOf: (userId) => listIdentities(db(), userId),
     db,
     store,
-    settings: () => ({ sessionKey: '', typesafeToken: '', origins: '' }),
+    settings: () => ({ appSecret: '', typesafeToken: '', origins: '' }),
   }
 }
 

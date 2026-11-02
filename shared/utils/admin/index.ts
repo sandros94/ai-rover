@@ -53,7 +53,7 @@ export interface BlobsDiagnosis {
 export interface RuntimeDiagnosis {
   node: string
   region?: string
-  hasSessionKey: boolean
+  hasAppSecret: boolean
   hasTypesafeToken: boolean
   originsConfigured: boolean
 }

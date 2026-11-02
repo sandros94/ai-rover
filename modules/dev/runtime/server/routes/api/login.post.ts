@@ -1,5 +1,6 @@
 import { readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
+import { signInSession, useAuthSession } from '#server/utils/session'
 import { findOrCreateDevUser } from '../../utils/login'
 import { defineDevWriteHandler } from '../../utils/write'
 
@@ -13,8 +14,11 @@ const BodySchema = v.object({ handle: v.pipe(v.string(), v.regex(/^[a-z0-9-]{1,3
 export default defineDevWriteHandler(async (event) => {
   const { handle } = await readValidatedBody(event, BodySchema)
   const user = await findOrCreateDevUser(process.env.NETLIFY_DB_URL, handle)
-  await setUserSession(event, {
-    user: { id: user.id, displayName: user.displayName, handle: `dev:${handle}`, providers: [] },
+  await signInSession(await useAuthSession(event), {
+    id: user.id,
+    displayName: user.displayName,
+    handle: `dev:${handle}`,
+    providers: [],
   })
   return { id: user.id, handle: `dev:${handle}` }
 })

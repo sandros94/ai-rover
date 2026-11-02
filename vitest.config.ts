@@ -3,8 +3,8 @@ import { defineVitestProject } from '@nuxt/test-utils/config'
 
 const rootDir = import.meta.dirname
 
-/** One random session key for the whole run: a built server refuses to start without one. */
-const sessionKey = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex')
+/** One random app secret for the whole run: a built server refuses every request without one. */
+const appSecret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex')
 
 const alias = {
   '~': `${rootDir}/app`,
@@ -47,7 +47,7 @@ export default defineConfig({
           name: 'e2e',
           include: ['test/e2e/**/*.{test,spec}.ts'],
           environment: 'node',
-          env: { NUXT_SESSION_KEY: sessionKey },
+          env: { NUXT_APP_SECRET: appSecret },
         },
       },
     ],

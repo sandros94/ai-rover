@@ -24,7 +24,7 @@ function isDev(): boolean {
 
 export default async (request: Request): Promise<void> => {
   await runTickRequest(request, {
-    token: () => tickToken(process.env.NUXT_SESSION_KEY ?? '', isDev()),
+    token: () => tickToken(process.env.NUXT_APP_SECRET, isDev()),
     tick: (missionId) => {
       const db = useDB()
       const jev = lazyJevClient(() =>

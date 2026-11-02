@@ -12,26 +12,22 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 8. Jev free tier / credits and p50 latency for ~2k-token states.
 9. Jev Choice quality with many numerically similar options (jaggedness page gives no threshold).
 10. TresJS 5.9 / `@tresjs/nuxt` 5.7 on Nuxt 5 nightly: works in avelune, not verified here; mobile frame budget unmeasured.
-11. `unauth` main via pkg.pr.new pins `unsecure ^0.2.2`; coexistence with `unsecure` 0.3.1 unverified (semver-breaking).
-12. Hand-rolled AT Protocol public client: DPoP nonce retry and handle/DID resolution against a real PDS untested.
+11. `unauth` and `unjwt` are pre-release builds from pkg.pr.new (`unauth` adee0a3; `unjwt` 5db6c51, the 0.9 preview, its package still versioned 0.8.5) until both are released on npm: their APIs may change before release, and installing depends on pkg.pr.new keeping the builds.
+12. AT Protocol on `unauth/n`'s preset: the callback leg against a real PDS (token exchange, DPoP nonce retry there) untested; the development client's move from `localhost` to `127.0.0.1` and its handoff back ran on mocked responses only.
 13. Ejecta-thickness constants (McGetchin 1973) cited second-hand.
 14. Client-side planner preview performance on phones over a 500 m disk of terrain.
 15. Corner steering rate of 0.168 rad/s (taken equal to the identical drive actuators' output rate) and the 2° difference below which the rover drives on without re-steering: no published figure for either.
 16. Slip model constants (gain 1.2, stuck above 0.6 for 3 m, loose-regolith noise at 80 m wavelength): judgement calls, untested against the JPL slip data beyond the qualitative 50–94 % figures.
 17. Migration application on a real deploy: Netlify applies `netlify/database/migrations/*/migration.sql` before publish; unexercised until the first deploy.
-18. `unauth` `defineSession` does not forward `sessionHeader` to `unjwt`, so a sealed session token is also accepted from a request header, not only the cookie; upstream fix pending, then pass `sessionHeader: false`.
-19. `unjwt` always adds `cty: application/json` to a `dpop+jwt` header; bsky.social accepted it, other authorization servers untested.
-20. Nitro bundles h3 rc.22 while the project pins rc.29; both load side by side and work, but the mixed versions are unverified beyond the current routes.
-21. The local PGlite data directory (`.data/pglite`) under an abrupt dev-server kill: Netlify's emulator's PGlite directory was corrupted once that way (`RuntimeError: Aborted()` at start). Unknown whether `nuxt-pglite` guards against it; DevTools' "Reset database" recreates the directory.
-22. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
-23. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
-24. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
-25. Chunk blobs carry the true heights and traversable bits of unrevealed ground, so a script combining them with the public plan can anticipate where a drive stops short. Accepted as a known limitation: the views hide fogged ground, and only the served chunks expose it.
-26. The attempt cap is checked before an insert without being atomic with it; concurrent submits can exceed it by a few.
-27. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
-28. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
-29. The end-to-end flow has been exercised locally with scripted browsers (two users, plan, submit, LGTM, flag, drive, settlement, replay, phone width); the failure path (not-moving cut, three strikes, reset) is covered by unit tests only, never by a scripted browser run.
-30. A denied GitHub consent (callback with `error=` and no `code`) is treated as a fresh start and bounces back to GitHub instead of showing `refused`.
-31. The Neon WebSocket pool inside Functions: works on the first deploy; cold-start cost and connection reuse across invocations unmeasured.
-32. Opening a drive at live: time to first frame over the real CDN unmeasured (about 16 requests at the end of a two-hour drive, trace blocks assembled by the function on their first request, then served from the durable cache), and so is publishing twice as many blobs per segment.
-33. The admin allowlist on a deploy: the identity keys a real AT Protocol, GitHub and Discord sign-in store were not matched against `NUXT_ADMIN_IDENTITIES` there, and nothing in the app ends a mission yet, so landing one after another is exercised by tests only.
+18. The local PGlite data directory (`.data/pglite`) under an abrupt dev-server kill: Netlify's emulator's PGlite directory was corrupted once that way (`RuntimeError: Aborted()` at start). Unknown whether `nuxt-pglite` guards against it; DevTools' "Reset database" recreates the directory.
+19. Real sign-ins in a browser on GitHub, Discord and AT Protocol since sign-in moved onto `unauth/n`'s handlers, locally or on a deploy: every flow ran on mocked responses only.
+20. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
+21. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.
+22. Chunk blobs carry the true heights and traversable bits of unrevealed ground, so a script combining them with the public plan can anticipate where a drive stops short. Accepted as a known limitation: the views hide fogged ground, and only the served chunks expose it.
+23. The attempt cap is checked before an insert without being atomic with it; concurrent submits can exceed it by a few.
+24. Lock ordering between settlement, withdrawals and likes is tested on call order only: the local test database runs every connection in one session, so two-connection races are unverified.
+25. Netlify's CDN may normalise `Accept-Encoding` before caching variants of the journey blobs; the identity/deflate split is unverified on a deploy.
+26. The end-to-end flow has been exercised locally with scripted browsers (two users, plan, submit, LGTM, flag, drive, settlement, replay, phone width); the failure path (not-moving cut, three strikes, reset) is covered by unit tests only, never by a scripted browser run.
+27. The Neon WebSocket pool inside Functions: works on the first deploy; cold-start cost and connection reuse across invocations unmeasured.
+28. Opening a drive at live: time to first frame over the real CDN unmeasured (about 16 requests at the end of a two-hour drive, trace blocks assembled by the function on their first request, then served from the durable cache), and so is publishing twice as many blobs per segment.
+29. The admin allowlist on a deploy: the identity keys a real AT Protocol, GitHub and Discord sign-in store were not matched against `NUXT_ADMIN_IDENTITIES` there, and nothing in the app ends a mission yet, so landing one after another is exercised by tests only.

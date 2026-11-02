@@ -1,9 +1,18 @@
 import { generateJWK } from 'unjwt/jwk'
 import { decrypt } from 'unjwt/jwe'
-import { createAuthContext } from '~~/modules/auth/runtime/server/lib/context'
+import type { DB } from '#server/database/db'
+import type { OAuthSignInContext } from '#server/utils/oauth-sign-in'
+import type { AuthSessions } from '#server/utils/session'
+import { createAuthSessions } from '#server/utils/session'
+import type { SessionData } from '#shared/types/session'
 
-/** A fresh production-shaped session key, as `NUXT_SESSION_KEY` carries it. */
-export const KEY = JSON.stringify(await generateJWK('A256GCM'))
+/** A fresh A256GCM key, sealing both the test sessions and the test flow cookies. */
+export const KEY = await generateJWK('A256GCM')
+
+/** Production-shaped sessions (`__Host-` cookie, `Secure`) sealed with {@link KEY}. */
+export function testSessions(): AuthSessions {
+  return createAuthSessions({ key: async () => KEY, dev: false })
+}
 
 export const ORIGIN = 'https://rover.test'
 
@@ -43,8 +52,19 @@ export function cookieHeader(...responses: Response[]): string {
 
 /** The claims sealed in a cookie value, decrypted with the test key. */
 export async function openCookie(value: string): Promise<Record<string, unknown>> {
-  const { payload } = await decrypt(value, JSON.parse(KEY))
+  const { payload } = await decrypt(value, KEY)
   return payload as Record<string, unknown>
+}
+
+/** The session data and token claims sealed in a session cookie value. */
+export async function openSession(
+  value: string,
+): Promise<SessionData & { jti: string; iat: number; exp: number }> {
+  return (await openCookie(value)) as unknown as SessionData & {
+    jti: string
+    iat: number
+    exp: number
+  }
 }
 
 export type Route = (request: Request) => Response | Promise<Response>
@@ -72,6 +92,18 @@ export function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), { ...init, headers })
 }
 
-export function testAuth(fetch: typeof globalThis.fetch, origins = ORIGIN) {
-  return createAuthContext({ key: KEY, dev: false, origins, fetch })
+/** The sign-in context over `db`, production-shaped, on {@link ORIGIN}. */
+export function testSignInContext(
+  db: DB,
+  fetch: typeof globalThis.fetch,
+  origins = [ORIGIN],
+): OAuthSignInContext {
+  return {
+    db: () => db,
+    sessions: testSessions(),
+    flowKey: async () => KEY,
+    origins,
+    dev: false,
+    fetch,
+  }
 }

@@ -5,6 +5,9 @@ minimumReleaseAgeExclude:
   - 'nuxt-nightly'
   - '@nuxt/*'
 
+# `unauth`'s pkg.pr.new build depends on `unjwt` by URL; allowed until both are released on npm.
+blockExoticSubdeps: false
+
 packageExtensions:
   # `@tresjs/nuxt` imports `@nuxt/devtools-kit` at runtime without declaring it.
   '@tresjs/nuxt':

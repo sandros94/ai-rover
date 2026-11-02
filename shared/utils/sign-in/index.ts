@@ -1,3 +1,12 @@
+/** The identity providers a user can sign in with. */
+export const AUTH_PROVIDERS = ['github', 'discord', 'atproto'] as const
+
+export type AuthProvider = (typeof AUTH_PROVIDERS)[number]
+
+export function isAuthProvider(value: unknown): value is AuthProvider {
+  return AUTH_PROVIDERS.includes(value as AuthProvider)
+}
+
 /**
  * What `/login?error=<code>` tells the user, by the code the sign-in routes redirect with. The
  * codes never carry the failure's message: that stays in the server log.

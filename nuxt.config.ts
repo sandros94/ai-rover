@@ -15,18 +15,23 @@ const PREVIEW_URL = ['deploy-preview', 'branch-deploy'].includes(process.env.CON
   ? process.env.DEPLOY_PRIME_URL
   : undefined
 
+/**
+ * The deploy's own addresses on Netlify, which the platform sets at build only: the site's main
+ * address, and this deploy's primary and unique ones (a deploy preview's or branch deploy's, or a
+ * production deploy's permalink). Empty elsewhere.
+ */
+const NETLIFY_ADDRESSES = process.env.NETLIFY
+  ? {
+      site: process.env.URL ?? '',
+      deploy: [process.env.DEPLOY_PRIME_URL, process.env.DEPLOY_URL].filter(Boolean).join(','),
+    }
+  : { site: '', deploy: '' }
+
 export default defineNuxtConfig({
   compatibilityDate: 'latest',
   devtools: { enabled: true },
 
-  modules: [
-    '@nuxt/ui',
-    '@netlify/nuxt',
-    'nuxt-pglite',
-    '@tresjs/nuxt',
-    './modules/dev',
-    './modules/auth',
-  ],
+  modules: ['@nuxt/ui', '@netlify/nuxt', 'nuxt-pglite', '@tresjs/nuxt', './modules/dev'],
 
   css: ['~/assets/css/main.css'],
 
@@ -47,18 +52,21 @@ export default defineNuxtConfig({
     /** TypeSafe API key for Jev, from `NUXT_TYPESAFE_TOKEN`; server only. */
     typesafeToken: '',
     /**
-     * Seals the session cookies, from `NUXT_SESSION_KEY`: the JSON of an `oct` JWK for A256GCM,
-     * or a random secret of at least 32 characters the key is derived from.
-     */
-    sessionKey: '',
-    /**
      * The identities that may use `/admin`, from `NUXT_ADMIN_IDENTITIES`: a comma list of
      * `provider:subject` keys; empty allows nobody.
      */
     adminIdentities: '',
     oauth: {
-      /** Comma list of origins sign-in may redirect to, from `NUXT_OAUTH_ORIGINS`. */
+      /** Comma list of origins every provider signs in on, from `NUXT_OAUTH_ORIGINS`. */
       origins: '',
+      /** The site's main address on Netlify (`URL`): every provider signs in on it too. */
+      siteUrl: NETLIFY_ADDRESSES.site,
+      /**
+       * This deploy's own addresses on Netlify (`DEPLOY_PRIME_URL`, `DEPLOY_URL`): AT Protocol
+       * signs in on them as well, GitHub and Discord not, their apps' callbacks being registered
+       * on the origins above only.
+       */
+      deployUrls: NETLIFY_ADDRESSES.deploy,
       /** From `NUXT_OAUTH_GITHUB_CLIENT_ID` and `NUXT_OAUTH_GITHUB_CLIENT_SECRET`. */
       github: { clientId: '', clientSecret: '' },
       /** From `NUXT_OAUTH_DISCORD_CLIENT_ID` and `NUXT_OAUTH_DISCORD_CLIENT_SECRET`. */

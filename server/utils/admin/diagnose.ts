@@ -269,7 +269,7 @@ export function diagnoseRuntime(settings: AdminSettings): RuntimeDiagnosis {
   return {
     node: process.version,
     ...(region && { region }),
-    hasSessionKey: settings.sessionKey !== '',
+    hasAppSecret: settings.appSecret !== '',
     hasTypesafeToken:
       settings.typesafeToken !== '' ||
       Boolean(process.env.TYPESAFE_API_KEY && process.env.TYPESAFE_BASE_URL),

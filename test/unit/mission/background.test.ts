@@ -28,7 +28,7 @@ vi.mock('#server/utils/db', () => ({ useDB: () => fakeDb }))
 vi.mock('#server/utils/journey/store', () => ({ createJourneyStore: () => ({}) }))
 
 const SECRET = 'Tg4hW9qLz2Nc7Vb1Xm5Rk8Pd3Js6Fy0AeQx'
-const DEV_SEED = 'ai-rover development session key'
+const DEV_SEED = 'ai-rover development tick secret'
 
 afterEach(() => {
   vi.mocked(tickMission).mockClear()
@@ -39,25 +39,32 @@ afterEach(() => {
 })
 
 describe('the tick token', () => {
-  it('is HKDF of the session key under its own info', async () => {
+  it('is HKDF of the app secret under its own info', async () => {
     const token = await tickToken(SECRET, false)
     expect(token).toBe(
-      await hkdf(SECRET, { length: 32, info: 'rover-tick', returnAs: 'base64url' }),
+      await hkdf(SECRET, { length: 32, info: 'ai-rover:tick', returnAs: 'base64url' }),
     )
     expect(token).not.toBe(
-      await hkdf(SECRET, { length: 32, info: 'rover-session', returnAs: 'base64url' }),
+      await hkdf(SECRET, { length: 32, info: 'ai-rover:session', returnAs: 'base64url' }),
     )
     expect(await tickToken(`${SECRET.slice(0, -1)}r`, false)).not.toBe(token)
   })
 
-  it('under dev, derives from the development seed when the key is empty, and refuses elsewhere', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(await tickToken('', true)).toBe(
-      await hkdf(DEV_SEED, { length: 32, info: 'rover-tick', returnAs: 'base64url' }),
-    )
-    expect(() => tickToken('', false)).toThrow(/NUXT_SESSION_KEY/)
+  it('under dev, derives from the development seed when the secret is unset, and refuses elsewhere', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const seeded = await hkdf(DEV_SEED, {
+      length: 32,
+      info: 'ai-rover:tick',
+      returnAs: 'base64url',
+    })
+    expect(await tickToken(undefined, true)).toBe(seeded)
+    expect(await tickToken('', true)).toBe(seeded)
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/NUXT_APP_SECRET/)
+    expect(() => tickToken(undefined, false)).toThrow(/NUXT_APP_SECRET is not set/)
+    expect(() => tickToken('', false)).toThrow(/openssl rand -base64 32/)
     expect(() => tickToken(DEV_SEED, false)).toThrow(/public development seed/)
-    expect(() => tickToken('too short', false)).toThrow(/at least 32 characters/)
+    expect(() => tickToken(DEV_SEED, true)).toThrow(/public development seed/)
+    expect(() => tickToken('too short', true)).toThrow(/shorter than 32 characters/)
   })
 
   it('authorizes only its own bearer', async () => {
@@ -66,7 +73,7 @@ describe('the tick token', () => {
     const otherKey = await tickToken(`${SECRET}x`, false)
     const otherInfo = await hkdf(SECRET, {
       length: 32,
-      info: 'rover-session',
+      info: 'ai-rover:session',
       returnAs: 'base64url',
     })
     for (const header of [
@@ -92,7 +99,7 @@ describe('the background function', () => {
   }
 
   it('logs a request with a bad token and returns without ticking or throwing', async () => {
-    vi.stubEnv('NUXT_SESSION_KEY', SECRET)
+    vi.stubEnv('NUXT_APP_SECRET', SECRET)
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const wrong = await tickToken(`${SECRET}x`, false)
     for (const authorization of [undefined, `Bearer ${wrong}`]) {
@@ -104,7 +111,7 @@ describe('the background function', () => {
   })
 
   it('logs a request whose body is not { missionId } and returns without throwing', async () => {
-    vi.stubEnv('NUXT_SESSION_KEY', SECRET)
+    vi.stubEnv('NUXT_APP_SECRET', SECRET)
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const bearer = `Bearer ${await tickToken(SECRET, false)}`
     for (const body of ['not json', {}, { missionId: '' }, { missionId: 7 }]) {
@@ -114,20 +121,20 @@ describe('the background function', () => {
     expect(logged).toHaveBeenCalledTimes(4)
   })
 
-  it('logs and returns when no session key is set outside dev', async () => {
-    vi.stubEnv('NUXT_SESSION_KEY', '')
+  it('logs and returns when no app secret is set outside dev', async () => {
+    vi.stubEnv('NUXT_APP_SECRET', undefined)
     // A local production build is not dev.
     vi.stubEnv('NETLIFY_LOCAL', 'true')
     vi.stubEnv('CONTEXT', 'production')
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const bearer = `Bearer ${await hkdf(DEV_SEED, { length: 32, info: 'rover-tick', returnAs: 'base64url' })}`
+    const bearer = `Bearer ${await hkdf(DEV_SEED, { length: 32, info: 'ai-rover:tick', returnAs: 'base64url' })}`
     await expect(entry(request({ missionId: 'm1' }, bearer))).resolves.toBe(undefined)
     expect(tickMission).not.toHaveBeenCalled()
     expect(logged).toHaveBeenCalled()
   })
 
   it('ticks the mission with the try-lock and no deadline, and logs what it did', async () => {
-    vi.stubEnv('NUXT_SESSION_KEY', SECRET)
+    vi.stubEnv('NUXT_APP_SECRET', SECRET)
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await entry(request({ missionId: 'm1' }, `Bearer ${await tickToken(SECRET, false)}`))
     expect(tickMission).toHaveBeenCalledExactlyOnceWith(fakeDb, {
@@ -141,13 +148,13 @@ describe('the background function', () => {
     expect(purge).not.toHaveBeenCalled()
   })
 
-  it('accepts the development token under dev with an empty key', async () => {
-    vi.stubEnv('NUXT_SESSION_KEY', '')
+  it('accepts the development token under dev without an app secret', async () => {
+    vi.stubEnv('NUXT_APP_SECRET', undefined)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.stubEnv('NETLIFY_LOCAL', 'true')
     vi.stubEnv('CONTEXT', 'dev')
-    await entry(request({ missionId: 'm1' }, `Bearer ${await tickToken('', true)}`))
+    await entry(request({ missionId: 'm1' }, `Bearer ${await tickToken(undefined, true)}`))
     expect(tickMission).toHaveBeenCalledOnce()
   })
 

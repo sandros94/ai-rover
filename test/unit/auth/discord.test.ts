@@ -1,21 +1,36 @@
 import { H3 } from 'nitro/h3'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { hash } from 'unsecure/hash'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DB } from '#server/database/db'
-import { findUserByIdentity } from '#server/repositories/users'
-import { completeSignIn } from '#server/utils/sign-in'
-import type { AuthContext } from '~~/modules/auth/runtime/server/lib/context'
-import { createDiscordHandler, discordAvatarUrl } from '~~/modules/auth/runtime/server/lib/discord'
-import { pkceChallenge } from '~~/modules/auth/runtime/server/lib/random'
+import { createUser, findUserByIdentity } from '#server/repositories/users'
+import type { OAuthSignInContext } from '#server/utils/oauth-sign-in'
+import { createDiscordSignIn, discordAvatarUrl } from '#server/utils/oauth-sign-in'
+import { signInSession } from '#server/utils/session'
 import { createTestDb } from '../db/helpers'
 import type { Route } from './helpers'
-import { cookieHeader, json, mockFetch, openCookie, ORIGIN, setCookies, testAuth } from './helpers'
+import {
+  cookieHeader,
+  json,
+  mockFetch,
+  openCookie,
+  openSession,
+  ORIGIN,
+  setCookies,
+  testSignInContext,
+} from './helpers'
 
 const CONFIG = { clientId: '1234567890', clientSecret: 'shh' }
+const ROUTE = `${ORIGIN}/api/auth/discord`
 
 let db: DB
 let close: () => Promise<void>
 beforeAll(async () => ({ db, close } = await createTestDb()))
 afterAll(() => close())
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+})
+afterEach(() => vi.restoreAllMocks())
 
 function discord(user: Record<string, unknown>, onToken?: Route) {
   return mockFetch({
@@ -29,81 +44,86 @@ function discord(user: Record<string, unknown>, onToken?: Route) {
   })
 }
 
-function appOver(auth: AuthContext) {
-  return new H3().get(
-    '/api/auth/discord',
-    createDiscordHandler(auth, CONFIG, {
-      onSuccess: (event, result) => completeSignIn(event, { db, sessions: auth.sessions }, result),
-    }),
-  )
+function appOver(context: OAuthSignInContext) {
+  return new H3()
+    .all('/api/auth/discord', createDiscordSignIn(CONFIG, context))
+    .post('/test/login-as/:id', async (event) => {
+      await signInSession(await context.sessions.use(event), {
+        id: event.context.params!.id!,
+        displayName: 'Existing',
+        providers: ['github'],
+      })
+      return 'ok'
+    })
 }
 
-async function start(app: H3, query = '') {
-  const res = await app.request(`${ORIGIN}/api/auth/discord${query}`)
+async function start(app: H3, query = '', init: RequestInit = {}) {
+  const res = await app.request(`${ROUTE}${query}`, init)
   expect(res.status).toBe(302)
   return { res, location: new URL(res.headers.get('location')!) }
 }
 
+function callback(app: H3, location: URL, cookie: string, answer = 'code=abc') {
+  return app.request(`${ROUTE}?${answer}&state=${location.searchParams.get('state')}`, {
+    headers: { cookie },
+  })
+}
+
 async function signIn(app: H3) {
   const { res, location } = await start(app)
-  return app.request(
-    `${ORIGIN}/api/auth/discord?code=abc&state=${location.searchParams.get('state')}`,
-    { headers: { cookie: cookieHeader(res) } },
-  )
+  return callback(app, location, cookieHeader(res))
 }
 
 describe('Discord sign-in', () => {
-  it('redirects to the authorize URL with PKCE and seals the verifier with the state', async () => {
-    const app = appOver(testAuth(discord({}).fetch))
+  it('redirects to the authorize URL with PKCE and the identify scope', async () => {
+    const app = appOver(testSignInContext(db, discord({}).fetch))
     const { res, location } = await start(app)
     expect(location.origin + location.pathname).toBe('https://discord.com/oauth2/authorize')
     const params = Object.fromEntries(location.searchParams)
     expect(params).toEqual({
       client_id: '1234567890',
-      redirect_uri: `${ORIGIN}/api/auth/discord`,
+      redirect_uri: ROUTE,
       response_type: 'code',
       scope: 'identify',
       state: expect.stringMatching(/^[\w-]{32,}$/),
       code_challenge: expect.stringMatching(/^[\w-]{43}$/),
       code_challenge_method: 'S256',
     })
-    const flow = setCookies(res)['__Host-rover-oauth']!
-    expect(Number(flow.attributes['max-age'])).toBe(600)
-    const sealed = await openCookie(flow.value)
-    expect(sealed).toMatchObject({ provider: 'discord', state: params.state })
-    expect(await pkceChallenge(sealed.verifier as string)).toBe(params.code_challenge)
+    const { record } = (await openCookie(setCookies(res)['__Host-unauth-flow']!.value)) as {
+      record: Record<string, string>
+    }
+    expect(record).toMatchObject({ provider: 'discord', state: params.state })
+    expect(await hash(record.verifier!, { algorithm: 'SHA-256', returnAs: 'base64url' })).toBe(
+      params.code_challenge,
+    )
   })
 
   it('answers 404 while no client id is configured', async () => {
-    const auth = testAuth(discord({}).fetch)
-    const app = new H3().get(
+    const context = testSignInContext(db, discord({}).fetch)
+    const app = new H3().all(
       '/api/auth/discord',
-      createDiscordHandler(auth, { clientId: '', clientSecret: '' }, { onSuccess: () => 'no' }),
+      createDiscordSignIn({ clientId: '', clientSecret: '' }, context),
     )
-    expect((await app.request(`${ORIGIN}/api/auth/discord`)).status).toBe(404)
+    expect((await app.request(ROUTE)).status).toBe(404)
   })
 
   it('refuses a callback whose state does not match the sealed one', async () => {
     const mock = discord({ id: '1', username: 'x' })
-    const app = appOver(testAuth(mock.fetch))
+    const app = appOver(testSignInContext(db, mock.fetch))
     const { res } = await start(app)
-    const callback = await app.request(`${ORIGIN}/api/auth/discord?code=abc&state=forged`, {
+    const answer = await app.request(`${ROUTE}?code=abc&state=forged`, {
       headers: { cookie: cookieHeader(res) },
     })
-    expect(callback.status).toBe(400)
+    expect(answer.headers.get('location')).toBe('/login?error=state-mismatch')
     expect(mock.calls).toHaveLength(0)
   })
 
   it('answers a denied authorization as refused, without starting again', async () => {
     const mock = discord({})
-    const app = appOver(testAuth(mock.fetch))
+    const app = appOver(testSignInContext(db, mock.fetch))
     const { res, location } = await start(app)
-    const callback = await app.request(
-      `${ORIGIN}/api/auth/discord?error=access_denied&state=${location.searchParams.get('state')}`,
-      { headers: { cookie: cookieHeader(res) } },
-    )
-    expect(callback.status).toBe(400)
-    expect(callback.headers.get('location')).toBeNull()
+    const answer = await callback(app, location, cookieHeader(res), 'error=access_denied')
+    expect(answer.headers.get('location')).toBe('/login?error=refused')
     expect(mock.calls).toHaveLength(0)
   })
 
@@ -115,22 +135,21 @@ describe('Discord sign-in', () => {
       avatar: '8342729096ea3675442027381ff50dfe',
       discriminator: '0',
     })
-    const app = appOver(testAuth(mock.fetch))
+    const app = appOver(testSignInContext(db, mock.fetch))
     const { res, location } = await start(app)
-    const callback = await app.request(
-      `${ORIGIN}/api/auth/discord?code=abc&state=${location.searchParams.get('state')}`,
-      { headers: { cookie: cookieHeader(res) } },
-    )
-    expect(callback.status).toBe(302)
+    const answer = await callback(app, location, cookieHeader(res))
+    expect(answer.headers.get('location')).toBe('/')
 
-    const sealed = await openCookie(setCookies(res)['__Host-rover-oauth']!.value)
+    const { record } = (await openCookie(setCookies(res)['__Host-unauth-flow']!.value)) as {
+      record: Record<string, string>
+    }
     expect(Object.fromEntries(new URLSearchParams(await mock.calls[0]!.text()))).toEqual({
       client_id: '1234567890',
       client_secret: 'shh',
       grant_type: 'authorization_code',
       code: 'abc',
-      redirect_uri: `${ORIGIN}/api/auth/discord`,
-      code_verifier: sealed.verifier,
+      redirect_uri: ROUTE,
+      code_verifier: record.verifier,
     })
 
     const user = await findUserByIdentity(db, { provider: 'discord', subject: '80351110224678912' })
@@ -140,23 +159,51 @@ describe('Discord sign-in', () => {
       avatarUrl:
         'https://cdn.discordapp.com/avatars/80351110224678912/8342729096ea3675442027381ff50dfe.png',
     })
-    const claims = await openCookie(setCookies(callback)['__Host-rover-session']!.value)
-    expect(claims).toMatchObject({ sub: user!.id, providers: ['discord'] })
+    const claims = await openSession(setCookies(answer)['__Host-rover-session']!.value)
+    expect(claims.user).toMatchObject({ id: user!.id, providers: ['discord'] })
     expect(JSON.stringify(claims)).not.toContain('dc_secret')
   })
 
   it('names the user by username when they set no display name', async () => {
-    const app = appOver(
-      testAuth(discord({ id: '4242', username: 'plain', global_name: null, avatar: null }).fetch),
-    )
-    expect((await signIn(app)).status).toBe(302)
-    const user = await findUserByIdentity(db, { provider: 'discord', subject: '4242' })
-    expect(user).toMatchObject({ displayName: 'plain', handle: 'plain' })
+    for (const [subject, global_name] of [
+      ['4242', null],
+      ['4243', '  '],
+    ] as const) {
+      const app = appOver(
+        testSignInContext(
+          db,
+          discord({ id: subject, username: 'plain', global_name, avatar: null }).fetch,
+        ),
+      )
+      expect((await signIn(app)).status).toBe(302)
+      const user = await findUserByIdentity(db, { provider: 'discord', subject })
+      expect(user).toMatchObject({ displayName: 'plain', handle: 'plain' })
+    }
   })
 
-  it('answers 502 when Discord refuses the code', async () => {
-    const app = appOver(testAuth(discord({}, () => json({ error: 'invalid_grant' })).fetch))
-    expect((await signIn(app)).status).toBe(502)
+  it('links the identity to the signed-in user from a same-origin form', async () => {
+    const existing = await createUser(db, { displayName: 'Existing' })
+    const app = appOver(testSignInContext(db, discord({ id: '5150', username: 'linker' }).fetch))
+    const login = await app.request(`${ORIGIN}/test/login-as/${existing.id}`, { method: 'POST' })
+    const { res, location } = await start(app, '?redirect=/settings&link=', {
+      method: 'POST',
+      headers: { 'cookie': cookieHeader(login), 'origin': ORIGIN, 'sec-fetch-site': 'same-origin' },
+    })
+    const answer = await callback(app, location, cookieHeader(login, res))
+    expect(answer.headers.get('location')).toBe('/settings')
+    expect(await findUserByIdentity(db, { provider: 'discord', subject: '5150' })).toMatchObject({
+      id: existing.id,
+    })
+  })
+
+  it('lands with the provider code when Discord refuses the code', async () => {
+    const app = appOver(
+      testSignInContext(
+        db,
+        discord({}, () => json({ error: 'invalid_grant' }, { status: 400 })).fetch,
+      ),
+    )
+    expect((await signIn(app)).headers.get('location')).toBe('/login?error=provider')
   })
 })
 

@@ -1,4 +1,4 @@
-import type { AuthProvider } from '#auth'
+import type { AuthProvider } from '#shared/utils/sign-in'
 
 /** The signed-in user's own account as the settings page reads it. */
 export interface AccountView {

@@ -16,7 +16,7 @@ import { readdir } from 'node:fs/promises'
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const SETTINGS: AdminSettings = {
-  sessionKey: 'a-session-secret-of-at-least-32-characters',
+  appSecret: 'an-app-secret-of-at-least-32-characters',
   typesafeToken: '',
   origins: ORIGIN,
 }
@@ -111,7 +111,7 @@ describe('POST /api/admin/diagnose', () => {
     expect(answer.runtime).toEqual({
       node: process.version,
       ...(process.env.AWS_REGION && { region: process.env.AWS_REGION }),
-      hasSessionKey: true,
+      hasAppSecret: true,
       hasTypesafeToken: false,
       originsConfigured: true,
     })

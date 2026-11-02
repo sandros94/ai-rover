@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AuthProvider } from '#auth'
+import type { AuthProvider } from '#shared/utils/sign-in'
 import { signInErrorSentence } from '#shared/utils/sign-in'
 
 const route = useRoute()
@@ -23,15 +23,6 @@ const providers = await useAuthProviders()
 const offers = (provider: AuthProvider) => providers.value.includes(provider)
 
 const handle = ref('')
-
-async function signInWithAtproto() {
-  const value = handle.value.trim()
-  if (value) {
-    await navigateTo(signInUrl('atproto', { redirect: redirect.value, handle: value }), {
-      external: true,
-    })
-  }
-}
 </script>
 
 <template>
@@ -68,11 +59,13 @@ async function signInWithAtproto() {
         <form
           v-if="offers('atproto')"
           data-test="atproto-sign-in"
+          method="post"
+          :action="signInUrl('atproto', { redirect })"
           class="flex flex-col gap-2"
-          @submit.prevent="signInWithAtproto"
         >
           <UInput
             v-model="handle"
+            name="handle"
             placeholder="alice.bsky.social"
             autocomplete="username"
             aria-label="AT Protocol handle or DID"
