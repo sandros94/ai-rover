@@ -3,7 +3,7 @@ import type { UserAccount } from '#server/database/schema'
 import { userAccount } from '#server/database/schema'
 import { createUser } from '#server/repositories/users'
 import { useDB } from '#server/utils/db'
-import { assertLoopback } from './migrate'
+import { assertLoopback } from './loopback'
 
 /**
  * The account development login `handle` signs in as, created on first sign-in as `dev:<handle>`.

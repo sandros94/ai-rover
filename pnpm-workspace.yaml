@@ -5,9 +5,6 @@ minimumReleaseAgeExclude:
   - 'nuxt-nightly'
   - '@nuxt/*'
 
-overrides:
-  # Netlify Database runs PostgreSQL 18; `@netlify/database-dev` pins an older PGlite major.
-  '@electric-sql/pglite': '0.5.13'
 allowBuilds:
   '@parcel/watcher': false
   'better-sqlite3': true
@@ -20,5 +17,4 @@ allowBuilds:
   vue-demi: false
 
 patchedDependencies:
-  '@netlify/database-dev': .patches/@netlify__database-dev.patch
   '@nuxt/fonts': .patches/@nuxt__fonts.patch

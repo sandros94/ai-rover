@@ -65,7 +65,7 @@ cp .env.example .env
 pnpm dev
 ```
 
-Local development emulates Netlify, including the database, which migrates itself at boot. Every variable is documented in `.env.example`. Without a TypeSafe key, the app runs but cannot judge new proposals.
+Local development emulates Netlify; the database is a local PGlite, served by `nuxt-pglite` and brought up to the migrations at boot. Nuxt DevTools' PGlite tab resets it and seeds a mission (`pnpm db:seed` from a terminal). Every variable is documented in `.env.example`. Without a TypeSafe key, the app runs but cannot judge new proposals.
 
 ```sh
 pnpm test        # unit, nuxt and e2e projects

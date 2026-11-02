@@ -1,15 +1,10 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getDatabase } from '@netlify/database'
-import { applyMigrations, NetlifyDB } from '@netlify/database-dev'
 import { sql as raw } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/netlify-db'
+import { applyMigrations } from 'nuxt-pglite/migrations'
 import { describe, expect, it } from 'vitest'
-import type { DB } from '#server/database/db'
-import { relations } from '#server/database/schema'
 import { DEFAULT_MISSION_RULES, MissionError, parseMissionRules } from '#shared/utils/mission'
-import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
-import { JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
+import { createTestDb, JUDGMENT, METRICS, MIGRATIONS_DIR, SUMMARY } from './helpers'
 
 function migrationSql(): string {
   return readdirSync(MIGRATIONS_DIR, { recursive: true, encoding: 'utf8' })
@@ -64,14 +59,12 @@ describe('generated migrations', () => {
 
 describe('the round_anchor migration', () => {
   it('applies after init and backfills anchors and rejection reasons on existing rows', async () => {
-    const server = new NetlifyDB({ logger: () => {} })
-    const connection = getDatabase({ connectionString: await server.start() })
-    const db: DB = drizzle({ client: connection, relations })
+    const { db, pg, close } = await createTestDb({ config: {} })
     try {
       const [init, ...later] = readdirSync(MIGRATIONS_DIR).toSorted()
       expect(init).toMatch(/_init$/)
       expect(later.some((name) => name.endsWith('_round_anchor'))).toBe(true)
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR, init)).toEqual([init])
+      expect(await applyMigrations(pg, MIGRATIONS_DIR, { target: init })).toEqual([init])
 
       const json = (value: unknown) => JSON.stringify(value)
       await db.execute(raw`
@@ -91,7 +84,7 @@ describe('the round_anchor migration', () => {
             ${json(JUDGMENT)}, ${json(METRICS)}, ${json(SUMMARY)})`)
       }
 
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(later)
+      expect(await applyMigrations(pg, MIGRATIONS_DIR)).toEqual(later)
       const rounds = await db.execute(raw`select anchor_x, anchor_y from round`, 'objects')
       expect(rounds).toEqual([{ anchor_x: 12.5, anchor_y: -4 }])
       const submissions = await db.execute(
@@ -103,22 +96,19 @@ describe('the round_anchor migration', () => {
         { status: 'open', rejection_reason: null },
       ])
     } finally {
-      await connection.pool.end()
-      await server.stop()
+      await close()
     }
   })
 })
 
 describe('the due_and_jev_cache migration', () => {
   it('makes existing active missions due and gives their rules the attempt cap', async () => {
-    const server = new NetlifyDB({ logger: () => {} })
-    const connection = getDatabase({ connectionString: await server.start() })
-    const db: DB = drizzle({ client: connection, relations })
+    const { db, pg, close } = await createTestDb({ config: {} })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_due_and_jev_cache'))
       expect(at).toBeGreaterThan(0)
-      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      await applyMigrations(pg, MIGRATIONS_DIR, { target: names[at - 1] })
 
       const { maxJudgedPerRound: _cap, ...older } = DEFAULT_MISSION_RULES
       const config = JSON.stringify({ world: {}, rules: older })
@@ -129,7 +119,7 @@ describe('the due_and_jev_cache migration', () => {
           ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${config}, 'ended'),
           ('01900000-0000-7000-8000-000000000003', 'mars', '0123456789abcdef', ${capped}, 'ended')`)
 
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      expect(await applyMigrations(pg, MIGRATIONS_DIR)).toEqual(names.slice(at))
       const missions = await db.execute(
         raw`
         select next_due_at is not null as due, (config -> 'rules' -> 'maxJudgedPerRound')::int as cap
@@ -142,26 +132,23 @@ describe('the due_and_jev_cache migration', () => {
         { due: false, cap: 2 },
       ])
     } finally {
-      await connection.pool.end()
-      await server.stop()
+      await close()
     }
   })
 })
 
 describe('the ai_judgment migration', () => {
   it('renames the judgment cache in place, keeping its rows and primary key', async () => {
-    const server = new NetlifyDB({ logger: () => {} })
-    const connection = getDatabase({ connectionString: await server.start() })
-    const db: DB = drizzle({ client: connection, relations })
+    const { db, pg, close } = await createTestDb({ config: {} })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_ai_judgment'))
       expect(at).toBeGreaterThan(0)
-      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      await applyMigrations(pg, MIGRATIONS_DIR, { target: names[at - 1] })
       await db.execute(raw`
         insert into jev_judgment (hash, model, answers) values ('h1', 'm', '{"verdict":"accept"}')`)
 
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      expect(await applyMigrations(pg, MIGRATIONS_DIR)).toEqual(names.slice(at))
       const rows = await db.execute(raw`select hash, model, answers from ai_judgment`, 'objects')
       expect(rows).toEqual([{ hash: 'h1', model: 'm', answers: { verdict: 'accept' } }])
       const keys = await db.execute(
@@ -176,22 +163,19 @@ describe('the ai_judgment migration', () => {
       )
       expect(old).toEqual([{ gone: true }])
     } finally {
-      await connection.pool.end()
-      await server.stop()
+      await close()
     }
   })
 })
 
 describe('the segment_time_band migration', () => {
   it('moves stored rules to the current shape and gives stored submissions their exploration', async () => {
-    const server = new NetlifyDB({ logger: () => {} })
-    const connection = getDatabase({ connectionString: await server.start() })
-    const db: DB = drizzle({ client: connection, relations })
+    const { db, pg, close } = await createTestDb({ config: {} })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_segment_time_band'))
       expect(at).toBeGreaterThan(0)
-      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      await applyMigrations(pg, MIGRATIONS_DIR, { target: names[at - 1] })
       const {
         segmentTimeBand: _band,
         explorationWeights: _weights,
@@ -238,7 +222,7 @@ describe('the segment_time_band migration', () => {
       }
       expect(() => parseMissionRules(older)).toThrow(MissionError)
 
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      expect(await applyMigrations(pg, MIGRATIONS_DIR)).toEqual(names.slice(at))
       const missions = await db.execute<{ config: { rules: unknown } }>(
         raw`select config from mission order by id`,
         'objects',
@@ -255,22 +239,19 @@ describe('the segment_time_band migration', () => {
         { exploration: 0, exploration_parts: { pathInFog: 0, goalInFog: 0, pocket: 0 } },
       ])
     } finally {
-      await connection.pool.end()
-      await server.stop()
+      await close()
     }
   })
 })
 
 describe('the stop_radius_rule migration', () => {
   it('gives the rules of existing missions the stop radius their stops were published with', async () => {
-    const server = new NetlifyDB({ logger: () => {} })
-    const connection = getDatabase({ connectionString: await server.start() })
-    const db: DB = drizzle({ client: connection, relations })
+    const { db, pg, close } = await createTestDb({ config: {} })
     try {
       const names = readdirSync(MIGRATIONS_DIR).toSorted()
       const at = names.findIndex((name) => name.endsWith('_stop_radius_rule'))
       expect(at).toBeGreaterThan(0)
-      await applyMigrations(executorOver(db), MIGRATIONS_DIR, names[at - 1])
+      await applyMigrations(pg, MIGRATIONS_DIR, { target: names[at - 1] })
 
       const { stopRadiusM: _radius, ...older } = DEFAULT_MISSION_RULES
       const config = JSON.stringify({ world: {}, rules: older })
@@ -280,7 +261,7 @@ describe('the stop_radius_rule migration', () => {
           ('01900000-0000-7000-8000-000000000001', 'mars', '0123456789abcdef', ${config}),
           ('01900000-0000-7000-8000-000000000002', 'mars', '0123456789abcdef', ${small})`)
 
-      expect(await applyMigrations(executorOver(db), MIGRATIONS_DIR)).toEqual(names.slice(at))
+      expect(await applyMigrations(pg, MIGRATIONS_DIR)).toEqual(names.slice(at))
       const missions = await db.execute(
         raw`
         select (config -> 'rules' -> 'stopRadiusM')::int as radius from mission order by id`,
@@ -288,8 +269,7 @@ describe('the stop_radius_rule migration', () => {
       )
       expect(missions).toEqual([{ radius: 500 }, { radius: 120 }])
     } finally {
-      await connection.pool.end()
-      await server.stop()
+      await close()
     }
   })
 })

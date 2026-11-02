@@ -1,23 +1,18 @@
-import { defineHandler, HTTPError, readValidatedBody } from 'nitro/h3'
+import { readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
 import { findOrCreateDevUser } from '../../utils/login'
-import { RemoteDatabaseError } from '../../utils/migrate'
+import { defineDevWriteHandler } from '../../utils/write'
 
 const BodySchema = v.object({ handle: v.pipe(v.string(), v.regex(/^[a-z0-9-]{1,32}$/)) })
 
 /**
  * Finds or creates `dev:<handle>` and sets the real session cookie for it, no provider involved.
- * Refuses (403) while the database is not on this machine.
+ * Accepted only from the dev server's own pages (403 otherwise); refuses (403) while the
+ * database is not on this machine.
  */
-export default defineHandler(async (event) => {
+export default defineDevWriteHandler(async (event) => {
   const { handle } = await readValidatedBody(event, BodySchema)
-  let user: Awaited<ReturnType<typeof findOrCreateDevUser>>
-  try {
-    user = await findOrCreateDevUser(process.env.NETLIFY_DB_URL, handle)
-  } catch (error) {
-    if (error instanceof RemoteDatabaseError) throw new HTTPError(error.message, { status: 403 })
-    throw error
-  }
+  const user = await findOrCreateDevUser(process.env.NETLIFY_DB_URL, handle)
   await setUserSession(event, {
     user: { id: user.id, displayName: user.displayName, handle: `dev:${handle}`, providers: [] },
   })

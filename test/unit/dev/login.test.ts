@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { userAccount } from '#server/database/schema'
 import {
   createUserWithIdentity,
@@ -9,28 +9,14 @@ import {
 } from '#server/repositories/users'
 import { useDB } from '#server/utils/db'
 import { findOrCreateDevUser } from '~~/modules/dev/runtime/server/utils/login'
-import {
-  prepareLocalDatabase,
-  RemoteDatabaseError,
-} from '~~/modules/dev/runtime/server/utils/migrate'
-import { copyMigrations, startLocalDatabase } from './helpers'
+import { RemoteDatabaseError } from '~~/modules/dev/runtime/server/utils/loopback'
+import { startLocalDatabase } from './helpers'
 
 let local: Awaited<ReturnType<typeof startLocalDatabase>>
-let migrations: Awaited<ReturnType<typeof copyMigrations>>
 
-beforeAll(async () => {
-  local = await startLocalDatabase()
-  migrations = await copyMigrations()
-})
-afterAll(async () => {
-  await migrations.remove()
-  await local.stop()
-})
-beforeEach(async () => {
-  vi.spyOn(console, 'log').mockImplementation(() => {})
-  await local.reset()
-  await prepareLocalDatabase(local.url, migrations.dir)
-})
+beforeAll(async () => (local = await startLocalDatabase()))
+afterAll(() => local.stop())
+beforeEach(() => local.reset())
 
 describe('findOrCreateDevUser', () => {
   it('creates dev:<handle> once and finds it after', async () => {

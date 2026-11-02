@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url'
 import { getDatabase } from '@netlify/database'
-import { applyMigrations, NetlifyDB } from '@netlify/database-dev'
 import { drizzle } from 'drizzle-orm/netlify-db'
+import { createTestDatabase } from 'nuxt-pglite/testing'
+import type { TestDatabase, TestDatabaseOptions } from 'nuxt-pglite/testing'
 import type { DB } from '#server/database/db'
 import type { MissionConfig } from '#server/database/schema'
 import type { SubmissionJudgment } from '#server/utils/jev/client'
@@ -19,34 +20,39 @@ import { closeRound } from '#server/repositories/rounds'
 import { createSegment, settleSegment } from '#server/repositories/segments'
 import type { Round, Stop } from '#server/database/schema'
 import type { DriveOutcome } from '#shared/utils/drive'
-import { executorOver } from '~~/modules/dev/runtime/server/utils/executor'
 
 export const MIGRATIONS_DIR = fileURLToPath(
   new URL('../../../netlify/database/migrations/', import.meta.url),
 )
 
+/** The app's PGlite config, which applies every generated migration to a new database. */
+export const PGLITE_CONFIG = fileURLToPath(
+  new URL('../../../server/pglite.config.ts', import.meta.url),
+)
+
 /**
- * A fresh in-memory platform database with every generated migration applied by the platform's
- * applier, reached through the same connector and driver as `useDB()`. `onQuery` sees the SQL of
- * every query the returned database runs.
+ * A fresh in-memory database built from the app's PGlite config (every generated migration
+ * applied), or from `config`, served over the wire protocol and reached through the same
+ * connector and driver as `useDB()`. `pg` is the PGlite instance behind it. `onQuery` sees the
+ * SQL of every query the returned database runs.
  */
 export async function createTestDb(
-  options: { onQuery?: (sql: string) => void } = {},
-): Promise<{ db: DB; close: () => Promise<void> }> {
-  const server = new NetlifyDB({ logger: () => {} })
-  const connection = getDatabase({ connectionString: await server.start() })
-  const { onQuery } = options
+  options: { config?: TestDatabaseOptions['config']; onQuery?: (sql: string) => void } = {},
+): Promise<{ db: DB; pg: TestDatabase['pg']; close: () => Promise<void> }> {
+  const { config = PGLITE_CONFIG, onQuery } = options
+  const test = await createTestDatabase({ config, socket: true, exportEnv: false })
+  const connection = getDatabase({ connectionString: test.url })
   const db = drizzle({
     client: connection,
     relations,
     ...(onQuery && { logger: { logQuery: (query: string) => onQuery(query) } }),
   })
-  await applyMigrations(executorOver(db), MIGRATIONS_DIR)
   return {
     db,
+    pg: test.pg,
     async close() {
       await connection.pool.end()
-      await server.stop()
+      await test.close()
     },
   }
 }

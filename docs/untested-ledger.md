@@ -22,7 +22,7 @@ Numbered list of what is known to be unverified. Reviewed at every milestone sta
 18. `unauth` `defineSession` does not forward `sessionHeader` to `unjwt`, so a sealed session token is also accepted from a request header, not only the cookie; upstream fix pending, then pass `sessionHeader: false`.
 19. `unjwt` always adds `cty: application/json` to a `dpop+jwt` header; bsky.social accepted it, other authorization servers untested.
 20. Nitro bundles h3 rc.22 while the project pins rc.29; both load side by side and work, but the mixed versions are unverified beyond the current routes.
-21. The local PGlite data directory (`.netlify/db`) was corrupted once by an abrupt dev-server kill (`RuntimeError: Aborted()` at start); moving it aside and letting the module re-migrate fixed it. Unknown whether the platform emulator guards against this.
+21. The local PGlite data directory (`.data/pglite`) under an abrupt dev-server kill: Netlify's emulator's PGlite directory was corrupted once that way (`RuntimeError: Aborted()` at start). Unknown whether `nuxt-pglite` guards against it; DevTools' "Reset database" recreates the directory.
 22. Real GitHub and AT Protocol sign-ins in a browser: only the PAR leg of atproto ran live; the callback and the GitHub flow ran on mocked responses.
 23. The 3D scene on a phone: 60 fps on a desktop GPU measured; mobile frame rate and the ~235 KB gzip three.js chunk unmeasured on real devices.
 24. `@tresjs/nuxt` pins `@nuxt/kit` 4.1 and logs a deprecated devtools call; behaviour under the Nuxt 5 nightly beyond the playground unverified.

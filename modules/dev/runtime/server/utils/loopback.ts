@@ -22,3 +22,18 @@ export function databaseHost(url: string | undefined): string {
     return '(unparseable)'
   }
 }
+
+/** Thrown by a writing surface asked to touch a database that is not on this machine. */
+export class RemoteDatabaseError extends Error {
+  constructor(url: string | undefined) {
+    super(
+      `NETLIFY_DB_URL points at ${databaseHost(url)}, not on this machine; the database was left untouched.`,
+    )
+    this.name = 'RemoteDatabaseError'
+  }
+}
+
+/** Refuses unless `url` is on this machine. */
+export function assertLoopback(url: string | undefined): void {
+  if (!isLoopback(url)) throw new RemoteDatabaseError(url)
+}

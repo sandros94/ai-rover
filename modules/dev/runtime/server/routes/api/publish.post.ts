@@ -1,4 +1,4 @@
-import { defineHandler, HTTPError, readValidatedBody } from 'nitro/h3'
+import { HTTPError, readValidatedBody } from 'nitro/h3'
 import * as v from 'valibot'
 import { DriveError, driveSegment, SEGMENT_ID } from '#shared/utils/drive'
 import {
@@ -11,6 +11,7 @@ import {
 import { encodeSegment, publishSegment, publishStop } from '#server/utils/journey/publish'
 import type { PutResult } from '#server/utils/journey/store'
 import { createJourneyStore } from '#server/utils/journey/store'
+import { defineDevWriteHandler } from '../../utils/write'
 
 const finite = v.pipe(v.number(), v.finite())
 
@@ -25,10 +26,12 @@ const BodySchema = v.object({
 
 /**
  * A landing stop at the origin of world `seed` and one segment from there to `goal`, published to the
- * journey store, with what was written and how long each step took. No segment row names the
- * segment, so the journey route serves its manifest and none of its slices or traces.
+ * local journey store, with what was written and how long each step took. No segment row names the
+ * segment, so the journey route serves its manifest and none of its slices or traces. Accepted
+ * only from the dev server's own pages (403 otherwise); refuses (403) while the database is not
+ * on this machine.
  */
-export default defineHandler(async (event) => {
+export default defineDevWriteHandler(async (event) => {
   const body = await readValidatedBody(event, BodySchema, {
     onError: (result) => ({
       status: 400,

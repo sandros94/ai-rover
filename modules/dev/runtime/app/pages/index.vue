@@ -4,12 +4,6 @@ import { useUserSession } from '#imports'
 
 const TOOLS = [
   {
-    title: 'Database',
-    description: 'Status, migrate, reset, seed',
-    to: '/__rover/db',
-    external: true,
-  },
-  {
     title: 'Disk viewer',
     description: 'Stop disk relief, masks and reachability',
     to: '/_dev/disk',
@@ -44,12 +38,10 @@ async function signIn(): Promise<void> {
   <UContainer class="max-w-2xl py-10 space-y-8">
     <h1 class="text-xl font-semibold">Development</h1>
 
-    <ul class="grid gap-3 sm:grid-cols-3">
+    <ul class="grid gap-3 sm:grid-cols-2">
       <li v-for="tool in TOOLS" :key="tool.to">
         <UCard :ui="{ body: 'p-4' }" class="h-full">
-          <ULink :to="tool.to" :external="tool.external" class="font-medium">{{
-            tool.title
-          }}</ULink>
+          <ULink :to="tool.to" class="font-medium">{{ tool.title }}</ULink>
           <p class="text-sm text-muted">{{ tool.description }}</p>
         </UCard>
       </li>

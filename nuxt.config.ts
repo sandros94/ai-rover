@@ -19,7 +19,14 @@ export default defineNuxtConfig({
   compatibilityDate: 'latest',
   devtools: { enabled: true },
 
-  modules: ['@nuxt/ui', '@netlify/nuxt', '@tresjs/nuxt', './modules/dev', './modules/auth'],
+  modules: [
+    '@nuxt/ui',
+    '@netlify/nuxt',
+    'nuxt-pglite',
+    '@tresjs/nuxt',
+    './modules/dev',
+    './modules/auth',
+  ],
 
   css: ['~/assets/css/main.css'],
 
@@ -75,10 +82,25 @@ export default defineNuxtConfig({
   /**
    * Local Netlify emulation under `dev` and `test`. Edge Functions are off: the project deploys
    * none (Nitro's `netlify` preset emits Functions v2) and emulating them starts a Deno process
-   * that the machine's Deno does not accept.
+   * that the machine's Deno does not accept. Database emulation is off: the PGlite socket below
+   * stands in for Netlify Database.
    */
   netlify: {
     edgeFunctions: { enabled: false },
+    database: { enabled: false },
+  },
+
+  /**
+   * PGlite built from `server/pglite.config.ts` (every generated migration applied). Under
+   * `nuxt dev` the socket serves it over the wire protocol at a pinned port, which
+   * `drizzle.config.ts` names too, exporting `NETLIFY_DB_URL` and `NETLIFY_DB_DRIVER=server` while
+   * unset so `useDB()` reaches it as it reaches Netlify Database; the test databases
+   * (`nuxt-pglite/testing`) are built from the same config. The server keeps Netlify Database:
+   * nothing of PGlite is bundled.
+   */
+  pglite: {
+    server: { enabled: false },
+    socket: { port: 5456, provider: 'netlify' },
   },
 
   experimental: {

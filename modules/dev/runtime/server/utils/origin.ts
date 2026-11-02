@@ -2,7 +2,7 @@
  * Whether a request was sent by a page of the dev server itself (same host and port): its
  * `Origin`, or its `Referer` when it sends no `Origin`. A page on another site can make a
  * browser post to the dev server, but it cannot make the browser name the dev server as the
- * origin; the DevTools panel is served by the dev server, so its requests pass.
+ * origin. A client outside a browser names the dev server as the origin itself.
  */
 export function isSameOrigin(request: Request): boolean {
   const own = new URL(request.url).host

@@ -4,11 +4,7 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@electric-sql/pglite': 0.5.13
-
 patchedDependencies:
-  '@netlify/database-dev': 9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27
   '@nuxt/fonts': c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f
 
 importers:
@@ -18,6 +14,9 @@ importers:
       '@iconify-json/lucide':
         specifier: npm:@iconify-json/lucide@^1.2.149
         version: 1.2.149
+      '@neondatabase/serverless':
+        specifier: npm:@neondatabase/serverless@^1.2.0
+        version: 1.2.0
       '@netlify/blobs':
         specifier: npm:@netlify/blobs@^11.1.7
         version: 11.1.7(supports-color@7.2.0)
@@ -32,25 +31,28 @@ importers:
         version: 2.6.2(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5)(vue@3.5.44(typescript@7.0.2))
       '@nuxt/ui':
         specifier: npm:@nuxt/ui@^4.12.0
-        version: 4.12.0(62907227d183f33d3098e624a815be52)
+        version: 4.12.0(229ac98387956c1a73a10649f8d85a16)
       '@tresjs/core':
         specifier: ^5.10.1
         version: 5.10.1(three@0.187.0)(vue@3.5.44(typescript@7.0.2))
       '@tresjs/nuxt':
         specifier: ^5.8.1
-        version: 5.8.1(eef44be6c6531abff79aacd012dd41d3)
+        version: 5.8.1(41ff89aa19d20f3d54ae9a87b61f7b29)
       '@typesafe-ai/sdk':
         specifier: npm:@typesafe-ai/sdk@^0.7.0
         version: 0.7.0
       drizzle-orm:
         specifier: npm:drizzle-orm@1.0.0-rc.5
-        version: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
+        version: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
       nitro:
         specifier: npm:nitro@3.0.261029-rc
         version: 3.0.261029-rc
       nuxt:
         specifier: npm:nuxt-nightly@5.0.0-2611010234-c709ec8
         version: nuxt-nightly@5.0.0-2611010234-c709ec8(@oxc-project/types@0.156.0)(@types/node@26.6.2)(@vitejs/devtools@0.7.5)(@vue/compiler-sfc@3.5.44)(acorn@8.18.0)(confbox@0.3.1)(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(lightningcss@1.33.0)(mlly@1.8.2)(nuxt-nightly@5.0.0-2611010234-c709ec8)(oxlint@1.90.0(oxlint-tsgolint@7.0.2005))(rolldown@1.2.16)(typescript@7.0.2)(vite@8.3.5)(vue-tsc@3.3.14(typescript@7.0.2))(yaml@2.9.1)
+      pg:
+        specifier: npm:pg@^8.23.1
+        version: 8.23.1
       simplex-noise:
         specifier: ^4.0.3
         version: 4.0.3
@@ -80,7 +82,7 @@ importers:
         specifier: npm:@dxup/unimport@^0.1.2
         version: 0.1.2
       '@electric-sql/pglite':
-        specifier: 0.5.13
+        specifier: npm:@electric-sql/pglite@0.5.13
         version: 0.5.13
       '@fontsource/public-sans':
         specifier: ^5.3.0
@@ -100,15 +102,9 @@ importers:
       '@golar/vue':
         specifier: npm:@golar/vue@^0.1.11
         version: 0.1.11
-      '@netlify/database-dev':
-        specifier: npm:@netlify/database-dev@^1.0.1
-        version: 1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)
       '@netlify/nuxt':
         specifier: npm:@netlify/nuxt@^1.0.1
-        version: 1.0.1(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(srvx@1.0.8)(supports-color@7.2.0)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
-      '@nuxt/devtools-kit':
-        specifier: npm:@nuxt/devtools-kit@^4.0.0
-        version: 4.0.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(nitro@3.0.261029-rc)(vite@8.3.5)
+        version: 1.0.1(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(srvx@1.0.8)(supports-color@7.2.0)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
       '@nuxt/test-utils':
         specifier: npm:@nuxt/test-utils@^4.3.4
         version: 4.3.4(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(@oxc-project/types@0.156.0)(@playwright/test@1.64.1)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.44)(@vue/server-renderer@3.5.44)(vue@3.5.44(typescript@7.0.2)))(confbox@0.3.1)(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(h3@2.0.8(crossws@0.4.17(srvx@1.0.8))(ocache@0.3.1))(happy-dom@21.0.4)(jiti@2.7.0)(mlly@1.8.2)(nuxt-nightly@5.0.0-2611010234-c709ec8)(playwright-core@1.64.1)(rolldown@1.2.16)(vite@8.3.5)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(happy-dom@21.0.4)(vite@8.3.5))(vue@3.5.44(typescript@7.0.2))
@@ -123,7 +119,7 @@ importers:
         version: 1.5.9
       drizzle-kit:
         specifier: npm:drizzle-kit@1.0.0-rc.5
-        version: 1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
+        version: 1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
       golar:
         specifier: npm:golar@^0.1.11
         version: 0.1.11
@@ -133,6 +129,9 @@ importers:
       meshoptimizer:
         specifier: ~1.3.0
         version: 1.3.0
+      nuxt-pglite:
+        specifier: https://pkg.pr.new/sandros94/nuxt-pglite@6ab1f85
+        version: https://pkg.pr.new/sandros94/nuxt-pglite@6ab1f85(@electric-sql/pglite@0.5.13)(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(magic-string@1.4.5)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5)
       oxfmt:
         specifier: npm:oxfmt@^0.75.0
         version: 0.75.0
@@ -365,6 +364,9 @@ packages:
 
   '@dxup/unimport@0.1.2':
     resolution: {integrity: sha512-/B8YJGPzaYq1NbsQmwgP8EZqg40NpTw4ZB3suuI0TplbxKHeK94jeaawLmVhCv+YwUnOpiWEz9U6SeThku/8JQ==}
+
+  '@electric-sql/pglite@0.3.16':
+    resolution: {integrity: sha512-mZkZfOd9OqTMHsK+1cje8OSzfAQcpD7JmILXTl5ahdempjUDdmg4euf1biDex5/LfQIDJ3gvCu6qDgdnDxfJmA==}
 
   '@electric-sql/pglite@0.5.13':
     resolution: {integrity: sha512-4rZuxK1k07w6sSpJzjMri0B9+HuXuC7V9pxVB51pR0T9KPqXg6TD0mdaEwBA9rkcL4jdht4tGDf/wYzAiGhT7g==}
@@ -1170,8 +1172,8 @@ packages:
     resolution: {integrity: sha512-FdvwZU5N03O77Suh35JqjAqq5R1ZTEPFtwu6N4BgBq28qrQtrCnpbLL5U2pwYCuE194jAw0xnlOVmIqhfoYuUQ==}
     engines: {node: '>=20'}
 
-  '@neondatabase/serverless@1.1.0':
-    resolution: {integrity: sha512-r3ZZhRjEcfEdKIZnoB1RusNgvHuaBRqfCzV4Gi+5A9yUX0S4HTws/ASWqt13wL4y4I+0rqsWGdA2w7EQXHi3+Q==}
+  '@neondatabase/serverless@1.2.0':
+    resolution: {integrity: sha512-tnaqgixUengZQNd9ZrS3ytQfamJzLKY8QxgqWQTNHHtB+KrFQWk77JTbbpg4RD+J3qE4eO2lVytvGDX5Kj6FdQ==}
     engines: {node: '>=19.0.0'}
 
   '@netlify/ai@1.0.1':
@@ -1363,19 +1365,6 @@ packages:
     resolution: {integrity: sha512-q3aRKpnriK/kITYlYUXSE3O0R7WeJwSMLvtbo1HfcKXYg/q8688iIb5VURl0fbkSaFTk7ndU5HIbW+5f0JOJPQ==}
     peerDependencies:
       vite: '>=6.0'
-
-  '@nuxt/devtools-kit@4.0.0':
-    resolution: {integrity: sha512-UyxsI/7qK183AGH7IhAob9MLbJuVcB0vwcSHVKbT/EGrklYi1vNaJfDK2jcjkpD/N5jYXKFHkDXend2Exaw8uQ==}
-    peerDependencies:
-      '@nuxt/kit': ^4.0.0-0 || ^5.0.0-0
-      nitro: '*'
-      nitropack: ^2.0.0
-      vite: '>=6.0'
-    peerDependenciesMeta:
-      nitro:
-        optional: true
-      nitropack:
-        optional: true
 
   '@nuxt/devtools-onboard@4.0.0':
     resolution: {integrity: sha512-XE+eZZaQMkHZJ7OQQmxgszmCQN3kKD+Sq0k7qPLl2PhDzw1LXZhuGRbokD3CkbvDeraH1QCk2PgVfFrheMzp1Q==}
@@ -3522,7 +3511,7 @@ packages:
   db0@0.3.4:
     resolution: {integrity: sha512-RiXXi4WaNzPTHEOu8UPQKMooIbqOEyqA1t7Z6MsdxSCeb8iUC9ko3LcmsLmeUt2SM5bctfArZKkRQggKZz7JNw==}
     peerDependencies:
-      '@electric-sql/pglite': 0.5.13
+      '@electric-sql/pglite': '*'
       '@libsql/client': '*'
       better-sqlite3: '*'
       drizzle-orm: '*'
@@ -3692,7 +3681,7 @@ packages:
       '@effect/sql-sqlite-do': '>=4.0.0'
       '@effect/sql-sqlite-node': '>=4.0.0'
       '@effect/sql-sqlite-wasm': '>=4.0.0'
-      '@electric-sql/pglite': 0.5.13
+      '@electric-sql/pglite': '>=0.2.0'
       '@libsql/client': '>=0.10.0'
       '@libsql/client-wasm': '>=0.10.0'
       '@neondatabase/serverless': '>=0.10.0'
@@ -5173,6 +5162,15 @@ packages:
       jiti:
         optional: true
 
+  nuxt-pglite@https://pkg.pr.new/sandros94/nuxt-pglite@6ab1f85:
+    resolution: {integrity: sha512-XZBpBhW/m2+gi8dRLUYB1sMCB+bOavLBa14LyguxSAe6MrOlg2WGrG4HEeF+FliWtxwZt3sx+vDOpfOX6sbQpQ==, tarball: https://pkg.pr.new/sandros94/nuxt-pglite@6ab1f85}
+    version: 0.4.1
+    peerDependencies:
+      '@electric-sql/pglite': ^0.5.13
+    peerDependenciesMeta:
+      '@electric-sql/pglite':
+        optional: true
+
   object-identity@0.2.3:
     resolution: {integrity: sha512-2J8Joz2Tf7aaylhqFvIUJHNgpuGR38Hh75Voq9GzTbStBxJUaOtN0K1aOd3cV5qp+ij1pMqRbPrGCGMOyX303w==}
 
@@ -5362,11 +5360,11 @@ packages:
   perfect-debounce@2.1.0:
     resolution: {integrity: sha512-LjgdTytVFXeUgtHZr9WYViYSM/g8MkcTPYDlPa3cDqMirHjKiSZPYd6DoL7pK8AJQr+uWkQvCjHNdiMqsrJs+g==}
 
-  pg-cloudflare@1.4.0:
-    resolution: {integrity: sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A==}
+  pg-cloudflare@1.4.1:
+    resolution: {integrity: sha512-6PQbsFWZcp9EmJEwy5cGQ2La+AMWpP46lgbb8X+U/XsHIUweYDNCpeuKck5RxL2MdVFi7krbbEi5nX4Zh7JhrQ==}
 
-  pg-connection-string@2.14.0:
-    resolution: {integrity: sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg==}
+  pg-connection-string@2.14.1:
+    resolution: {integrity: sha512-qR3kGNPBLpCNtz0evbKA0Y/MRFXwSSdT+pTJvYp/bXTcReZbvX1kzF0IyTc1QnxqF7AZbOeBhNL8R5mYQZV/MA==}
 
   pg-gateway@0.3.0-beta.4:
     resolution: {integrity: sha512-CTjsM7Z+0Nx2/dyZ6r8zRsc3f9FScoD5UAOlfUx1Fdv/JOIWvRbF7gou6l6vP+uypXQVoYPgw8xZDXgMGvBa4Q==}
@@ -5380,15 +5378,15 @@ packages:
     peerDependencies:
       pg: '>=8.0'
 
-  pg-protocol@1.16.0:
-    resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
+  pg-protocol@1.16.1:
+    resolution: {integrity: sha512-p9VOFMiHB/ZbJATetbg+99PxssTVSQRnyuPSQ67mN1+1KBOjZaZ83ZQzltnxPhJwSsC3nwVjJ10DVJlerbFzLg==}
 
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
     engines: {node: '>=4'}
 
-  pg@8.23.0:
-    resolution: {integrity: sha512-Ip2EQCngowJLGOfCwkFhPXU7/ljlhn6Rxlmy4XYfL2Y+vyRM59+8uR2xqRWKdYmbXmxCFOAmKxBuSUCdF34qLg==}
+  pg@8.23.1:
+    resolution: {integrity: sha512-aL96AHANtWjPLDOLqnhx+ngp9+UK7ETEU8VJrDCGvsSSi/mGLcWYsS6Herg7lmaBJe4uwrfqsa7gTEFaSizDoQ==}
     engines: {node: '>= 16.0.0'}
     peerDependencies:
       pg-native: '>=3.0.1'
@@ -6619,7 +6617,7 @@ packages:
       '@clickhouse/client': ^1.11.2
       '@cloudflare/workers-types': '*'
       '@duckdb/node-api': ^1.1.2-alpha.4
-      '@electric-sql/pglite': 0.5.13
+      '@electric-sql/pglite': ^0.2.17
       '@libsql/client': ^0.15.4
       '@libsql/client-wasm': ^0.15.4
       '@neondatabase/serverless': ^1.0.0
@@ -7054,6 +7052,8 @@ snapshots:
       - webpack
 
   '@dxup/unimport@0.1.2': {}
+
+  '@electric-sql/pglite@0.3.16': {}
 
   '@electric-sql/pglite@0.5.13': {}
 
@@ -7632,7 +7632,7 @@ snapshots:
       zod: 4.6.5
     optional: true
 
-  '@neondatabase/serverless@1.1.0': {}
+  '@neondatabase/serverless@1.2.0': {}
 
   '@netlify/ai@1.0.1':
     dependencies:
@@ -7693,17 +7693,17 @@ snapshots:
       yargs: 17.7.3
       zod: 4.6.5
 
-  '@netlify/database-dev@1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)':
+  '@netlify/database-dev@1.0.1':
     dependencies:
-      '@electric-sql/pglite': 0.5.13
+      '@electric-sql/pglite': 0.3.16
       pg-gateway: 0.3.0-beta.4
 
   '@netlify/database@2.0.1(@electric-sql/pglite@0.5.13)':
     dependencies:
-      '@neondatabase/serverless': 1.1.0
+      '@neondatabase/serverless': 1.2.0
       '@netlify/runtime-utils': 3.0.0
-      pg: 8.23.0
-      waddler: 0.1.1(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(pg@8.23.0)
+      pg: 8.23.1
+      waddler: 0.1.1(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(pg@8.23.1)
       ws: 8.21.3
     transitivePeerDependencies:
       - '@clickhouse/client'
@@ -7756,17 +7756,17 @@ snapshots:
       parse-gitignore: 2.0.0
       semver: 7.8.5
 
-  '@netlify/dev@5.1.3(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)(supports-color@7.2.0)':
+  '@netlify/dev@5.1.3(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)(supports-color@7.2.0)':
     dependencies:
       '@netlify/ai': 1.0.1
       '@netlify/blobs': 11.1.1(supports-color@7.2.0)
       '@netlify/config': 25.2.5
-      '@netlify/database-dev': 1.0.1(patch_hash=9f35d6861674e9b4e0a52760a49e08502ebac7898ec82b5327150d11ab6a2b27)
+      '@netlify/database-dev': 1.0.1
       '@netlify/dev-utils': 6.0.1
       '@netlify/edge-functions-dev': 2.0.1
       '@netlify/functions-dev': 2.0.8(supports-color@7.2.0)
       '@netlify/headers': 3.0.1
-      '@netlify/images': 2.0.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)
+      '@netlify/images': 2.0.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)
       '@netlify/redirects': 4.0.2
       '@netlify/runtime': 5.0.5(supports-color@7.2.0)
       '@netlify/server-dev': 0.1.1
@@ -7875,9 +7875,9 @@ snapshots:
     dependencies:
       '@netlify/headers-parser': 10.1.1
 
-  '@netlify/images@2.0.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)':
+  '@netlify/images@2.0.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)':
     dependencies:
-      ipx: 3.1.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)
+      ipx: 3.1.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -7901,9 +7901,9 @@ snapshots:
       - srvx
       - uploadthing
 
-  '@netlify/nuxt@1.0.1(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(srvx@1.0.8)(supports-color@7.2.0)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))':
+  '@netlify/nuxt@1.0.1(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(srvx@1.0.8)(supports-color@7.2.0)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))':
     dependencies:
-      '@netlify/dev': 5.1.3(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)(supports-color@7.2.0)
+      '@netlify/dev': 5.1.3(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8)(supports-color@7.2.0)
       '@netlify/dev-utils': 6.0.4
       '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
       h3: 1.15.11
@@ -8126,28 +8126,19 @@ snapshots:
       - rolldown
       - unplugin
 
-  '@nuxt/devtools-kit@4.0.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(nitro@3.0.261029-rc)(vite@8.3.5)':
-    dependencies:
-      '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
-      nostics: 1.3.0
-      tinyexec: 1.3.1
-      vite: 8.3.5(@types/node@26.6.2)(@vitejs/devtools@0.7.5)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)
-    optionalDependencies:
-      nitro: 3.0.261029-rc
-
   '@nuxt/devtools-onboard@4.0.0(@nuxt/kit-nightly@5.0.0-2611010234-c709ec8(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))':
     dependencies:
       '@devframes/hub-ui-onboard': 1.3.0
       '@nuxt/kit': '@nuxt/kit-nightly@5.0.0-2611010234-c709ec8(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))'
       pkg-types: 2.4.0
 
-  '@nuxt/fonts@0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.7(supports-color@7.2.0))(@nuxt/schema@4.6.3)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(vite@8.3.5)':
+  '@nuxt/fonts@0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.7(supports-color@7.2.0))(@nuxt/schema@4.6.3)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(vite@8.3.5)':
     dependencies:
       '@nuxt/devtools-kit': 3.4.4(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5)
       '@nuxt/kit': 4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
       consola: 3.4.2
       defu: 6.1.7
-      fontless: 0.2.1(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(vite@8.3.5)
+      fontless: 0.2.1(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(vite@8.3.5)
       h3: 1.15.11
       magic-regexp: 0.10.0
       ofetch: 1.5.1
@@ -8157,7 +8148,7 @@ snapshots:
       ufo: 1.6.4
       unifont: 0.7.5
       unplugin: 3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)
-      unstorage: 1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
+      unstorage: 1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -8492,11 +8483,11 @@ snapshots:
       - vite
       - webpack
 
-  '@nuxt/ui@4.12.0(62907227d183f33d3098e624a815be52)':
+  '@nuxt/ui@4.12.0(229ac98387956c1a73a10649f8d85a16)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@iconify/vue': 5.0.4(vue@3.5.44(typescript@7.0.2))
-      '@nuxt/fonts': 0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.7(supports-color@7.2.0))(@nuxt/schema@4.6.3)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(vite@8.3.5)
+      '@nuxt/fonts': 0.14.0(patch_hash=c80ffaa749bda639654d7ea9b90f89a1d56190e1caedf91d810871e64e3ebb9f)(@netlify/blobs@11.1.7(supports-color@7.2.0))(@nuxt/schema@4.6.3)(confbox@0.3.1)(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(dotenv@17.4.2)(esbuild@0.28.1)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(vite@8.3.5)
       '@nuxt/icon': 2.6.2(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5)(vue@3.5.44(typescript@7.0.2))
       '@nuxt/kit': 4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
       '@nuxt/schema': 4.6.3
@@ -8554,8 +8545,8 @@ snapshots:
       typescript: 7.0.2
       ufo: 1.6.4
       unplugin: 3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)
-      unplugin-auto-import: 21.1.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(@vueuse/core@14.4.0(vue@3.5.44(typescript@7.0.2)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)
-      unplugin-vue-components: 32.1.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)(vue@3.5.44(typescript@7.0.2))
+      unplugin-auto-import: 21.1.0(@nuxt/kit@4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(@vueuse/core@14.4.0(vue@3.5.44(typescript@7.0.2)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)
+      unplugin-vue-components: 32.1.0(@nuxt/kit@4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)(vue@3.5.44(typescript@7.0.2))
       vaul-vue: 0.4.1(reka-ui@2.11.0(vue@3.5.44(typescript@7.0.2)))(vue@3.5.44(typescript@7.0.2))
       vue-component-type-helpers: 3.3.14
     optionalDependencies:
@@ -9377,10 +9368,10 @@ snapshots:
       three: 0.187.0
       vue: 3.5.44(typescript@7.0.2)
 
-  '@tresjs/nuxt@5.8.1(eef44be6c6531abff79aacd012dd41d3)':
+  '@tresjs/nuxt@5.8.1(41ff89aa19d20f3d54ae9a87b61f7b29)':
     dependencies:
       '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
-      '@nuxt/ui': 4.12.0(62907227d183f33d3098e624a815be52)
+      '@nuxt/ui': 4.12.0(229ac98387956c1a73a10649f8d85a16)
       '@tresjs/core': 5.10.1(three@0.187.0)(vue@3.5.44(typescript@7.0.2))
       defu: 6.1.7
       mlly: 1.8.2
@@ -10450,10 +10441,10 @@ snapshots:
       es-errors: 1.3.0
       is-data-view: 1.0.2
 
-  db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)):
+  db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)):
     optionalDependencies:
       '@electric-sql/pglite': 0.5.13
-      drizzle-orm: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
+      drizzle-orm: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
     optional: true
 
   debug@4.4.3(supports-color@7.2.0):
@@ -10589,16 +10580,16 @@ snapshots:
 
   draco3dgltf@1.5.9: {}
 
-  drizzle-kit@1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)):
+  drizzle-kit@1.0.0-rc.5(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)):
     optionalDependencies:
-      drizzle-orm: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
+      drizzle-orm: 1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)
 
-  drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5):
+  drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5):
     optionalDependencies:
       '@electric-sql/pglite': 0.5.13
-      '@neondatabase/serverless': 1.1.0
+      '@neondatabase/serverless': 1.2.0
       '@opentelemetry/api': 1.9.1
-      pg: 8.23.0
+      pg: 8.23.1
       valibot: 1.5.0(typescript@7.0.2)
       zod: 4.6.5
 
@@ -10999,7 +10990,7 @@ snapshots:
     dependencies:
       tiny-inflate: 1.0.3
 
-  fontless@0.2.1(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(vite@8.3.5):
+  fontless@0.2.1(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(vite@8.3.5):
     dependencies:
       consola: 3.4.2
       css-tree: 3.2.1
@@ -11013,7 +11004,7 @@ snapshots:
       pathe: 2.0.3
       ufo: 1.6.4
       unifont: 0.7.5
-      unstorage: 1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
+      unstorage: 1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
     optionalDependencies:
       vite: 8.3.5(@types/node@26.6.2)(@vitejs/devtools@0.7.5)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)
     transitivePeerDependencies:
@@ -11304,7 +11295,7 @@ snapshots:
 
   iota-array@1.0.0: {}
 
-  ipx@3.1.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8):
+  ipx@3.1.1(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))(srvx@1.0.8):
     dependencies:
       '@fastify/accept-negotiator': 2.1.0
       citty: 0.1.6
@@ -11320,7 +11311,7 @@ snapshots:
       sharp: 0.34.5
       svgo: 4.1.0
       ufo: 1.6.4
-      unstorage: 1.17.5(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
+      unstorage: 1.17.5(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5)))
       xss: 1.0.15
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -12132,6 +12123,27 @@ snapshots:
       - webpack
       - yaml
 
+  nuxt-pglite@https://pkg.pr.new/sandros94/nuxt-pglite@6ab1f85(@electric-sql/pglite@0.5.13)(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(magic-string@1.4.5)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5):
+    dependencies:
+      '@nuxt/devtools-kit': 3.4.4(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))(vite@8.3.5)
+      '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
+      defu: 6.1.7
+      jiti: 2.7.0
+      mlly: 1.8.2
+      pathe: 2.0.3
+    optionalDependencies:
+      '@electric-sql/pglite': 0.5.13
+    transitivePeerDependencies:
+      - '@nuxt/schema'
+      - confbox
+      - dotenv
+      - giget
+      - magic-string
+      - oxc-parser
+      - rolldown
+      - unplugin
+      - vite
+
   object-identity@0.2.3: {}
 
   object-inspect@1.13.4: {}
@@ -12321,20 +12333,20 @@ snapshots:
 
   perfect-debounce@2.1.0: {}
 
-  pg-cloudflare@1.4.0:
+  pg-cloudflare@1.4.1:
     optional: true
 
-  pg-connection-string@2.14.0: {}
+  pg-connection-string@2.14.1: {}
 
   pg-gateway@0.3.0-beta.4: {}
 
   pg-int8@1.0.1: {}
 
-  pg-pool@3.14.0(pg@8.23.0):
+  pg-pool@3.14.0(pg@8.23.1):
     dependencies:
-      pg: 8.23.0
+      pg: 8.23.1
 
-  pg-protocol@1.16.0: {}
+  pg-protocol@1.16.1: {}
 
   pg-types@2.2.0:
     dependencies:
@@ -12344,15 +12356,15 @@ snapshots:
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
 
-  pg@8.23.0:
+  pg@8.23.1:
     dependencies:
-      pg-connection-string: 2.14.0
-      pg-pool: 3.14.0(pg@8.23.0)
-      pg-protocol: 1.16.0
+      pg-connection-string: 2.14.1
+      pg-pool: 3.14.0(pg@8.23.1)
+      pg-protocol: 1.16.1
       pg-types: 2.2.0
       pgpass: 1.0.5
     optionalDependencies:
-      pg-cloudflare: 1.4.0
+      pg-cloudflare: 1.4.1
 
   pgpass@1.0.5:
     dependencies:
@@ -13359,7 +13371,7 @@ snapshots:
       h3: 2.0.8(crossws@0.4.17(srvx@1.0.8))(ocache@0.3.1)
       rou3: 0.8.1
 
-  unplugin-auto-import@21.1.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(@vueuse/core@14.4.0(vue@3.5.44(typescript@7.0.2)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5):
+  unplugin-auto-import@21.1.0(@nuxt/kit@4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(@vueuse/core@14.4.0(vue@3.5.44(typescript@7.0.2)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5):
     dependencies:
       local-pkg: 1.2.1
       magic-string: 1.4.5
@@ -13368,7 +13380,7 @@ snapshots:
       unplugin: 3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)
       unplugin-utils: 0.3.2
     optionalDependencies:
-      '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
+      '@nuxt/kit': 4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
       '@vueuse/core': 14.4.0(vue@3.5.44(typescript@7.0.2))
     transitivePeerDependencies:
       - '@farmfe/core'
@@ -13388,7 +13400,7 @@ snapshots:
       pathe: 2.0.3
       picomatch: 4.0.7
 
-  unplugin-vue-components@32.1.0(@nuxt/kit@4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)(vue@3.5.44(typescript@7.0.2)):
+  unplugin-vue-components@32.1.0(@nuxt/kit@4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)))(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5)(vue@3.5.44(typescript@7.0.2)):
     dependencies:
       chokidar: 5.0.0
       local-pkg: 1.2.1
@@ -13401,7 +13413,7 @@ snapshots:
       unplugin-utils: 0.3.2
       vue: 3.5.44(typescript@7.0.2)
     optionalDependencies:
-      '@nuxt/kit': 4.6.3(@nuxt/schema-nightly@5.0.0-2611010234-c709ec8)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
+      '@nuxt/kit': 4.6.3(@nuxt/schema@4.6.3)(confbox@0.3.1)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(magic-string@1.4.5)(mlly@1.8.2)(rolldown@1.2.16)(unplugin@3.4.0(esbuild@0.28.1)(rolldown@1.2.16)(vite@8.3.5))
     transitivePeerDependencies:
       - '@farmfe/core'
       - '@rsbuild/core'
@@ -13440,7 +13452,7 @@ snapshots:
 
   unsecure@0.3.1: {}
 
-  unstorage@1.17.5(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))):
+  unstorage@1.17.5(@netlify/blobs@11.1.1(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -13452,9 +13464,9 @@ snapshots:
       ufo: 1.6.4
     optionalDependencies:
       '@netlify/blobs': 11.1.1(supports-color@7.2.0)
-      db0: 0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
+      db0: 0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
 
-  unstorage@1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))):
+  unstorage@1.17.5(@netlify/blobs@11.1.7(supports-color@7.2.0))(db0@0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -13466,7 +13478,7 @@ snapshots:
       ufo: 1.6.4
     optionalDependencies:
       '@netlify/blobs': 11.1.7(supports-color@7.2.0)
-      db0: 0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(pg@8.23.0)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
+      db0: 0.3.4(@electric-sql/pglite@0.5.13)(drizzle-orm@1.0.0-rc.5(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(@opentelemetry/api@1.9.1)(pg@8.23.1)(valibot@1.5.0(typescript@7.0.2))(zod@4.6.5))
 
   unstorage@2.0.0-beta.0: {}
 
@@ -13706,11 +13718,11 @@ snapshots:
 
   w3c-keyname@2.2.8: {}
 
-  waddler@0.1.1(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.1.0)(pg@8.23.0):
+  waddler@0.1.1(@electric-sql/pglite@0.5.13)(@neondatabase/serverless@1.2.0)(pg@8.23.1):
     optionalDependencies:
       '@electric-sql/pglite': 0.5.13
-      '@neondatabase/serverless': 1.1.0
-      pg: 8.23.0
+      '@neondatabase/serverless': 1.2.0
+      pg: 8.23.1
 
   watlas@1.0.1: {}
 

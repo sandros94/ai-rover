@@ -149,33 +149,23 @@ describe('POST /api/admin/diagnose', () => {
 
 describe('diagnoseLocks', () => {
   it('counts the sessions by state and names one holding an advisory lock over 5 s', async () => {
-    let release!: () => void
-    const released = new Promise<void>((resolve) => (release = resolve))
-    let taken!: () => void
-    const locked = new Promise<void>((resolve) => (taken = resolve))
-    const holder = db.transaction(async (tx) => {
+    // Probed on the connection that holds the lock: the test database is one PGlite session,
+    // which runs another connection's query only once the transaction has ended.
+    const held = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('held-by-a-test'))`)
-      taken()
-      await released
+      return diagnoseLocks(() => tx, { now: new Date(Date.now() + 6_000) })
     })
-    try {
-      await locked
-      const held = await diagnoseLocks(() => db, { now: new Date(Date.now() + 6_000) })
-      expect(held.ok).toBe(true)
-      expect(Object.values(held.states).reduce((a, b) => a + b, 0)).toBeGreaterThan(0)
-      expect(held.oldestTransactionS).toBeGreaterThan(5)
-      expect(held.stuck).toContainEqual(
-        expect.objectContaining({
-          pid: expect.any(Number),
-          ageS: expect.any(Number),
-          holdsAdvisoryLock: true,
-        }),
-      )
-      expect(held.stuck[0]!.ageS).toBeGreaterThan(5)
-    } finally {
-      release()
-      await holder
-    }
+    expect(held.ok).toBe(true)
+    expect(Object.values(held.states).reduce((a, b) => a + b, 0)).toBeGreaterThan(0)
+    expect(held.oldestTransactionS).toBeGreaterThan(5)
+    expect(held.stuck).toContainEqual(
+      expect.objectContaining({
+        pid: expect.any(Number),
+        ageS: expect.any(Number),
+        holdsAdvisoryLock: true,
+      }),
+    )
+    expect(held.stuck[0]!.ageS).toBeGreaterThan(5)
     expect((await diagnoseLocks(() => db)).stuck).toEqual([])
   })
 

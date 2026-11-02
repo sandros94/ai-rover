@@ -3,12 +3,7 @@ import { useDB } from '#server/utils/db'
 import type { JourneyStore } from '#server/utils/journey/store'
 import { createJourneyStore } from '#server/utils/journey/store'
 import { createMissionAtStop } from '#server/utils/mission/create'
-import {
-  assertLoopback,
-  DatabaseRefusedError,
-  databaseRefusal,
-  resetLocalDatabase,
-} from './migrate'
+import { assertLoopback } from './loopback'
 
 export interface SeedInput {
   store?: JourneyStore
@@ -17,8 +12,6 @@ export interface SeedInput {
   /** Stop 0, world metres; default the origin. */
   x?: number
   y?: number
-  /** Reset the database first instead of refusing when it already has a mission. */
-  force?: boolean
 }
 
 export interface SeededMission {
@@ -32,26 +25,25 @@ export interface SeededMission {
   bytes: { count: number; raw: number; stored: number }
 }
 
-/** Thrown when seeding a database that already has a mission without `force`. */
+/** Thrown when seeding a database that already has a mission. */
 export class MissionExistsError extends Error {
   constructor(missionId: string) {
     super(
-      `The local database already has a mission (${missionId}); seed with \`force: true\` to reset it first.`,
+      `The local database already has a mission (${missionId}); run "Reset database" from the PGlite tab in Nuxt DevTools, then seed again.`,
     )
     this.name = 'MissionExistsError'
   }
 }
 
-/** Lands a mission on an empty local database through the lifecycle's own landing. */
+/**
+ * Lands a mission on an empty local database through the lifecycle's own landing. Refuses,
+ * writing nothing, unless `url` (the database `useDB()` reaches) is on this machine.
+ */
 export async function seedLocalMission(
   url: string | undefined,
-  directory: string,
   input: SeedInput = {},
 ): Promise<SeededMission> {
   assertLoopback(url)
-  const refusal = input.force ? await resetLocalDatabase(url, directory) : await databaseRefusal()
-  if (refusal) throw new DatabaseRefusedError(refusal)
-
   const db = useDB()
   const [existing] = await db.select({ id: mission.id }).from(mission).limit(1)
   if (existing) throw new MissionExistsError(existing.id)
